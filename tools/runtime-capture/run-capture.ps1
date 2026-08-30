@@ -32,7 +32,12 @@ param(
     # See launch-capture.ps1: a locked player frame rate is a time dilation,
     # not a frame shortcut. The prologue is ~84% of an unattended run.
     [int] $FrameRate = 0,
-    [string] $SaveDirectory = ""
+    [string] $SaveDirectory = "",
+    # Keep the window open this many seconds AFTER the wrapper closes its
+    # trace, instead of closing it immediately. Observational only - see the
+    # block that uses it. Snapshot the save first: the post-victory route
+    # reaches town square, which flushes the SharedObject.
+    [int] $LingerSec = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -112,6 +117,20 @@ if (-not (Wait-Log '"step":"battle-ready"' $NavigateTimeoutSec 'the navigator to
 
 Write-Host 'Battle reached; autopilot performing the action...'
 if (-not (Wait-Log '"t":"end"' $BattleTimeoutSec 'the wrapper to close its trace')) {
+    Show-Diagnostics
+}
+
+if ($LingerSec -gt 0) {
+    # The capture is already finished; this is purely observational. The
+    # autopilot has no steps left and nothing is clicked, so the game simply
+    # runs its own post-action frames - reward, level-up, and the route back -
+    # and the frame log records where they go. This is how the levelled route
+    # gets confirmed against the running build rather than only from bytecode.
+    #
+    # It is NOT save-neutral: the route back passes through town square, which
+    # flushes the SharedObject. Snapshot before using this.
+    Write-Host "Lingering $LingerSec s to record the game's own post-action frames..."
+    Start-Sleep -Seconds $LingerSec
     Show-Diagnostics
 }
 
