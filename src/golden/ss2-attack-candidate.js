@@ -451,10 +451,12 @@ export function resolveSs2PhysicalAttackCandidate(scenario, rolls) {
       "physical-damage"
     );
   }
-  const staminaBonus = healthPathEntered
-    ? Math.ceil(defender.breastplate * vanillaDamageRegister / 100)
-    : 0;
-  if (healthPathEntered && staminaBonus !== 0) {
+  // Byte-verified 2026-08-30: the breastplate stamina block is an
+  // unconditional join in the mapped ingress — the absorbed-armour skip
+  // branch jumps directly into it — so fully absorbed damage still grants
+  // stamina from the undiminished damage register.
+  const staminaBonus = Math.ceil(defender.breastplate * vanillaDamageRegister / 100);
+  if (staminaBonus !== 0) {
     const staminaBefore = defender.staminaleft;
     defender.staminaleft += staminaBonus;
     recordMutation(

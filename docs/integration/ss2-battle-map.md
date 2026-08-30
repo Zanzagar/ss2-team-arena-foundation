@@ -245,14 +245,90 @@ still passed to `knockback`; 80 is not a force clamp.
 - subtracts normal/grievous damage from `armourclass` first, carrying only
   overflow into `hitpoints`; critical damage bypasses that armour-class branch
   even though its separate removal roll can still destroy a piece;
-- after hitpoint-applicable or overflow damage, grants the defender
-  `ceil(game_defender.breastplate * appliedDamage / 100)` stamina and clamps;
+- runs the breastplate stamina block as an unconditional join on every
+  invocation (byte-verified 2026-08-30: the absorbed-armour skip branch
+  `+0x189c If` jumps directly to the stamina block at `+0x18f3`), granting
+  `ceil(game_defender.breastplate * damage / 100)` stamina where `damage` is
+  the current register — the full rounded-up damage when armour fully
+  absorbed the hit or on non-armour paths, and the overflow remainder after
+  an overflow rewrite; helper semantics: `get_percentage(a, b) = (a / b) *
+  100` and `add_percentage(a, b) = ceil(a * b / 100)`;
+- when `damage_method` is `taunt`, sets crowd action 3 and then overwrites
+  the method register to `normal`, so taunt damage takes the normal
+  armour-first path (and the crowd value is immediately overwritten to 2 in
+  the armour block);
 - can set `burning`, `frozen`, `poison`, or `life_stolen` from weapon
   enchantment types 2–5 after a potency roll. When the secondary weapon is
   active, the type comes from its secondary field but the comparison still
   reads the primary weapon potency field in this build;
-- sets `phasecomplete` and calls `death(...)` when the relevant mode's defeat
-  condition is reached.
+- ends with the byte-verified defeat gate described below.
+
+### Defeat gate and death dispatch (byte-verified 2026-08-30)
+
+Both damage ingresses end with the same gate, decoded opcode-by-opcode from
+`damagecharacter` (`+0x195e..+0x1a72`) and `magic_damage_character`
+(`+0x14ee..+0x157c`) in overlay block `DoAction@0x240c7f`:
+
+- The defeat block is entered iff `hitpoints <= 0` **or** (`hitpoints <
+  hitpointsmax` **and** `_global.fight_mode != "tournament"`). The second
+  term is a first-blood-style condition the earlier map wording did not
+  record: statically, any post-`check_stats` damage below maximum enters the
+  block in every non-tournament mode.
+- On entry, `_global.phasecomplete = true` is set first, unconditionally,
+  before any `death` call.
+- `fight_mode == "duel"` always calls `death(defenderClip, "yield")`,
+  including genuine kills; duel kills never route to `slain`.
+- Otherwise `damagecharacter` dispatches by `attack_direction`:
+  `<= 12` → `slain`, `== 20` → `taunt`, `21–23` → `arrow`, `== 30` →
+  `grievous`; directions 13–19, 24–29, and 31+ set `phasecomplete` without
+  any `death` call (statically unreachable from the mapped dispatcher).
+  `magic_damage_character` has no direction chain and always uses `slain`
+  outside duels.
+- `death(whichcharacter, how_died)` itself contains no hitpoint or
+  `fight_mode` reads (verified: its only branches are the two clip
+  comparisons), so nothing downstream statically prevents the first-blood
+  term from ending a fight. Because observable vanilla battles do not end on
+  first blood, the live `fight_mode` values during ordinary fights (only one
+  entry path is verified to set `"misc"`) are an **unresolved runtime
+  question** for the capture workflow; the candidate resolver deliberately
+  models the `hitpoints <= 0` term only.
+
+### Spell ingress `magic_damage_character` (byte-verified 2026-08-30)
+
+`magic_damage_character(defender, attacker, game_defender, game_attacker,
+damage_method, bonus_frame, damage)` — DefineFunction2 at `+0x1313..+0x157c`
+of the same block; register bindings byte-verified from the header param
+table (`r1=_global` via PreloadGlobal, `r2=game_defender`, `r3=damage`,
+`r4=defender` clip, `r5=damage_method`, `r6=bonus_frame`; `attacker` and
+`game_attacker` are not register-bound). Verified order:
+
+1. Attaches `bonus_icon` at depth 25005, offset ±100 by the defender's
+   facing, splat frame from `bonus_frame`, displayed bonus
+   `Math.ceil(damage)`, `check_flipping`, crowd action 2, then
+   `defenderClip.gotoAndPlay(damage_method)` — i.e. for this ingress the
+   `damage_method` argument is the defender's animation label and
+   `bonus_frame` selects the splat.
+2. Armour-first algorithm identical to the physical path, including the
+   exact-armour-equality quirk (equality skips the overflow rewrite, so the
+   full original damage also reaches hitpoints) and the strict-overflow
+   rewrite `damage -= originalArmour` with `armourclass_temp` zeroed only on
+   strict overflow; `armourclass` is left negative until `check_stats`
+   clamps it.
+3. The hitpoints subtraction is gated on post-decrement `armourclass <= 0`;
+   the **applied** damage is the raw `damage` argument (possibly
+   overflow-rewritten) — unlike the physical path there is **no**
+   `Math.ceil` before the armour/hitpoint math; the ceil at step 1 is
+   display-only.
+4. `game_defender.psyche_up = 1` unconditionally at the join.
+5. The same unconditional breastplate stamina join as the physical path.
+6. `check_stats(game_defender)`, then the shared defeat gate above.
+
+The function contains **no** RNG call, no `RandomNumber` opcode, and no
+armour-removal call — its complete call inventory is the UI attach/goto
+calls, `Math.ceil`, `check_flipping`, `get_percentage`, `add_percentage`,
+`check_stats`, and the two `death` sites. Spell damage rolls therefore all
+happen in the callers (the mapped `randomBetween` ranges), and a future
+spell-ingress candidate needs no removal or knockback samples.
 
 Two transient/boundary behaviors need explicit runtime fixtures. Direction 23
 does not assign `criticalhit`, so bash can inherit the previous action's value.

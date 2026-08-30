@@ -336,12 +336,14 @@ test("armour removal preserves selection and native cosmetic roll order", () => 
   ]);
 });
 
-test("fully absorbed armour damage does not grant breastplate stamina", () => {
+test("fully absorbed armour damage still grants breastplate stamina", () => {
+  // Byte-verified: the vanilla stamina block is an unconditional join, so an
+  // armour-absorbed hit grants ceil(breastplate * fullDamage / 100).
   const scenario = physicalScenario({
     villain: {
-      armourclass: 25,
-      armourclass_max: 25,
-      breastplate: 5,
+      armourclass: 32,
+      armourclass_max: 32,
+      breastplate: 2,
       staminaleft: 20,
       staminamax: 100
     }
@@ -356,10 +358,10 @@ test("fully absorbed armour damage does not grant breastplate stamina", () => {
     betweenSample("enchantment-potency-roll", 1, 100, 100)
   ]);
 
-  assert.equal(outcome.state.villain.armourclass, 5);
+  assert.equal(outcome.state.villain.armourclass, 12);
   assert.equal(outcome.state.villain.hitpoints, 100);
-  assert.equal(outcome.mutation.staminaBonus, 0);
-  assert.equal(outcome.state.villain.staminaleft, 20);
+  assert.equal(outcome.mutation.staminaBonus, 1);
+  assert.equal(outcome.state.villain.staminaleft, 21);
 });
 
 test("knockback force sign follows the defender avatar direction", () => {

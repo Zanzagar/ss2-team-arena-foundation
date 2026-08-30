@@ -68,7 +68,10 @@ The candidate module also preserves the mapped ranged attacker-shield chance
 adjustment, critical-deflection threshold, native cosmetic debris rolls when a
 piece is removed, the defender-facing knockback sign, the secondary-enchantment
 type/primary-potency quirk, and the direction-23 stale `criticalhit`
-requirement. Fully armour-absorbed damage does not enter the stamina-gain path.
+requirement. The breastplate stamina block is an unconditional join
+(byte-verified 2026-08-30): fully armour-absorbed damage still grants
+`ceil(breastplate * fullDamage / 100)` stamina, corrected from the earlier
+static reading that gated it on hitpoint-applicable damage.
 
 ## Statically reconstructed physical RNG order
 

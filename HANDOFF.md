@@ -27,17 +27,20 @@ identities, replays, wire snapshots, and state hashes. Its formulas are
 intentional placeholders until they can be validated against the licensed game.
 
 The fingerprinted Steam build now has a read-only battle map and an isolated
-asset-free 1v1 candidate harness with strict ordered RNG fixtures. Static
-candidates are not runtime goldens and do not replace the placeholder engine
-rules. The Stage 3 runtime-capture pipeline is also in place: observation
+asset-free 1v1 candidate harness with eleven strict ordered-RNG fixtures.
+Static candidates are not runtime goldens and do not replace the placeholder
+engine rules. The Stage 3 runtime-capture pipeline is in place: observation
 records with digests, raw-trace ingestion, a two-independent-observation
-promotion gate, preserved divergence reports, and the
+promotion gate, preserved divergence reports, a reference-trace simulator
+(never promotable), an unvalidated AS2 wrapper draft, and the
 `tools/capture-session.mjs` CLI, all documented in
-`docs/integration/ss2-runtime-capture.md`. The next technical gate is running
-the first controlled licensed 1v1 captures (blocked on approving a local AVM1
-player such as Ruffle), followed by the SS2 state/UI adapter. The delivery
-target remains 2v2 and 3v3 cooperative campaign support; see
-`docs/roadmap.md`.
+`docs/integration/ss2-runtime-capture.md`. The battle map's damage ingresses
+were re-verified opcode-by-opcode on 2026-08-30 (see the defeat-gate and
+`magic_damage_character` sections), which corrected the breastplate-stamina
+rule in the isolated candidate. The next technical gate is running the first
+controlled licensed 1v1 captures (blocked on approving a local AVM1 player
+such as Ruffle), followed by the SS2 state/UI adapter. The delivery target
+remains 2v2 and 3v3 cooperative campaign support; see `docs/roadmap.md`.
 
 ## Keep the project lawful and reversible
 
