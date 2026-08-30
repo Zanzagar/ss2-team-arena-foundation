@@ -2,12 +2,15 @@
 
 ## On the PC with Swords & Sandals II installed
 
-1. Extract this folder into a new local Codex project folder.
-2. Open that folder as the project, then continue this Codex task and say that
+1. Preferred: copy `ss2-team-arena-foundation.bundle` to the new PC and run
+   `git clone ss2-team-arena-foundation.bundle ss2-team-arena-foundation`.
+   This preserves the complete commit history.
+2. Alternative: extract the transfer ZIP into a new local Codex project folder.
+3. Open that folder as the project, then continue this Codex task and say that
    the licensed game is installed.
-3. Give Codex permission to read the game's installation directory when asked.
+4. Give Codex permission to read the game's installation directory when asked.
    Do not copy, upload, or redistribute the original SWF or assets.
-4. Run `npm test` from this folder to confirm the transferred foundation.
+5. Run `npm test` from this folder to confirm the transferred foundation.
 
 ## What Codex should inspect first
 
