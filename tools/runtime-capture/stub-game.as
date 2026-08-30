@@ -110,6 +110,7 @@ function buildCheckattackroll() {
 // BEFORE its combat functions are defined (frame-52 semantics), so the
 // wrapper must hook the empty clip and wrap the functions at assignment.
 function defineOverlayFunctions() {
+    ov.getphase = function (whatsdoing) {};
     ov.randomBetween = function (a, b) {
         return Math.floor(Math.random() * (b - a + 1)) + a;
     };
@@ -139,6 +140,10 @@ this.onEnterFrame = function () {
         // Simulate the overlay timeline looping through frame 52 again.
         ov.checkattackroll = buildCheckattackroll();
         ov.damagecharacter = buildDamagecharacter();
+    }
+    if (stubFrame == 9) {
+        // Real actions arm at getphase before any roll happens.
+        ov.getphase("normal_attack");
     }
     if (stubFrame == 10) {
         ov.checkattackroll();

@@ -168,7 +168,8 @@ loadMovieNum(config.gameUrl, 1);
 
 var currentHook = "unattributed";   // set/cleared by function wraps
 var battleHooked = false;
-var actionDepth = 0;                // > 0 while inside the armed action
+var actionDepth = 0;                // > 0 while inside checkattackroll
+var armed = false;                  // recording window is open
 var actionCaptured = false;         // one action per session
 var finalsDumped = false;
 
@@ -199,7 +200,7 @@ function dumpSide(kind, side) {
 // armed action is executing.
 function makeWatcher(side) {
     return function (prop, oldValue, newValue) {
-        if (actionDepth > 0) {
+        if (armed) {
             emit({
                 t: "set",
                 path: "/" + side + "/" + prop,
@@ -259,7 +260,7 @@ function makeRandomBetweenMaker(siteId) {
         return function (a, b) {
             // Rolls outside the armed action (AI decisions, cosmetics on
             // other turns) are neither injected nor recorded.
-            if (actionDepth <= 0) return original(a, b);
+            if (!armed) return original(a, b);
             var sample = tape[tapeCursor];
             var matches = sample != undefined && sample.min == a && sample.max == b;
             var value;
@@ -290,6 +291,7 @@ function makeRandomBetweenMaker(siteId) {
 function beginAction() {
     if (actionCaptured) return;
     actionCaptured = true;
+    armed = true;
     dbg("action-armed");
     dumpSide("state", "hero");
     dumpSide("state", "villain");
@@ -303,6 +305,7 @@ function beginAction() {
 
 function finishTrace() {
     if (finalsDumped) return;
+    armed = false;
     dumpSide("final", "hero");
     dumpSide("final", "villain");
     // The post-session hash check has not run yet; ingest re-runs it live
@@ -315,7 +318,7 @@ function finishTrace() {
 function makeGotoMaker() {
     return function (original) {
         return function (label) {
-            if (actionDepth > 0 && (label == "combatwon" || label == "combatlost")) {
+            if (armed && (label == "combatwon" || label == "combatlost")) {
                 emit({ t: "event", type: "overlay-label", label: label });
             }
             return original.apply(this, arguments);
@@ -353,17 +356,32 @@ function hookBattle() {
 
     registerSlot(function () { return overlayClip(); }, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
     registerSlot(function () { return gameRoot(); }, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));
+    // Every action begins with getphase(whatsdoing) - byte-verified from
+    // the phase-button handlers - so arming keys on it; melee actions also
+    // pass through checkattackroll, whose return closes the trace early.
+    registerSlot(function () { return overlayClip(); }, "getphase", function (original) {
+        return function () {
+            var previous = currentHook;
+            currentHook = "getphase";
+            if (!actionCaptured) {
+                beginAction();
+                emit({ t: "var", name: "phase_action", value: String(arguments[0]) });
+            }
+            var result = original.apply(this, arguments);
+            currentHook = previous;
+            return result;
+        };
+    });
     registerSlot(function () { return overlayClip(); }, "checkattackroll", function (original) {
         return function () {
             var previous = currentHook;
             currentHook = "check-attack-roll";
-            var arming = !actionCaptured;
-            if (arming) beginAction();
+            if (!actionCaptured) beginAction();
             actionDepth++;
             var result = original.apply(this, arguments);
             actionDepth--;
             currentHook = previous;
-            if (arming && actionDepth == 0) finishTrace();
+            if (armed && actionDepth == 0) finishTrace();
             return result;
         };
     });
@@ -371,16 +389,29 @@ function hookBattle() {
     registerSlot(function () { return overlayClip(); }, "magic_damage_character", makeHookMaker("damagecharacter"));
     registerSlot(function () { return overlayClip(); }, "remove_armour", makeHookMaker("remove-armour"));
     registerSlot(function () { return overlayClip(); }, "destroy_armour", makeHookMaker("remove-armour"));
-    registerSlot(function () { return overlayClip(); }, "nextphase", makeHookMaker("next-phase"));
+    // The phase boundary: an armed action that never reached checkattackroll
+    // (e.g. a range taunt) is complete when nextphase runs - close the trace
+    // BEFORE it, so its stamina/regen accounting stays outside the
+    // single-action scope, matching the fixture boundary.
+    registerSlot(function () { return overlayClip(); }, "nextphase", function (original) {
+        return function () {
+            if (armed && actionDepth == 0) finishTrace();
+            var previous = currentHook;
+            currentHook = "next-phase";
+            var result = original.apply(this, arguments);
+            currentHook = previous;
+            return result;
+        };
+    });
     registerSlot(function () { return overlayClip(); }, "check_spells", makeHookMaker("check-spells"));
     registerSlot(function () { return overlayClip(); }, "defender_hurt", makeHookMaker("damagecharacter", function (args) {
-        if (actionDepth > 0) emit({ t: "event", type: "defender-hurt", method: String(args[0]) });
+        if (armed) emit({ t: "event", type: "defender-hurt", method: String(args[0]) });
     }));
     registerSlot(function () { return overlayClip(); }, "defender_blocked", makeHookMaker("check-attack-roll", function () {
-        if (actionDepth > 0) emit({ t: "event", type: "defender-blocked" });
+        if (armed) emit({ t: "event", type: "defender-blocked" });
     }));
     registerSlot(function () { return overlayClip(); }, "death", makeHookMaker("death", function (args) {
-        if (actionDepth > 0) {
+        if (armed) {
             var clip = args[0];
             var side = clip == gameRoot().arena.gladiators.villain ? "villain" : "hero";
             emit({ t: "event", type: "death", side: side });
