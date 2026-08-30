@@ -24,7 +24,11 @@ param(
     [string] $Navigate = 'prisoner',
     [int] $LaunchTimeoutSec = 300,
     [int] $NavigateTimeoutSec = 180,
-    [int] $BattleTimeoutSec = 180
+    [int] $BattleTimeoutSec = 180,
+    # Leave the raw log unprocessed for tools/runtime-capture/campaign.mjs,
+    # which resolves the observed attack direction to the right candidate
+    # before it ingests. See launch-capture.ps1 for why.
+    [switch] $SkipPipeline
 )
 
 $ErrorActionPreference = 'Stop'
@@ -67,8 +71,10 @@ New-Item -ItemType Directory -Path (Split-Path -Parent $launchOut) -Force | Out-
 # and Start-Process joins an argument array with plain spaces, which
 # otherwise truncates -File at the first space.
 $launcherScript = Join-Path $PSScriptRoot 'launch-capture.ps1'
-$launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
-    -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" -ArgumentList @(
+# Built as a variable, never inline: an array concatenation written in a
+# parameter position is parsed as further positional arguments, not as an
+# operator, and Start-Process then forwards a stray '+' to the launcher.
+$launcherArgs = @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass',
     '-File', "`"$launcherScript`"",
     '-FixturePath', "`"$FixturePath`"",
@@ -77,6 +83,10 @@ $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
     '-Autopilot', "`"$Autopilot`"",
     '-Navigate', "`"$Navigate`""
 )
+if ($SkipPipeline) { $launcherArgs += '-SkipPipeline' }
+$launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" `
+    -ArgumentList $launcherArgs
 
 # Hash verification of ~107 MB plus the FFDec wrapper compile happen before
 # the window appears, so this wait is deliberately generous.
@@ -103,6 +113,10 @@ Write-Host 'Closing the window so the pipeline runs...'
 Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
 $launch.WaitForExit()
 Write-Host "Launcher exit code: $($launch.ExitCode)"
+if ($SkipPipeline) {
+    Write-Host "Raw log ready: $logPath"
+    return
+}
 Write-Host '--- pipeline result ---'
 Get-Content $launchOut -ErrorAction SilentlyContinue |
     Select-String -Pattern 'Extracted', 'MATCH', 'DIVERGE', 'rejected', 'Post-session' |

@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "golden-prisoner-normal-kill-dir5",
+  "classification": "golden",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "licensed-observation",
+    "runtimeVerified": true,
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
+      "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter"
+    ],
+    "observedAt": "2026-08-30T21:40:29Z",
+    "captureToolVersion": "ss2-capture/0.1.0",
+    "repetitions": 2,
+    "observationIds": [
+      "obs-nav6",
+      "obs-camp1"
+    ],
+    "observationDigests": [
+      "093609b25b79ffcd2e754aaa9e7b5474adb1b4523522debc07b296bca1bd9a91",
+      "736f7c696f0cc8020623f42de2d46b4a2fb2de143850cdb4ae1a1b9801b0b799"
+    ],
+    "captureManifestSha256": "a3fc06d81b1074d0d2928f227c98c34d1631f773ab5bb0a7f818634d9fcbdc59"
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 5,
+    "result": null,
+    "hero": {
+      "attack": 1,
+      "defence": 1,
+      "strength": 10,
+      "charisma": 1,
+      "magicka": 1,
+      "min_damage": 21,
+      "max_damage": 23,
+      "hitpoints": 30,
+      "hitpointsmax": 30,
+      "staminaleft": 105,
+      "staminamax": 110,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "gladiator_dir": "right"
+    },
+    "villain": {
+      "attack": 0,
+      "defence": 0,
+      "strength": 0,
+      "charisma": 0,
+      "magicka": 0,
+      "min_damage": 1,
+      "max_damage": 3,
+      "hitpoints": 10,
+      "hitpointsmax": 10,
+      "staminaleft": 95,
+      "staminamax": 100,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "gladiator_dir": "left"
+    },
+    "fightMode": "misc"
+  },
+  "samples": [
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 50
+    },
+    {
+      "label": "normal-damage-roll",
+      "source": "randomBetween",
+      "min": 21,
+      "max": 23,
+      "value": 22
+    },
+    {
+      "label": "normal-critical-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 20,
+      "value": 7
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 42
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 12
+    },
+    {
+      "label": "knockback-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 4,
+      "value": 1
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "attackDirection": 5,
+      "chance": 56,
+      "rollNeeded": 44,
+      "diceroll": 50,
+      "hit": true,
+      "selectedDamage": 22,
+      "criticalSample": 7,
+      "inheritedCritical": false,
+      "deflectionRoll": 42,
+      "deflectionThreshold": 100,
+      "criticalCleared": false,
+      "criticalSampleAfterDeflection": 7,
+      "dispatchedMethod": "normal",
+      "effectiveDamageMethod": "normal"
+    },
+    "mutation": {
+      "armourDamage": 0,
+      "hitpointDamage": 10,
+      "staminaBonus": 0,
+      "armourRemovalRoll": 12,
+      "armourRemovals": [],
+      "knockback": {
+        "roll": 1,
+        "force": null,
+        "animation": false
+      },
+      "enchantmentRoll": 100,
+      "statusApplied": null
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/hitpoints",
+        "before": 10,
+        "after": -12,
+        "reason": "physical-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/hitpoints",
+        "before": -12,
+        "after": 0,
+        "reason": "stat-clamp"
+      },
+      {
+        "sequence": 3,
+        "path": "/result",
+        "before": null,
+        "after": {
+          "status": "pending-animation",
+          "completionToken": "ss2-1v1:hero:villain:combat_won",
+          "winnerSide": "hero",
+          "loserSide": "villain",
+          "reason": "elimination",
+          "howDied": "slain",
+          "overlayLabel": "combatwon",
+          "arenaLabel": "combat_won"
+        },
+        "reason": "battle-result-pending"
+      }
+    ],
+    "resultEvent": {
+      "type": "battle-result-pending",
+      "status": "pending-animation",
+      "completionToken": "ss2-1v1:hero:villain:combat_won",
+      "winnerSide": "hero",
+      "loserSide": "villain",
+      "reason": "elimination",
+      "howDied": "slain",
+      "overlayLabel": "combatwon",
+      "arenaLabel": "combat_won"
+    },
+    "state": {
+      "hero": {
+        "hitpoints": 30,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 105,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 0,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 95,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "elimination",
+        "howDied": "slain",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      }
+    }
+  }
+}

@@ -1,12 +1,14 @@
 # SS2 controlled runtime-capture workflow
 
-Status: capture, verification, and promotion pipeline landed 2026-08-30 and
-fully covered by tests. No runtime observation has been captured yet, so every
-committed fixture is still `classification: "candidate"`. This document is the
-operating procedure for Stage 3 of [the roadmap](../roadmap.md): promoting
-static candidates to runtime-observed goldens with repeated evidence from the
-licensed local build in
-[`ss2-build-fingerprint.json`](ss2-build-fingerprint.json).
+Status: capture, verification, and promotion landed 2026-08-30 and are fully
+covered by tests. The loop now runs unattended end to end, and the whole
+`prisoner-normal-kill` family — all four normal-band attack directions — is
+promoted to runtime-observed goldens, each backed by two matching
+observations from two independent sessions. Every other committed fixture is
+still `classification: "candidate"`. This document is the operating procedure
+for Stage 3 of [the roadmap](../roadmap.md): promoting static candidates to
+runtime-observed goldens with repeated evidence from the licensed local build
+in [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json).
 
 ## Boundary
 
@@ -215,16 +217,114 @@ the isolated candidate module/fixture to the observed behavior, add a
 regression test, and only then attempt promotion again. Divergences do not
 touch `classicStyleRules` or the team engine directly.
 
-## What remains before the first golden
+## Campaign automation
 
-1. First real sessions must confirm what only the licensed timeline can:
-   the `arena.overlay` instance path, live battle-flow timing, the END-key
-   non-lethal finish, and which `fight_mode` values ordinary fights use
-   (the defeat gate's first-blood term in the battle map).
-2. Two matching controlled sessions per candidate, starting with
-   `candidate-normal-threshold-hit`, staged per
-   [the staging guide](ss2-capture-staging.md) and driven by
-   `tools/runtime-capture/launch-capture.ps1`.
+A single session is one command; a whole candidate family is one loop. The
+loop exists because the wrapper **observes** `attack_direction` rather than
+forcing it. The direction is drawn inside the game before the recording
+window opens — overlay frame 52 `DoAction@0x240c7f` assigns
+`attack_direction = randomBetween(9, 12)` for a power attack (`+0x608a`),
+`randomBetween(5, 8)` for a normal attack (`+0x61f1`) and
+`randomBetween(1, 4)` for a quick attack (`+0x635c`), with fixed values for
+the single-direction actions (bash 23 at `+0x64c3`, taunt 20 at `+0x6981`,
+bombard 21 at `+0x6c67`, snipe 22 at `+0x6c8c`, grievous 30). Arming happens
+later, at `attack_chances`, so that draw comes from the live RNG and is not
+on the injected tape. Which candidate a run is evidence for is therefore not
+known until the trace has been read.
+
+```text
+run-campaign.ps1  (loop, one Ruffle window at a time)
+  -> run-capture.ps1 -SkipPipeline        one unattended session, raw log only
+  -> campaign.mjs ingest-round            resolve, ingest, file the observation
+  -> campaign.mjs settle                  build manifests, promote what qualifies
+```
+
+| File | Responsibility |
+| --- | --- |
+| `tools/runtime-capture/run-campaign.ps1` | the round loop: unique ids, sequential sessions, per-round ingest and settle, coverage summary |
+| `tools/runtime-capture/campaign.mjs` | `plan` (coverage), `seed` (which tape a round injects), `ingest-round` (file one session), `settle` (promote what qualifies) |
+| `tools/runtime-capture/build-manifest.mjs` | derive a capture manifest from the observation records it attests |
+
+A **family** is the set of candidate fixtures whose ids share the prefix
+`candidate-<family>` and differ only in `scenario.attackDirection` — the
+candidates one staged scenario can produce. `ingest-round` ingests a session
+against every member and keeps the one that MATCHES, so a run is only ever
+filed as evidence for a candidate it agrees with in full; two matches would
+mean the members are not mutually exclusive, and that is rejected as a
+malformed family. When nothing matches, the run is a real divergence and the
+report is written against the member for the direction the trace actually
+recorded.
+
+`seed` refuses to nominate a tape when a family's members disagree about
+their injectable samples. Injection is tape-positional, so a mismatched tape
+would feed one direction's rolls into another's call order and the trace
+would be an experiment rather than evidence.
+
+`build-manifest.mjs` copies every manifest field out of the validated
+observation records and originates only `createdAt`. Rebuilding the
+hand-written `test/manifests/prisoner-dir6.json` from its two observations
+reproduces its canonical digest
+(`889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c`), which
+is the digest `golden-prisoner-normal-kill-dir6` already cites.
+
+`-SkipPipeline` on `run-capture.ps1`/`launch-capture.ps1` leaves the raw log
+for the campaign driver. Without it the launcher verifies against the one
+fixture it was given and writes a divergence report every time the game chose
+a different — equally valid — direction, burying real disagreements in noise.
+
+Nothing in the loop weakens the promotion gate: observations come from
+`ingestSs2CaptureTrace`, matching from `matchSs2ObservationToFixture`, and
+promotion from the same `promoteSs2CandidateToGolden` two-observation,
+two-session gate the CLI uses.
+
+### Hero action vocabulary
+
+`getphase(whatsdoing)` accepts only the labels defined by the controller
+frame currently in scope, read statically from sprite 862 (read-only
+inspection; nothing exported):
+
+| Controller frame | Labels |
+| --- | --- |
+| 1 `initialise` | `rest`, `runleft`, `runright`, `frozen`, `burning`, `poisoned`, `life_stolen`, `swap_weapons` |
+| 5 `longrange_warrior` | `taunt`, `rest`, `jumpleft`, `jumpright`, `walkleft`, `walkright`, `chargeleft`, `chargeright`, `psyche_up`, `wincrowd` |
+| 13 `closerange_warrior` | `power_attack`, `normal_attack`, `quick_attack`, `shove`, `jumpleft`, `jumpright`, `walkleft`, `walkright`, `psyche_up`, `wincrowd` |
+| 20 `longrange_archer` | `bombardleft`, `bombardright`, `snipeleft`, `sniperight`, `taunt`, `rest`, `jumpleft`, `jumpright`, `walkleft`, `walkright`, `psyche_up`, `wincrowd` |
+| 28 `closerange_archer` | `bash_attack`, `shove`, `taunt`, `jumpleft`, `jumpright`, `walkright`, `psyche_up`, `wincrowd` |
+
+This is why `walkright*5,normal_attack` works: the walks carry the hero from
+long range (frame 5) into close range (frame 13), where the three melee
+attacks live. `power_attack` and `quick_attack` sit on that same frame and
+need no new staging, so the normal-band family has power-band and quick-band
+siblings reachable with the same gladiator. The archer actions (`bombard*`,
+`snipe*`, `bash_attack`) require the bow weapon mode, so they are gated on a
+gladiator that owns a bow, not on the wrapper.
+
+## What remains
+
+The first goldens are in, so what is left is breadth, not feasibility. In
+rough order of cost:
+
+1. **Power and quick bands.** `power_attack` and `quick_attack` live on the
+   same controller frame as `normal_attack` and need no new staging, but the
+   directions they produce (9–12 and 1–4) have no candidate fixtures yet, and
+   their roll orders differ from the normal band (`max_damage` with a 5–20
+   critical sample; `min_damage` with a −20..20 sample). Author the
+   candidates from the battle map first, then run the family through
+   `run-campaign.ps1` exactly as the normal band was.
+2. **Single-direction actions.** Bash (23), bombard (21), and snipe (22) are
+   one fixture each rather than a family, but bombard/snipe/bash need the bow
+   weapon mode, so they need a gladiator that owns a bow — a staging problem,
+   not a tooling one.
+3. **Richer scenarios.** Every golden so far comes from one staged pair (the
+   tutorial prisoner against a level-1 gladiator with no armour). Armour,
+   status flags, and non-lethal outcomes are all still candidate-only, and
+   the armour-first and equality-quirk fixtures are the ones most worth
+   confirming live.
+4. **Out of scope by design.** Range taunts and other opcode-rolled paths
+   make no `randomBetween` calls, so no wrapper can inject or record them.
+
+Staging requirements per fixture are in
+[the staging guide](ss2-capture-staging.md).
 
 The 2v2 and then 3v3 cooperative campaign targets are unchanged: one shared
 resolver, team elimination, AI fill, controller-independent combatants, and a

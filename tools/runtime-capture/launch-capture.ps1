@@ -27,7 +27,14 @@ param(
     # 'prisoner' makes the wrapper navigate from the title screen to the
     # tutorial battle with the game's own calls, so no clicks are needed.
     [string] $Navigate = '',
-    [switch] $Passive
+    [switch] $Passive,
+    # The campaign driver files the evidence itself: it ingests the trace
+    # against every candidate in the target family and keeps the one that
+    # matches. Verifying here first would write a divergence report every
+    # time the game picked a different (equally valid) attack direction,
+    # burying real disagreements in noise. With this set the session stops
+    # once the raw log is written.
+    [switch] $SkipPipeline
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,6 +111,11 @@ Write-Host 'then CLOSE the Ruffle window to finish.'
 $proc = Start-Process -FilePath $ruffle.FullName -ArgumentList $ruffleArgs `
     -RedirectStandardOutput (Join-Path $projectRoot $log) -PassThru -NoNewWindow
 $proc.WaitForExit()
+
+if ($SkipPipeline) {
+    Write-Host "Session ended. Raw log left at $log for the campaign driver."
+    exit 0
+}
 
 Write-Host 'Session ended. Extracting and verifying...'
 $jsonl = "$sessionDirRelative\$ObservationId.jsonl"

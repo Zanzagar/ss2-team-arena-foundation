@@ -36,6 +36,45 @@ Traces produced against the stub are validation artifacts only: their ids
 stay prefixed `stubcheck-` and their observation records never enter
 `test/observations/`.
 
+## Running captures
+
+| Script | Use |
+| --- | --- |
+| `validate-vehicle.ps1` | the gate. Run after **every** wrapper edit, before trusting any real capture. |
+| `launch-capture.ps1` | one session against the licensed build; runs delog/ingest/verify on close unless `-SkipPipeline`. |
+| `run-capture.ps1` | one session, start to finish, unattended — launches, waits on the log for `battle-ready` and the trace close, then closes the window. |
+| `run-campaign.ps1` | many sessions in a loop until a candidate family is fully covered. |
+| `campaign.mjs` | the bookkeeping: `plan`, `seed`, `ingest-round`, `settle`. |
+| `build-manifest.mjs` | derive a capture manifest from the observation records it attests. |
+
+One session:
+
+```
+powershell -File tools\runtime-capture\run-capture.ps1 `
+  -FixturePath test\fixtures\ss2-1v1\candidate-prisoner-normal-kill.json `
+  -SessionId <unique> -ObservationId <unique>
+```
+
+A whole family, until every attack direction has a golden:
+
+```
+powershell -File tools\runtime-capture\run-campaign.ps1 `
+  -Family prisoner-normal-kill -SessionPrefix camp -Rounds 8 -StopWhenComplete
+```
+
+Only one Ruffle window may exist at a time — a stale window flushes its older
+save state back on exit and silently clobbers a newer session's — so rounds
+are strictly sequential and every entry point refuses to start while one is
+open.
+
+The campaign loop exists because `attack_direction` is **observed, not
+forced**: the game draws it (`randomBetween(5, 8)` for a normal attack)
+before the recording window arms, so which candidate a run is evidence for is
+only known once the trace is read. `campaign.mjs ingest-round` therefore
+ingests each session against every candidate in the family and keeps the one
+that MATCHES. See the campaign-automation section of
+[`docs/integration/ss2-runtime-capture.md`](../../docs/integration/ss2-runtime-capture.md).
+
 ## Known constraints
 
 - The wrapper cannot observe AVM1 `RandomNumber` opcode rolls (cosmetic
