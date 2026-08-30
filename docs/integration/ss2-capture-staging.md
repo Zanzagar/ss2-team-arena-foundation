@@ -53,6 +53,10 @@ The operator cannot freely set opponent stats. Two supported routes:
 | `candidate-armour-removal-debris` | 5–8 | villain helmet 1 + shield 2 (armour 34) | debris opcode rolls are unobservable (excluded from matching) |
 | `candidate-grievous-knockback` | 30 (grievous) | hero strength 9, 2/10 weapon; villain breastplate 1, 50 hp | which player action produces direction 30 is not yet mapped — identify it before staging |
 | `candidate-snipe-shield-boost` | 22 (snipe) | hero bow drawn with shield 10 equipped (shield contributes no armour while `using_bow`) | ammunition and range staging; confirm shield stays equipped while sniping |
+| `candidate-deflection-threshold-discriminator` | 5–8 | villain helmet 10 + greaves 2 (armour 106); needs injected critical 20 and deflection 85 | the roll between rival thresholds (83 < 85 < 87) is the whole point — inject exactly |
+| `candidate-frozen-enchantment-proc` | 5–8 | hero weapon enchantment type 3 potency 5 | none |
+| `candidate-bash-inherited-critical` | 23 (shove/bash) | a prior action must leave `criticalhit` at 20 (e.g. an immediately preceding power attack) | confirm which UI action maps to direction 23 and that the transient survives to it |
+| `candidate-bombard-threshold` | 21 (bombard) | hero bow drawn; no armour either side | bombard left/right selection and range staging |
 
 ## Wrapper launch values
 
