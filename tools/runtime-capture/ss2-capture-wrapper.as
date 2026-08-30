@@ -246,6 +246,7 @@ function makeHookMaker(hookLabel, onEnter, onExit) {
         return function () {
             var previous = currentHook;
             currentHook = hookLabel;
+            if (armed) dbg("called:" + hookLabel);
             if (onEnter != undefined) onEnter(arguments);
             var result = original.apply(this, arguments);
             if (onExit != undefined) onExit();
@@ -256,36 +257,79 @@ function makeHookMaker(hookLabel, onEnter, onExit) {
 }
 
 function makeRandomBetweenMaker(siteId) {
+    // Diagnostic passthrough only: the tape is served and recorded at the
+    // Math.random tap below, which the frame-52 atomic re-definitions
+    // cannot shadow. Serving it here too would double-consume the tape.
     return function (original) {
         return function (a, b) {
-            // Rolls outside the armed action (AI decisions, cosmetics on
-            // other turns) are neither injected nor recorded.
-            if (!armed) return original(a, b);
-            var sample = tape[tapeCursor];
-            var matches = sample != undefined && sample.min == a && sample.max == b;
-            var value;
-            var label;
-            if (config.injected && matches) {
-                value = sample.value;
-                label = sample.label;
-            } else {
-                // A bounds mismatch inside the action means the game diverged
-                // from the candidate's expected roll order: fall back to the
-                // live RNG and keep recording. A session with zero injected
-                // samples is rejected by validation; the raw JSONL is then
-                // the divergence evidence.
-                value = original(a, b);
-                label = matches ? sample.label : "unexpected-" + tapeCursor;
-            }
-            tapeCursor++;
-            emit({
-                t: "roll", label: label, source: "randomBetween",
-                min: a, max: b, value: value,
-                callSite: siteId, injected: config.injected && matches
-            });
-            return value;
+            if (armed) dbg("called:randomBetween");
+            return original(a, b);
         };
     };
+}
+
+// Byte-verified: frame 52 re-defines checkattackroll/randomBetween and
+// calls them in the SAME script execution, so slot wraps cannot interpose
+// on that path. Math.random is the one shared singleton underneath every
+// randomBetween body; while armed, the tape is served and recorded THERE.
+// For a tape entry (a, b, v), returning (v - a + 0.5) / (b - a + 1) makes
+// floor(r * (b - a + 1)) + a yield exactly v.
+var originalMathRandom = Math.random;
+function tappedRandom() {
+    if (!armed) return originalMathRandom();
+    var sample = tape[tapeCursor];
+    if (config.injected && sample != undefined) {
+        tapeCursor++;
+        var span = sample.max - sample.min + 1;
+        emit({
+            t: "roll", label: sample.label, source: "randomBetween",
+            min: sample.min, max: sample.max, value: sample.value,
+            callSite: OVERLAY_CALL_SITE, injected: true
+        });
+        return (sample.value - sample.min + 0.5) / span;
+    }
+    // Tape exhausted or passive: record the raw uniform draw in the
+    // diagnostics log; the integer roll it produced is reconstructed
+    // during analysis from the surrounding evidence.
+    var raw = originalMathRandom();
+    trace("{\"t\":\"dbg\",\"at\":\"mrand\",\"r\":" + raw + ",\"cursor\":" + tapeCursor + "}");
+    tapeCursor++;
+    return raw;
+}
+
+// Probed live: each level keeps its OWN Math, so tapping the wrapper's
+// Math.random never sees the game's rolls. Instead a tapped Math clone is
+// planted as a timeline variable on the game's root and overlay clips -
+// bare `Math` lookups from their frame-defined functions resolve the
+// shadow before the movie globals, atomic re-definitions included.
+var tappedMath = null;
+function buildTappedMath() {
+    if (tappedMath != null) return;
+    tappedMath = {
+        abs: Math.abs, acos: Math.acos, asin: Math.asin, atan: Math.atan,
+        atan2: Math.atan2, ceil: Math.ceil, cos: Math.cos, exp: Math.exp,
+        floor: Math.floor, log: Math.log, max: Math.max, min: Math.min,
+        pow: Math.pow, round: Math.round, sin: Math.sin, sqrt: Math.sqrt,
+        tan: Math.tan,
+        E: Math.E, LN10: Math.LN10, LN2: Math.LN2, LOG10E: Math.LOG10E,
+        LOG2E: Math.LOG2E, PI: Math.PI, SQRT1_2: Math.SQRT1_2,
+        SQRT2: Math.SQRT2,
+        random: tappedRandom
+    };
+    dbg("tapped-math-built");
+}
+function shadowMathScopes() {
+    buildTappedMath();
+    var root = gameRoot();
+    if (root != undefined && root.Math != tappedMath) {
+        root.Math = tappedMath;
+        dbg("math-shadowed:root");
+    }
+    var overlay = overlayClip();
+    if (overlay != undefined && overlay.Math != tappedMath) {
+        overlay.Math = tappedMath;
+        dbg("math-shadowed:overlay");
+    }
 }
 
 function beginAction() {
@@ -315,11 +359,16 @@ function finishTrace() {
     traceClosed = true;
 }
 
+var resultSeen = false;
 function makeGotoMaker() {
     return function (original) {
         return function (label) {
             if (armed && (label == "combatwon" || label == "combatlost")) {
                 emit({ t: "event", type: "overlay-label", label: label });
+                // The close is deferred one tick (driver loop): the mapped
+                // post-death knockback and enchantment rolls arrive later in
+                // the same script and belong to the action.
+                resultSeen = true;
             }
             return original.apply(this, arguments);
         };
@@ -374,10 +423,22 @@ function hookBattle() {
             return result;
         };
     });
+    // attack_chances is defined at overlay frame 1 (never re-defined
+    // mid-battle) and is the first call of every attack resolution: the
+    // reliable arming point even when the atomic frame-52 path shadows the
+    // checkattackroll wrap itself.
+    registerSlot(function () { return overlayClip(); }, "attack_chances", function (original) {
+        return function () {
+            if (!actionCaptured) beginAction();
+            dbg("called:attack_chances");
+            return original.apply(this, arguments);
+        };
+    });
     registerSlot(function () { return overlayClip(); }, "checkattackroll", function (original) {
         return function () {
             var previous = currentHook;
             currentHook = "check-attack-roll";
+            dbg("called:checkattackroll");
             if (!actionCaptured) beginAction();
             actionDepth++;
             var result = original.apply(this, arguments);
@@ -437,6 +498,10 @@ Key.addListener(keyListener);
 // stat objects the game swapped. The armed action closes the trace itself.
 this.onEnterFrame = function () {
     if (!battleHooked) { hookBattle(); return; }
+    // Lethal close for actions the atomic frame-52 path resolved without
+    // our checkattackroll wrap: one tick after the result label.
+    if (armed && resultSeen && actionDepth == 0) finishTrace();
     sweepFieldWatches();
     sweepWraps();
+    shadowMathScopes();
 };
