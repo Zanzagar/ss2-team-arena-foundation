@@ -46,7 +46,9 @@ Module responsibilities:
 | `src/golden/observation.js` | observation schema/digests, comparison projection, observation-vs-observation and observation-vs-fixture matching |
 | `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks |
 | `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate, promotion, divergence reports |
-| `tools/capture-session.mjs` | operator CLI: `verify-install`, `ingest`, `verify`, `promote`, `manifest-digest` |
+| `src/golden/simulate-capture-trace.js` | reference trace generator (`synthetic-simulator` method, never promotable) for pipeline dry runs and wrapper validation |
+| `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `ingest`, `verify`, `promote`, `manifest-digest` |
+| `tools/runtime-capture/ss2-capture-wrapper.as` | unvalidated AS2 instrumentation wrapper draft (see its README for the validation gate) |
 
 ## Capture session protocol
 
@@ -92,8 +94,9 @@ vehicle, in order of preference:
 2. A licensed AIR/projector runtime, with the same wrapper, if Ruffle's AVM1
    fidelity proves insufficient for the battle timeline.
 
-The wrapper (independently authored, to live under `tools/runtime-capture/`
-when validated against a real player) instruments without patching:
+The wrapper source is committed as an unvalidated draft at
+`tools/runtime-capture/ss2-capture-wrapper.as`. It instruments without
+patching:
 
 - wraps the three mapped `randomBetween` definitions (overlay frame 52 blocks
   `0x23f835`/`0x240c7f`, root frame 35 block `0x40198e`) to serve an injected
@@ -110,6 +113,19 @@ when validated against a real player) instruments without patching:
   bounds), never by value, and `attack_direction` is observed and recorded
   rather than forced;
 - emits only the JSONL trace grammar below (no screenshots, no assets).
+
+### Reference traces (simulator)
+
+`node tools/capture-session.mjs simulate --fixture <candidate.json>` writes
+the exact JSONL a perfect wrapper would emit for that fixture's staged
+scenario and injected tape (default output under ignored
+`captures/simulated/`). These traces exercise `ingest` and `verify` end to
+end and are the wrapper's executable specification: during validation the
+wrapper must reproduce them (modulo meta identity and passive roll values)
+before a real capture counts as evidence. Their capture method is
+`synthetic-simulator`, which observation validation accepts but promotion
+rejects unconditionally — a simulated trace can never become runtime
+evidence, and simulated records do not belong in `test/observations/`.
 
 ## Raw trace grammar (JSON lines, version 1)
 
@@ -175,9 +191,10 @@ touch `classicStyleRules` or the team engine directly.
 
 1. Approval to install an AVM1-capable player (Ruffle) — nothing may be
    downloaded without explicit sign-off.
-2. Authoring and validating the wrapper movie against that player, including
-   confirming `Object.watch` and function-wrap fidelity on the licensed
-   timeline before any trace is trusted.
+2. Compiling and validating the committed wrapper draft against that player
+   (`Object.watch` and function-wrap fidelity, level isolation, the overlay
+   instance path), then reproducing the simulator's reference traces before
+   any real trace is trusted.
 3. The first two controlled sessions per candidate, starting with
    `candidate-normal-threshold-hit`.
 

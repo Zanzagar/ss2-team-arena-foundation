@@ -9,6 +9,7 @@
  */
 
 import {
+  SS2_SIMULATED_CAPTURE_METHOD,
   matchSs2ObservationToFixture,
   sha256OfCanonicalJson,
   validateSs2Observation
@@ -281,6 +282,12 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
       defer(new PromotionError(
         `Observation ${observation?.observationId ?? "(unidentified)"} is invalid: ${error.message}`,
         { cause: error }
+      ));
+      continue;
+    }
+    if (observation.capture.method === SS2_SIMULATED_CAPTURE_METHOD) {
+      defer(new PromotionError(
+        `Observation ${observation.observationId} is a synthetic simulator trace, not runtime evidence.`
       ));
       continue;
     }

@@ -65,10 +65,16 @@ independent sessions:
 
 ```powershell
 node tools/capture-session.mjs verify-install
+node tools/capture-session.mjs simulate --fixture <candidate.json>
 node tools/capture-session.mjs ingest --trace <raw.jsonl> --fixture <candidate.json> --out <observation.json>
 node tools/capture-session.mjs verify --fixture <candidate.json> --observation <observation.json>
 node tools/capture-session.mjs promote --fixture <candidate.json> --manifest <manifest.json> --observation <obs1.json> --observation <obs2.json>
 ```
+
+`simulate` writes a reference trace (`synthetic-simulator` method) for
+pipeline dry runs and wrapper validation; promotion always rejects simulated
+evidence. The unvalidated AS2 wrapper draft lives in
+`tools/runtime-capture/`.
 
 Raw traces stay in ignored `captures/`; divergent observations are preserved
 under `test/fixtures/ss2-1v1-divergences/` and drive candidate corrections.

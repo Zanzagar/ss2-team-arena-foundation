@@ -5,6 +5,9 @@
  * Subcommands:
  *   verify-install   recompute the installed SWF hashes against the pinned
  *                    fingerprint (run before and after every capture session)
+ *   simulate         generate a reference trace (synthetic-simulator method,
+ *                    never promotable) from a candidate fixture for pipeline
+ *                    dry runs and wrapper validation
  *   ingest           normalize one raw wrapper trace (JSONL) into a validated
  *                    observation record
  *   verify           match observation records against a fixture; divergences
@@ -27,6 +30,7 @@ import { fileURLToPath } from "node:url";
 
 import { ingestSs2CaptureTrace } from "../src/golden/capture-ingest.js";
 import { matchSs2ObservationToFixture, validateSs2Observation } from "../src/golden/observation.js";
+import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 import {
   PromotionBlockedError,
   buildSs2DivergenceReport,
@@ -144,6 +148,8 @@ function parseArgs(argv) {
       case "--manifest": options.manifest = next(); break;
       case "--out": options.out = next(); break;
       case "--divergence-dir": options.divergenceDir = next(); break;
+      case "--observation-id": options.observationId = next(); break;
+      case "--session-id": options.sessionId = next(); break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
   }
@@ -171,6 +177,23 @@ async function commandVerifyInstall(options) {
     ? "Installed build matches the pinned fingerprint."
     : "Installed build DOES NOT match the pinned fingerprint. Stop the capture session.");
   return result.ok ? 0 : 1;
+}
+
+async function commandSimulate(options) {
+  const fixture = await readJson(require_(options, "fixture", "--fixture"));
+  const stamp = Date.now();
+  const trace = simulateSs2CaptureTrace(fixture, {
+    observationId: options.observationId ?? `sim-obs-${stamp}`,
+    sessionId: options.sessionId ?? `sim-session-${stamp}`,
+    observedAt: new Date().toISOString()
+  });
+  const outPath = options.out ??
+    path.join(SCRIPT_DIR, "..", "captures", "simulated", `${fixture.fixtureId}-${stamp}.jsonl`);
+  await mkdir(path.dirname(outPath), { recursive: true });
+  await writeFile(outPath, trace, "utf8");
+  console.log(`Wrote synthetic-simulator reference trace to ${outPath}`);
+  console.log("Simulated traces exercise the pipeline only; promotion always rejects them.");
+  return 0;
 }
 
 async function commandIngest(options) {
@@ -260,6 +283,7 @@ async function commandManifestDigest(options) {
 
 const COMMANDS = new Map([
   ["verify-install", commandVerifyInstall],
+  ["simulate", commandSimulate],
   ["ingest", commandIngest],
   ["verify", commandVerify],
   ["promote", commandPromote],
