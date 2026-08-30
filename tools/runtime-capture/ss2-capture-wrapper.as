@@ -293,7 +293,12 @@ function hookBattle() {
     if (root == undefined || root.game == undefined) return;
     if (root.game.hero == undefined || root.game.villain == undefined) return;
     var overlay = overlayClip();
-    if (overlay == undefined || typeof overlay.randomBetween != "function") return;
+    // Hook the moment the overlay clip EXISTS: its combat functions are only
+    // defined when the timeline reaches frame 52, and an action triggered
+    // from the long-range phase executes within the same ticks as those
+    // definitions - polling for the functions loses the race (observed
+    // live). The slot watches below wrap them at assignment time instead.
+    if (overlay == undefined) return;
 
     installResilientWrap(overlay, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
     installResilientWrap(root, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));

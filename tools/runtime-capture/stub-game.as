@@ -106,21 +106,30 @@ function buildCheckattackroll() {
     };
 }
 
-ov.damagecharacter = buildDamagecharacter();
-
-ov.defender_hurt = function (method, damage) {
-    this.damagecharacter(damage);
-};
-
-ov.defender_blocked = function () {};
-
-ov.checkattackroll = buildCheckattackroll();
+// Mirrors the real timeline: the overlay clip exists for several frames
+// BEFORE its combat functions are defined (frame-52 semantics), so the
+// wrapper must hook the empty clip and wrap the functions at assignment.
+function defineOverlayFunctions() {
+    ov.randomBetween = function (a, b) {
+        return Math.floor(Math.random() * (b - a + 1)) + a;
+    };
+    ov.damagecharacter = buildDamagecharacter();
+    ov.defender_hurt = function (method, damage) {
+        this.damagecharacter(damage);
+    };
+    ov.defender_blocked = function () {};
+    ov.checkattackroll = buildCheckattackroll();
+}
 
 // Decoy rolls before the action: real battles roll AI-decision dice outside
 // checkattackroll, which the wrapper must neither inject nor record.
 var stubFrame = 0;
 this.onEnterFrame = function () {
     stubFrame++;
+    if (stubFrame == 3) {
+        // Frame-52 moment: everything gets defined at once.
+        defineOverlayFunctions();
+    }
     if (stubFrame == 5) {
         _global.battle_started = true;
         ov.randomBetween(1, 100);
