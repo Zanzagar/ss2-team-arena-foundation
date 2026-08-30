@@ -224,8 +224,27 @@ function makeWatcher(side) {
  */
 var hookSlots = [];
 function registerSlot(ownerGetter, name, maker) {
-    hookSlots.push({ ownerGetter: ownerGetter, name: name, maker: maker });
+    // Frame-defined functions are pinned (see pinSlot); native clip methods
+    // such as gotoAndPlay are never re-defined and must not be watched.
+    hookSlots.push({ ownerGetter: ownerGetter, name: name, maker: maker, pin: true });
 }
+function registerNativeSlot(ownerGetter, name, maker) {
+    hookSlots.push({ ownerGetter: ownerGetter, name: name, maker: maker, pin: false });
+}
+// Pinning: probed live, Ruffle DROPS scope-style assignments onto watched
+// slots. Installing the watch AFTER the game's first definition therefore
+// freezes our wrapper in place - the frame-52 re-definitions that would
+// otherwise strip it (define-and-call is atomic, so a per-frame sweep loses
+// that race) are discarded, and the game's own calls reach our wrapper.
+// This is exactly the arrangement of the one fully successful live capture
+// (session-20260830-e). The initial definition is never blocked because the
+// watch is only installed once the function exists.
+function pinSlot(owner, name, wrapped) {
+    owner.watch(name, function (prop, oldValue, newValue) {
+        return wrapped;
+    });
+}
+
 function sweepWraps() {
     for (var i = 0; i < hookSlots.length; i++) {
         var slot = hookSlots[i];
@@ -236,6 +255,7 @@ function sweepWraps() {
             var wrapped = slot.maker(current);
             wrapped.__ss2w = true;
             owner[slot.name] = wrapped;
+            if (slot.pin == true) pinSlot(owner, slot.name, wrapped);
             dbg("wrapped:" + slot.name);
         }
     }
@@ -486,7 +506,7 @@ function hookBattle() {
             emit({ t: "event", type: "death", side: side });
         }
     }));
-    registerSlot(function () { return overlayClip(); }, "gotoAndPlay", makeGotoMaker());
+    registerNativeSlot(function () { return overlayClip(); }, "gotoAndPlay", makeGotoMaker());
 
     battleHooked = true;
 }
