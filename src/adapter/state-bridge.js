@@ -316,6 +316,13 @@ export function compareMaximumHealth(rules, canonicalSource, vanillaRecord) {
 /**
  * Mirrors resolved canonical state onto a vanilla record. Pure: it returns a
  * new record and copies values, never computing one.
+ *
+ * It writes **all six** status flags unconditionally, so the returned record
+ * reports `materialisedFlags: []` — after this, nothing is absent any more.
+ * That is only true of a record whose writes were actually applied to the live
+ * combat object, so a caller that syncs canonical state onto a mirror it has
+ * not flushed has thrown away the undefined-until-set provenance. Prefer
+ * `mirrorDifferences` first and skip the sync when the mirror already agrees.
  */
 export function toVanillaCombatant(canonical, record) {
   assertVanillaRecord(record);
@@ -335,11 +342,16 @@ export function toVanillaCombatant(canonical, record) {
 }
 
 /**
- * Fails loudly when a vanilla record has drifted away from resolved canonical
- * state. Drift is a bug in whoever applied the writes, and silently correcting
- * it would hide a desync between the mirror and the authoritative resolver.
+ * Every place a vanilla record disagrees with resolved canonical state, as
+ * human-readable strings. Empty means the mirror is in step.
+ *
+ * Only the fields the adapter owns are compared — `hitpoints`, `hitpointsmax`
+ * and the six status flags — because they are the only canonical values that
+ * exist. Armour, stamina, ammunition and the rest have no canonical
+ * counterpart to disagree with; see `docs/ss2-adapter-contract.md`,
+ * "Canonical-shape gaps this exposes".
  */
-export function assertMirrorAgrees(record, canonical) {
+export function mirrorDifferences(record, canonical) {
   assertVanillaRecord(record);
   const problems = [];
   if (record.fields.hitpoints !== canonical.health) {
@@ -353,6 +365,16 @@ export function assertMirrorAgrees(record, canonical) {
     const mirrored = record.fields[flag] === true;
     if (mirrored !== active.has(flag)) problems.push(`${flag} ${String(record.fields[flag])} != canonical ${active.has(flag)}`);
   }
+  return problems;
+}
+
+/**
+ * Fails loudly when a vanilla record has drifted away from resolved canonical
+ * state. Drift is a bug in whoever applied the writes, and silently correcting
+ * it would hide a desync between the mirror and the authoritative resolver.
+ */
+export function assertMirrorAgrees(record, canonical) {
+  const problems = mirrorDifferences(record, canonical);
   if (problems.length > 0) {
     throw new AdapterStateError(
       `The vanilla mirror for ${canonical.id} has drifted from resolved state: ${problems.join("; ")}.`
@@ -509,19 +531,34 @@ export function vanillaWritesForResolvedAction({
   return Object.freeze({ writes: Object.freeze(writes), unmapped: Object.freeze(unmapped) });
 }
 
-/** Applies field writes to a normalised vanilla record. Pure; returns a new record. */
+/**
+ * Applies field writes to a normalised vanilla record. Pure; returns a new record.
+ *
+ * `materialisedFlags` is carried forward minus the flags these writes actually
+ * touched. A write *creates* the flag it writes, so that flag is no longer
+ * absent — but a flag nobody wrote is still absent on the live combat object,
+ * and forgetting that would make a later first write report `materialises:
+ * false` for a field it really does create. Applying a health-only write must
+ * not erase the absence of five untouched status flags.
+ */
 export function applyVanillaWrites(record, writes) {
   assertVanillaRecord(record);
   const fields = { ...record.fields };
   const clip = { ...record.clip };
+  const written = new Set();
   for (const write of writes) {
     if (write.target === WriteTarget.FIGHTER_CLIP) clip[write.field] = write.to;
-    else fields[write.field] = write.to;
+    else {
+      fields[write.field] = write.to;
+      written.add(write.field);
+    }
   }
   return Object.freeze({
     fields,
     clip: Object.freeze(clip),
-    materialisedFlags: Object.freeze([]),
+    materialisedFlags: Object.freeze(
+      (record.materialisedFlags ?? []).filter((flag) => !written.has(flag))
+    ),
     facingSource: record.facingSource,
     timedSpellFields: record.timedSpellFields,
     unknownFields: record.unknownFields
