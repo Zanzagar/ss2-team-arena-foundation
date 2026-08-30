@@ -123,19 +123,18 @@ test("wrapper tape strings carry only injectable randomBetween samples", () => {
   }
 });
 
-test("ruffle logs delog into clean traces, dropping non-capture lines", () => {
+test("ruffle logs delog into clean traces, dropping noise and truncating at end", () => {
   const fixture = fixtures[0];
   const trace = simulateSs2CaptureTrace(fixture);
-  const logText = trace
-    .trim()
-    .split("\n")
-    .map((line) => `2026-08-30T16:00:00.000000Z  INFO avm_trace: ${line}`)
-    .concat([
-      "2026-08-30T16:00:01.000000Z  INFO avm_trace: some game-internal trace text",
-      "2026-08-30T16:00:02.000000Z  INFO avm_trace: [\"an\",\"array\"]",
-      "2026-08-30T16:00:03.000000Z  WARN ruffle_core: unrelated runtime noise"
-    ])
-    .join("\r\n");
+  const stamp = (line) => `2026-08-30T16:00:00.000000Z  INFO avm_trace: ${line}`;
+  const logText = [
+    stamp("some game-internal trace text"),
+    stamp("[\"an\",\"array\"]"),
+    ...trace.trim().split("\n").map(stamp),
+    // Anything after the end line is post-session runtime noise.
+    stamp("{\"t\":\"set\",\"path\":\"/hero/hitpoints\",\"before\":1,\"after\":2,\"hook\":\"late\"}"),
+    "2026-08-30T16:00:03.000000Z  WARN ruffle_core: unrelated runtime noise"
+  ].join("\r\n");
   const { trace: extracted, dropped } = extractCaptureTraceFromRuffleLog(logText);
   assert.equal(extracted, trace);
   assert.equal(dropped, 2);
