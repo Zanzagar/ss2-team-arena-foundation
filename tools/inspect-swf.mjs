@@ -5,12 +5,14 @@
  *
  * This tool intentionally does not export scripts, images, sounds, or other
  * embedded assets. It reads a local SWF in memory and prints authored metadata
- * that is useful when building an interoperability map.
+ * that is useful when building an interoperability map: symbol names, character
+ * ids, instruction offsets, and frame labels with the frame spans they own.
  */
 
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
 const TAG_NAMES = new Map([
@@ -22,6 +24,7 @@ const TAG_NAMES = new Map([
   [34, "DefineButton2"],
   [37, "DefineEditText"],
   [39, "DefineSprite"],
+  [43, "FrameLabel"],
   [56, "ExportAssets"],
   [59, "DoInitAction"],
   [70, "PlaceObject3"],
@@ -68,18 +71,27 @@ const ACTION_NAMES = new Map([
 
 function usage(message) {
   if (message) console.error(message);
-  console.error("Usage: node tools/inspect-swf.mjs <file.swf> [--search <regex> | --function <regex> | --function-names <regex> | --references <regex>] [--around <n>] [--max-actions <n>] [--json]");
+  console.error("Usage: node tools/inspect-swf.mjs <file.swf> [--search <regex> | --function <regex> | --function-names <regex> | --references <regex> | --labels [regex]] [--around <n>] [--timeline <regex>] [--max-actions <n>] [--json]");
   process.exitCode = 2;
 }
 
-function parseArguments(argv) {
-  const options = { file: null, search: null, function: null, functionNames: null, references: null, around: 0, maxActions: 240, json: false };
+export function parseArguments(argv) {
+  const options = { file: null, search: null, function: null, functionNames: null, references: null, labels: null, timeline: null, around: 0, maxActions: 240, json: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--search") options.search = argv[++index];
     else if (value === "--function") options.function = argv[++index];
     else if (value === "--function-names") options.functionNames = argv[++index];
     else if (value === "--references") options.references = argv[++index];
+    else if (value === "--labels") {
+      // The regex is optional: `--labels` alone lists every timeline's labels.
+      // The next token is only taken as the filter once the positional file
+      // argument is already known, so `--labels <file.swf>` still means "list
+      // every label in that file" rather than silently filtering by a path.
+      const next = argv[index + 1];
+      const takesFilter = options.file !== null && typeof next === "string" && !next.startsWith("-");
+      options.labels = { filter: takesFilter ? argv[++index] : null };
+    } else if (value === "--timeline") options.timeline = argv[++index];
     else if (value === "--around") options.around = Number(argv[++index]);
     else if (value === "--max-actions") options.maxActions = Number(argv[++index]);
     else if (value === "--json") options.json = true;
@@ -87,12 +99,13 @@ function parseArguments(argv) {
     else throw new Error(`Unexpected argument: ${value}`);
   }
   if (!options.file) return null;
-  if ([options.search, options.function, options.functionNames, options.references].filter(Boolean).length > 1) {
-    throw new Error("Use only one of --search, --function, --function-names, or --references.");
+  if ([options.search, options.function, options.functionNames, options.references, options.labels].filter(Boolean).length > 1) {
+    throw new Error("Use only one of --search, --function, --function-names, --references, or --labels.");
   }
   if (!Number.isInteger(options.maxActions) || options.maxActions < 1) throw new Error("--max-actions must be a positive integer.");
   if (!Number.isInteger(options.around) || options.around < 0) throw new Error("--around must be a non-negative integer.");
   if (options.around && !options.references) throw new Error("--around can only be used with --references.");
+  if (options.timeline !== null && !options.labels) throw new Error("--timeline can only be used with --labels.");
   return options;
 }
 
@@ -519,6 +532,27 @@ function parsePlaceObject(buffer, start, end, tagCode, context, analysis, swfVer
   if (hasClipActions && cursor < end) parseClipActions(buffer, cursor, end, swfVersion, `${context}/instance:${name ?? depth}`, analysis);
 }
 
+/**
+ * FrameLabel (tag 43): a NUL-terminated STRING, optionally followed — SWF 6 and
+ * later only — by a single UI8 "named anchor" byte whose defined value is 1.
+ *
+ * Nothing here throws on damaged input: an unterminated string, an empty label
+ * and unexpected trailing bytes are all reported as flags on the decoded record
+ * so a caller sees the damage instead of a silently plausible label.
+ */
+export function parseFrameLabel(buffer, start, end, swfVersion) {
+  const parsed = readCString(buffer, start, end);
+  const terminated = parsed.next > start && buffer[parsed.next - 1] === 0;
+  const trailing = Math.max(0, end - parsed.next);
+  const namedAnchor = swfVersion >= 6 && trailing >= 1 && buffer[parsed.next] === 1;
+  return {
+    label: parsed.value,
+    namedAnchor,
+    truncated: !terminated,
+    trailingBytes: trailing - (namedAnchor ? 1 : 0)
+  };
+}
+
 function parseDefineButton2(buffer, start, end, context, analysis) {
   if (start + 5 > end) return;
   const characterId = buffer.readUInt16LE(start);
@@ -569,6 +603,16 @@ function parseTags(buffer, start, end, context, analysis, swfVersion) {
       const declaredFrames = buffer.readUInt16LE(bodyStart + 2);
       analysis.sprites.push({ id, declaredFrames, offset: tagOffset });
       parseTags(buffer, bodyStart + 4, bodyEnd, `sprite:${id}`, analysis, swfVersion);
+    } else if (code === 43) {
+      // The label belongs to the frame currently being assembled, i.e. the one
+      // the next ShowFrame will display. `frame` is 1-based and only advances
+      // on ShowFrame, so it is exactly what `_currentframe` reports there.
+      analysis.frameLabels.push({
+        timeline: context,
+        frame,
+        offset: tagOffset,
+        ...parseFrameLabel(buffer, bodyStart, bodyEnd, swfVersion)
+      });
     } else if (code === 56) parseExportAssets(buffer, bodyStart, bodyEnd, analysis.exports);
     else if (code === 59 && bodyStart + 2 <= bodyEnd) {
       const spriteId = buffer.readUInt16LE(bodyStart);
@@ -576,6 +620,11 @@ function parseTags(buffer, start, end, context, analysis, swfVersion) {
     } else if (code === 76) parseExportAssets(buffer, bodyStart, bodyEnd, analysis.symbolClasses);
     cursor = bodyEnd;
   }
+  // Frames actually displayed by this timeline: one per ShowFrame. `frame` is
+  // the number of the frame being assembled when the stream ran out, so the
+  // last displayed frame is `frame - 1`.
+  const displayed = frame - 1;
+  if (displayed > (analysis.timelineFrames.get(context) ?? 0)) analysis.timelineFrames.set(context, displayed);
 }
 
 function instructionChildren(instruction) {
@@ -653,6 +702,133 @@ function resolveContext(context, exportById) {
   });
 }
 
+function buildExportIndex(exports, symbolClasses) {
+  const exportById = new Map();
+  for (const entry of [...exports, ...symbolClasses]) {
+    if (!exportById.has(entry.id)) exportById.set(entry.id, []);
+    exportById.get(entry.id).push(entry.name);
+  }
+  return exportById;
+}
+
+/**
+ * Groups decoded FrameLabel records per timeline and gives each label the frame
+ * span it owns: from its own frame up to the frame before the next label on the
+ * same timeline, or up to the timeline's last frame for the final label. A
+ * controller plays through that span and rests inside it, so the span — not the
+ * label frame — is what a `_currentframe` reader has to expect.
+ */
+export function buildFrameLabelTimelines(analysis, swf = null) {
+  const exportById = buildExportIndex(analysis.exports, analysis.symbolClasses);
+  const spriteById = new Map();
+  for (const sprite of analysis.sprites) if (!spriteById.has(sprite.id)) spriteById.set(sprite.id, sprite);
+
+  const groups = new Map();
+  const groupFor = (timeline) => {
+    const existing = groups.get(timeline);
+    if (existing) return existing;
+    const matched = /^sprite:(\d+)$/.exec(timeline);
+    const spriteId = matched ? Number(matched[1]) : null;
+    const group = {
+      timeline,
+      display: resolveContext(timeline, exportById),
+      spriteId,
+      names: spriteId === null ? [] : exportById.get(spriteId) ?? [],
+      frameCount: analysis.timelineFrames.get(timeline) ?? 0,
+      declaredFrameCount: spriteId === null ? swf?.frameCount ?? null : spriteById.get(spriteId)?.declaredFrames ?? null,
+      labels: []
+    };
+    groups.set(timeline, group);
+    return group;
+  };
+
+  for (const entry of analysis.frameLabels) groupFor(entry.timeline).labels.push(entry);
+
+  const timelines = [...groups.values()];
+  for (const group of timelines) {
+    const ordered = [...group.labels].sort((a, b) => a.frame - b.frame || a.offset - b.offset);
+    const lastFrame = Math.max(group.frameCount, ordered[ordered.length - 1]?.frame ?? 0);
+    group.labels = ordered.map((entry, index) => {
+      const next = ordered[index + 1];
+      const spanEnd = Math.max(entry.frame, next ? next.frame - 1 : lastFrame);
+      return {
+        label: entry.label,
+        frame: entry.frame,
+        spanEnd,
+        spanFrames: spanEnd - entry.frame + 1,
+        namedAnchor: entry.namedAnchor,
+        truncated: entry.truncated,
+        trailingBytes: entry.trailingBytes,
+        offset: entry.offset
+      };
+    });
+  }
+  timelines.sort((a, b) => {
+    if (a.spriteId === b.spriteId) return a.timeline.localeCompare(b.timeline);
+    if (a.spriteId === null) return -1;
+    if (b.spriteId === null) return 1;
+    return a.spriteId - b.spriteId;
+  });
+  return timelines;
+}
+
+export function filterFrameLabelTimelines(timelines, { label = null, timeline = null } = {}) {
+  const labelExpression = label ? new RegExp(label, "i") : null;
+  const timelineExpression = timeline ? new RegExp(timeline, "i") : null;
+  const output = [];
+  for (const group of timelines) {
+    if (timelineExpression && !timelineExpression.test(group.display)) continue;
+    const labels = labelExpression ? group.labels.filter((entry) => labelExpression.test(entry.label)) : group.labels;
+    if (!labels.length) continue;
+    output.push({ ...group, labels });
+  }
+  return output;
+}
+
+function frameLabelNotes(entry) {
+  const notes = [];
+  if (entry.namedAnchor) notes.push("named anchor");
+  if (entry.truncated) notes.push("unterminated string");
+  if (entry.trailingBytes > 0) notes.push(`${entry.trailingBytes} unexpected trailing byte${entry.trailingBytes === 1 ? "" : "s"}`);
+  return notes.length ? `  [${notes.join("; ")}]` : "";
+}
+
+export function formatFrameLabelReport(timelines, { label = null, timeline = null, totalTimelines = null } = {}) {
+  const shown = timelines.reduce((total, group) => total + group.labels.length, 0);
+  const filters = [];
+  if (label) filters.push(`labels matching /${label}/i`);
+  if (timeline) filters.push(`timelines matching /${timeline}/i`);
+  const scope = totalTimelines === null || totalTimelines === timelines.length
+    ? `${timelines.length} timelines`
+    : `${timelines.length} of ${totalTimelines} timelines`;
+  const lines = [filters.length
+    ? `\nFrame labels (${filters.join("; ")}): ${shown} across ${scope}`
+    : `\nFrame labels: ${shown} across ${scope}`];
+  for (const group of timelines) {
+    const declared = group.declaredFrameCount === null
+      ? ""
+      : `, declared ${group.declaredFrameCount}${group.declaredFrameCount === group.frameCount ? "" : " — MISMATCH"}`;
+    lines.push(`\n[${group.display}] ${group.frameCount} frame${group.frameCount === 1 ? "" : "s"}${declared}`);
+    for (const entry of group.labels) {
+      const name = entry.label === "" ? "<empty>" : entry.label;
+      lines.push(`  ${name.padEnd(24)} frame ${String(entry.frame).padStart(4)}  span ${entry.frame}-${entry.spanEnd} (${entry.spanFrames} frame${entry.spanFrames === 1 ? "" : "s"})${frameLabelNotes(entry)}`);
+    }
+  }
+  return lines;
+}
+
+export function frameLabelPayload(file, timelines, { label = null, timeline = null, totalTimelines = null } = {}) {
+  return {
+    file,
+    labelFilter: label,
+    timelineFilter: timeline,
+    labelCount: timelines.reduce((total, group) => total + group.labels.length, 0),
+    timelineCount: timelines.length,
+    totalTimelinesWithLabels: totalTimelines,
+    timelines
+  };
+}
+
 function serialisableSummary(file, stat, swf, analysis) {
   const exportById = new Map();
   for (const entry of [...analysis.exports, ...analysis.symbolClasses]) {
@@ -678,12 +854,29 @@ function serialisableSummary(file, stat, swf, analysis) {
   };
 }
 
-function printHumanSummary(summary, analysis, search, functionSearch, functionNamesSearch, referencesSearch, around, maxActions) {
+function printHumanSummary(summary, analysis, options) {
+  const {
+    search,
+    function: functionSearch,
+    functionNames: functionNamesSearch,
+    references: referencesSearch,
+    labels,
+    timeline: timelineFilter,
+    around,
+    maxActions
+  } = options;
   console.log(`SWF: ${summary.file}`);
   console.log(`Size: ${summary.bytesOnDisk} bytes; FWS v${summary.version}; original compression: ${summary.originalCompression}`);
   console.log(`Movie: ${summary.frameRate} fps, ${summary.frameCount} root frames; declared length: ${summary.declaredFileLength}`);
   console.log(`AVM1 action blocks: ${summary.actionBlockCount}; sprites: ${summary.sprites.length}; exports: ${summary.exports.length}; named instances: ${summary.namedInstances.length}; edit text fields: ${summary.editTexts.length}`);
   console.log("Tags: " + summary.tagCounts.map((entry) => `${entry.name}=${entry.count}`).join(", "));
+  if (labels) {
+    const all = buildFrameLabelTimelines(analysis, { frameCount: summary.frameCount });
+    const selected = filterFrameLabelTimelines(all, { label: labels.filter, timeline: timelineFilter });
+    const report = { label: labels.filter, timeline: timelineFilter, totalTimelines: all.length };
+    for (const line of formatFrameLabelReport(selected, report)) console.log(line);
+    return;
+  }
   if (referencesSearch) {
     const expression = new RegExp(referencesSearch, "i");
     const exportById = new Map();
@@ -807,37 +1000,61 @@ function printHumanSummary(summary, analysis, search, functionSearch, functionNa
   }
 }
 
-try {
-  const options = parseArguments(process.argv.slice(2));
-  if (!options) usage();
-  else {
-    const file = path.resolve(options.file);
-    const stat = fs.statSync(file);
-    const input = fs.readFileSync(file);
-    const normalised = normaliseSwf(input);
-    const buffer = normalised.buffer;
-    const version = buffer[3];
-    const declaredFileLength = buffer.readUInt32LE(4);
-    let cursor = skipRect(buffer, 8);
-    const frameRate = buffer.readUInt16LE(cursor) / 256;
-    const frameCount = buffer.readUInt16LE(cursor + 2);
-    cursor += 4;
-    const analysis = {
-      tagCounts: new Map(),
-      exports: [],
-      symbolClasses: [],
-      sprites: [],
-      instances: [],
-      editTexts: [],
-      actionBlocks: []
-    };
-    parseTags(buffer, cursor, buffer.length, "root", analysis, version);
-    const swf = { ...normalised, version, declaredFileLength, frameRate, frameCount };
-    const summary = serialisableSummary(file, stat, swf, analysis);
-    if (options.json) console.log(JSON.stringify(summary, null, 2));
-    else printHumanSummary(summary, analysis, options.search, options.function, options.functionNames, options.references, options.around, options.maxActions);
+/**
+ * Reads a SWF that is already in memory. Nothing here touches the filesystem,
+ * which is what lets the tests exercise the decoders on synthetic buffers.
+ */
+export function analyseSwfBuffer(input) {
+  const normalised = normaliseSwf(input);
+  const buffer = normalised.buffer;
+  const version = buffer[3];
+  const declaredFileLength = buffer.readUInt32LE(4);
+  let cursor = skipRect(buffer, 8);
+  const frameRate = buffer.readUInt16LE(cursor) / 256;
+  const frameCount = buffer.readUInt16LE(cursor + 2);
+  cursor += 4;
+  const analysis = {
+    tagCounts: new Map(),
+    exports: [],
+    symbolClasses: [],
+    sprites: [],
+    instances: [],
+    editTexts: [],
+    actionBlocks: [],
+    frameLabels: [],
+    timelineFrames: new Map()
+  };
+  parseTags(buffer, cursor, buffer.length, "root", analysis, version);
+  return { swf: { ...normalised, version, declaredFileLength, frameRate, frameCount }, analysis };
+}
+
+function main(argv) {
+  const options = parseArguments(argv);
+  if (!options) {
+    usage();
+    return;
   }
-} catch (error) {
-  console.error(error.stack ?? error.message);
-  process.exitCode = 1;
+  const file = path.resolve(options.file);
+  const stat = fs.statSync(file);
+  const { swf, analysis } = analyseSwfBuffer(fs.readFileSync(file));
+  const summary = serialisableSummary(file, stat, swf, analysis);
+  if (options.json && options.labels) {
+    const all = buildFrameLabelTimelines(analysis, swf);
+    const selected = filterFrameLabelTimelines(all, { label: options.labels.filter, timeline: options.timeline });
+    console.log(JSON.stringify(frameLabelPayload(file, selected, {
+      label: options.labels.filter,
+      timeline: options.timeline,
+      totalTimelines: all.length
+    }), null, 2));
+  } else if (options.json) console.log(JSON.stringify(summary, null, 2));
+  else printHumanSummary(summary, analysis, options);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.stack ?? error.message);
+    process.exitCode = 1;
+  }
 }
