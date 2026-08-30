@@ -98,6 +98,7 @@ function dbg(label) {
 var rawTape = _root.tape;
 var rawWatchFields = _root.watchFields;
 var rawAutopilot = _root.autopilot;
+var rawNavigate = _root.navigate;
 var config = {
     gameUrl: _root.gameUrl,
     observationId: _root.observationId,
@@ -177,6 +178,149 @@ function dbgFrame(f) {
     if (seenFrames[f] == true) return;
     seenFrames[f] = true;
     trace("{\"t\":\"dbg\",\"at\":\"frame\",\"f\":" + f + "}");
+}
+
+// Root-timeline position, logged once per distinct frame. This is the
+// screen-free way to observe menu navigation: an operator (or an automated
+// route) can confirm progress from the log alone, with no screenshots.
+var seenRootFrames = {};
+function dbgRootFrame() {
+    var root = gameRoot();
+    if (root == undefined) return;
+    var f = root._currentframe;
+    if (f == undefined || seenRootFrames[f] == true) return;
+    seenRootFrames[f] = true;
+    trace("{\"t\":\"dbg\",\"at\":\"rootframe\",\"f\":" + f + "}");
+}
+
+// ---------------------------------------------------------------------------
+// Navigator: walks the game from its title screen to the tutorial prisoner
+// battle using the game's OWN navigation calls, so no synthetic clicks and
+// therefore no window focus are needed - the whole run is unattended and the
+// desktop stays usable. Each step reproduces exactly what the corresponding
+// button does (byte-verified; DefineButton2 actions cannot be invoked, so
+// those are replicated statement for statement) and waits on a state check
+// rather than a timer.
+//
+//   step 0  title idle        -> gotoAndPlay("new_or_continue")     [button 1502]
+//   step 1  frame >= 52       -> gotoAndPlay("load_saved_gladiators")[button 1535]
+//   step 2  slot handlers up  -> get_char1.onRelease()               [slot clip]
+//   step 3  hero loaded       -> replicate the confirm button        [button 1669]
+//   step 4                    -> set up the misc fight, arena_intro  [sprite 1788 frame 78]
+//   step 5  frame == 220      -> gotoAndPlay("arena")                [button 2128]
+//   step 6  battle_started    -> hand over to the autopilot
+// ---------------------------------------------------------------------------
+var navStep = 0;
+var navCooldown = 0;
+var navDiagCount = 0;
+function dbgNav(label) {
+    trace("{\"t\":\"dbg\",\"at\":\"nav\",\"step\":\"" + label + "\"}");
+}
+
+function stepNavigator() {
+    if (rawNavigate != "prisoner") return;
+    if (navStep > 6) return;
+    var root = gameRoot();
+    if (root == undefined) return;
+    if (navCooldown > 0) { navCooldown--; return; }
+
+    if (navStep == 0) {
+        // Frame 10 performs the SharedObject read; so_local proves it ran.
+        if (root.so_local == undefined) return;
+        dbgNav("title");
+        root.gotoAndPlay("new_or_continue");
+        navStep = 1; navCooldown = 15; return;
+    }
+    if (navStep == 1) {
+        // Frame 35 defines the routines used below; the screen settles at 52.
+        if (root._currentframe < 52) return;
+        dbgNav("new_or_continue");
+        root.gotoAndPlay("load_saved_gladiators");
+        navStep = 2; navCooldown = 15; return;
+    }
+    if (navStep == 2) {
+        if (typeof root.get_char1.onRelease != "function") return;
+        if (root.so_local.max_gladiators == undefined) return;
+        if (root.so_local.max_gladiators < 1) return;
+        dbgNav("slot-list");
+        root.get_char1.onRelease();
+        navStep = 3; navCooldown = 15; return;
+    }
+    if (navStep == 3) {
+        // initcharacter populates the combat object field by field; counting
+        // properties is naming-agnostic (character_name is written later, by
+        // skincharacter, so it is not a usable readiness signal).
+        var heroProps = 0;
+        var firstNames = "";
+        for (var k in root.game.hero) {
+            heroProps++;
+            if (heroProps <= 5) firstNames += k + " ";
+        }
+        if (heroProps < 6) {
+            if (navDiagCount < 4) {
+                navDiagCount++;
+                trace("{\"t\":\"dbg\",\"at\":\"navdiag\",\"props\":" + heroProps +
+                    ",\"names\":\"" + firstNames + "\"" +
+                    ",\"charToLoad\":\"" + String(root.char_to_load) + "\"" +
+                    ",\"slotFrame\":\"" + String(root.get_char1._currentframe) + "\"" +
+                    ",\"heroDNA\":\"" + String(_global.heroDNA).substr(0, 20) + "\"}");
+                navCooldown = 25;
+            }
+            return;
+        }
+        trace("{\"t\":\"dbg\",\"at\":\"navdiag\",\"props\":" + heroProps + ",\"names\":\"" + firstNames + "\"}");
+        dbgNav("hero-loaded");
+        _global.current_character = root.char_to_load;
+        _global.gamephase = 1;
+        _global.time_of_day = 24;
+        root.game.hero.score = 0;
+        root.hero.removeMovieClip();
+        root.delete_tooltips();
+        navStep = 4; navCooldown = 10; return;
+    }
+    if (navStep == 4) {
+        // Hand control back to the game's own frames instead of shortcutting
+        // to arena_intro. daybreak -> (frame 113 routes a level-1 hero to)
+        // dungeon -> the prologue clip, which skins the hero, builds the
+        // villain via unleash_hell(0) and sets the fight mode itself before
+        // jumping to arena_intro.
+        //
+        // Skipping those frames tripped the game's own character validation
+        // ("your character has been corrupted ... character tampering"),
+        // which is exactly the outcome this project must never provoke: the
+        // save is untouched, but a run that lands on that screen is not
+        // vanilla behaviour and its evidence would be worthless. The
+        // prologue self-advances, so an unattended run simply waits it out.
+        dbgNav("daybreak");
+        root.gotoAndPlay("daybreak");
+        navStep = 5; navCooldown = 30; return;
+    }
+    if (navStep == 5) {
+        // Frame 220 is arena_intro's Stop: the game has by then run its own
+        // setup and validation for both fighters.
+        if (root._currentframe != 220) {
+            if (navDiagCount < 8) {
+                navDiagCount++;
+                trace("{\"t\":\"dbg\",\"at\":\"navdiag\",\"waitingAt\":" +
+                    root._currentframe + "}");
+                navCooldown = 90;
+            }
+            return;
+        }
+        dbgNav("versus");
+        trace("{\"t\":\"dbg\",\"at\":\"navdiag\",\"heroLevel\":\"" +
+            String(root.game.hero.herolevel) + "\",\"fightMode\":\"" +
+            String(_global.fight_mode) + "\",\"villainName\":\"" +
+            String(root.game.villain.character_name) + "\"}");
+        _global.fightselected = false;
+        root.gotoAndPlay("arena");
+        navStep = 6; navCooldown = 30; return;
+    }
+    if (navStep == 6) {
+        if (_global.battle_started != true) return;
+        dbgNav("battle-ready");
+        navStep = 7;
+    }
 }
 
 function stepAutopilot() {
@@ -577,6 +721,8 @@ Key.addListener(keyListener);
 // frame - re-wrapping any function the timeline (re)defined and re-watching
 // stat objects the game swapped. The armed action closes the trace itself.
 this.onEnterFrame = function () {
+    dbgRootFrame();
+    stepNavigator();
     if (!battleHooked) { hookBattle(); return; }
     // Lethal close for actions the atomic frame-52 path resolved without
     // our checkattackroll wrap: one tick after the result label.

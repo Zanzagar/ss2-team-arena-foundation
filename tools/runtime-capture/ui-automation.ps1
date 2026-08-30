@@ -19,7 +19,7 @@ powershell -File tools\runtime-capture\ui-automation.ps1 key -Key END
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('info', 'focus', 'shot', 'click', 'move', 'key')]
+    [ValidateSet('info', 'focus', 'shot', 'click', 'postclick', 'children', 'move', 'key')]
     [string] $Command,
     [string] $Path,
     [int] $X,
@@ -87,6 +87,36 @@ public class Ss2Ui {
     public static void MoveClient(IntPtr hWnd, int cx, int cy) {
         POINT o = ClientOrigin(hWnd);
         SetCursorPos(o.X + cx, o.Y + cy);
+    }
+
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("user32.dll")] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder s, int max);
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWnd, EnumProc cb, IntPtr lParam);
+
+    const uint WM_MOUSEMOVE = 0x0200, WM_LBUTTONDOWN = 0x0201, WM_LBUTTONUP = 0x0202;
+
+    // Message-posted click: reaches the window's queue without focus or
+    // cursor movement, so an unattended run leaves the desktop usable.
+    public static void PostClick(IntPtr hWnd, int cx, int cy) {
+        IntPtr lp = (IntPtr)((cy << 16) | (cx & 0xFFFF));
+        PostMessage(hWnd, WM_MOUSEMOVE, (IntPtr)0, lp);
+        System.Threading.Thread.Sleep(30);
+        PostMessage(hWnd, WM_LBUTTONDOWN, (IntPtr)1, lp);
+        System.Threading.Thread.Sleep(60);
+        PostMessage(hWnd, WM_LBUTTONUP, (IntPtr)0, lp);
+    }
+
+    public static System.Collections.Generic.List<string> Children(IntPtr hWnd) {
+        var found = new System.Collections.Generic.List<string>();
+        EnumChildWindows(hWnd, delegate(IntPtr child, IntPtr p) {
+            var sb = new System.Text.StringBuilder(256);
+            GetClassName(child, sb, sb.Capacity);
+            found.Add(child.ToInt64() + " " + sb.ToString());
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 
     public static void PressVk(byte vk) {
@@ -159,6 +189,16 @@ switch ($Command) {
         [Ss2Ui]::ClickClient($hWnd, $X, $Y)
         Start-Sleep -Milliseconds $SettleMs
         Write-Host "Clicked client ($X,$Y)."
+    }
+    'postclick' {
+        # No focus, no cursor movement: the message goes straight to the queue.
+        [Ss2Ui]::PostClick($hWnd, $X, $Y)
+        Start-Sleep -Milliseconds $SettleMs
+        Write-Host "Posted click to client ($X,$Y)."
+    }
+    'children' {
+        $kids = [Ss2Ui]::Children($hWnd)
+        if ($kids.Count -eq 0) { Write-Host '(no child windows)' } else { $kids | ForEach-Object { Write-Host $_ } }
     }
     'move' {
         [Ss2Ui]::Focus($hWnd)

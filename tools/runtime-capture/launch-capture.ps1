@@ -24,6 +24,9 @@ param(
     # action entry point, e.g. 'walkright*5,normal_attack'. Leave empty to
     # play the fight by hand.
     [string] $Autopilot = '',
+    # 'prisoner' makes the wrapper navigate from the title screen to the
+    # tutorial battle with the game's own calls, so no clicks are needed.
+    [string] $Navigate = '',
     [switch] $Passive
 )
 
@@ -91,6 +94,7 @@ $ruffleArgs = @(
     "-Pinjected=$injected",
     "-Ptape=$tape",
     "-Pautopilot=$Autopilot",
+    "-Pnavigate=$Navigate",
     $wrapperSwf
 )
 
