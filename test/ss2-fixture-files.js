@@ -23,7 +23,8 @@ export const SS2_FIXTURE_FILES = [
   "candidate-bash-inherited-critical.json",
   "candidate-bombard-threshold.json",
   "candidate-duel-absorbed-normal-hit.json",
-  "candidate-duel-firstblood-normal-kill.json"
+  "candidate-duel-firstblood-normal-kill.json",
+  "candidate-prisoner-normal-kill.json"
 ];
 
 export async function loadSs2Fixtures() {
