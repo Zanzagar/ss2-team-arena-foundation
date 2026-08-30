@@ -29,7 +29,15 @@ export const SS2_FIXTURE_FILES = [
   "candidate-prisoner-normal-kill.json",
   "candidate-prisoner-normal-kill-dir8.json",
   "candidate-prisoner-normal-kill-dir6.json",
-  "candidate-prisoner-normal-kill-dir5.json"
+  "candidate-prisoner-normal-kill-dir5.json",
+  "candidate-prisoner-power-kill-dir9.json",
+  "candidate-prisoner-power-kill-dir10.json",
+  "candidate-prisoner-power-kill-dir11.json",
+  "candidate-prisoner-power-kill-dir12.json",
+  "candidate-prisoner-quick-kill-dir1.json",
+  "candidate-prisoner-quick-kill-dir2.json",
+  "candidate-prisoner-quick-kill-dir3.json",
+  "candidate-prisoner-quick-kill-dir4.json"
 ];
 
 /**
