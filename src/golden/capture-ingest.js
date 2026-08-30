@@ -111,15 +111,44 @@ function readMeta(lines) {
 function readEnd(lines) {
   const { lineNumber, entry } = lines[lines.length - 1];
   if (entry.t !== "end") fail(lineNumber, "the last line must be an end line.");
-  const keys = Object.keys(entry).sort();
-  if (keys.length !== 2 || keys[0] !== "installHashVerifiedAfter" || keys[1] !== "t") {
-    fail(lineNumber, "the end line must carry only installHashVerifiedAfter.");
+  const allowed = new Set(["t", "installHashVerifiedAfter", "overdraw", "launchNonce"]);
+  for (const key of Object.keys(entry)) {
+    if (!allowed.has(key)) fail(lineNumber, `the end line carries an unexpected field ${key}.`);
+  }
+  if (!Object.hasOwn(entry, "installHashVerifiedAfter")) {
+    fail(lineNumber, "the end line must carry installHashVerifiedAfter.");
   }
   // `null` is the wrapper's placeholder: the after-attestation cannot be
   // known while the game is still running, so ingest must supply it from a
   // live verify-install run.
   if (entry.installHashVerifiedAfter !== true && entry.installHashVerifiedAfter !== null) {
     fail(lineNumber, "installHashVerifiedAfter must be true or the null placeholder.");
+  }
+  // Draws the armed window made after the injected tape ran out. They are
+  // invisible in the trace itself — they fall through to the live RNG and are
+  // logged only as `dbg` lines, which delog strips — so a run that drew more
+  // times than the candidate models would otherwise be indistinguishable from
+  // one that matched it. That is a divergence, and it must be refused here
+  // rather than silently matched.
+  //
+  // Absent on traces from wrappers predating the field; those are accepted so
+  // existing raw evidence stays ingestible, and they simply carry no
+  // assurance on this point.
+  if (Object.hasOwn(entry, "overdraw")) {
+    if (!Number.isInteger(entry.overdraw) || entry.overdraw < 0) {
+      fail(lineNumber, "end.overdraw must be a non-negative integer.");
+    }
+    if (entry.overdraw > 0) {
+      fail(
+        lineNumber,
+        `the armed window made ${entry.overdraw} draw(s) after the injected tape was exhausted, ` +
+        "so the action drew more randomness than the target candidate models. This is a " +
+        "divergence: correct the candidate's roll order from the raw trace."
+      );
+    }
+  }
+  if (Object.hasOwn(entry, "launchNonce") && typeof entry.launchNonce !== "string") {
+    fail(lineNumber, "end.launchNonce must be a string when present.");
   }
   return entry;
 }

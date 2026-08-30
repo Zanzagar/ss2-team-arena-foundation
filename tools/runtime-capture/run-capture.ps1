@@ -28,7 +28,11 @@ param(
     # Leave the raw log unprocessed for tools/runtime-capture/campaign.mjs,
     # which resolves the observed attack direction to the right candidate
     # before it ingests. See launch-capture.ps1 for why.
-    [switch] $SkipPipeline
+    [switch] $SkipPipeline,
+    # See launch-capture.ps1: a locked player frame rate is a time dilation,
+    # not a frame shortcut. The prologue is ~84% of an unattended run.
+    [int] $FrameRate = 0,
+    [string] $SaveDirectory = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -84,6 +88,8 @@ $launcherArgs = @(
     '-Navigate', "`"$Navigate`""
 )
 if ($SkipPipeline) { $launcherArgs += '-SkipPipeline' }
+if ($FrameRate -gt 0) { $launcherArgs += @('-FrameRate', "$FrameRate") }
+if ($SaveDirectory) { $launcherArgs += @('-SaveDirectory', "`"$SaveDirectory`"") }
 $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" `
     -ArgumentList $launcherArgs

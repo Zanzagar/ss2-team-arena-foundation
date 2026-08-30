@@ -34,7 +34,21 @@ param(
     # time the game picked a different (equally valid) attack direction,
     # burying real disagreements in noise. With this set the session stops
     # once the raw log is written.
-    [switch] $SkipPipeline
+    [switch] $SkipPipeline,
+    # Override and lock the player frame rate. This is a time dilation, not a
+    # shortcut: every frame of the game still executes, in order, with all
+    # inter-clip timing preserved, so it is categorically different from
+    # jumping the playhead past the prologue (which trips the game own
+    # character-tampering screen and voids the run). The whole wrapper is
+    # frame-based - cooldowns, idle ticks, the autopilot wait limit - so it
+    # scales with this automatically. 0 leaves the movie own rate.
+    [int] $FrameRate = 0,
+    # Isolated SharedObject store for this session. Ruffle shares one save
+    # location by default, and a window that loaded older state flushes it
+    # back on exit, clobbering a newer session - which is the only reason
+    # sessions must be serialised. Giving each concurrent session its own
+    # seeded copy removes that cause.
+    [string] $SaveDirectory = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,6 +118,11 @@ $ruffleArgs = @(
     "-Pnavigate=$Navigate",
     $wrapperSwf
 )
+if ($FrameRate -gt 0) { $ruffleArgs = @('--frame-rate', "$FrameRate") + $ruffleArgs }
+if ($SaveDirectory) {
+    New-Item -ItemType Directory -Path $SaveDirectory -Force | Out-Null
+    $ruffleArgs = @('--save-directory', "$SaveDirectory") + $ruffleArgs
+}
 
 Write-Host 'Launching the instrumented session. Stage the scenario, perform'
 Write-Host 'the one controlled action (press END after a non-lethal action),'

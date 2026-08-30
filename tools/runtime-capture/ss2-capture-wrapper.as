@@ -196,9 +196,16 @@ var AUTOPILOT_WAIT_LIMIT = 900;
 // heroactions 52, combatwon 62, combatlost 74.
 // ---------------------------------------------------------------------------
 var CONTROLLERS = [
-    { name: "initialise", from: 1, to: 4, actions: {
-        rest: true, runleft: true, runright: true, frozen: true,
-        burning: true, poisoned: true, life_stolen: true, swap_weapons: true } },
+    // Byte-verified: frames 1-4 contain no Stop, so the controller never
+    // RESTS on the initialise span - it passes straight through to the
+    // selector at frame 4. The autopilot fires only on a settled menu frame,
+    // so nothing here is reachable by it, and the entry exists to make that
+    // diagnosis explicit rather than to offer these as steps. The labels are
+    // the forced phases frame 1 issues to itself (empty-ammo swap, forced
+    // rest, taunted run, and the four damage-over-time flags), not buttons.
+    // swap_weapons is deliberately absent: no controller frame wires it, and
+    // its only manual route is the swap_inventory button on frame 1.
+    { name: "initialise", from: 1, to: 4, actions: {} },
     { name: "longrange_warrior", from: 5, to: 12, actions: {
         taunt: true, rest: true, jumpleft: true, jumpright: true,
         walkleft: true, walkright: true, chargeleft: true, chargeright: true,
@@ -212,10 +219,22 @@ var CONTROLLERS = [
         sniperight: true, taunt: true, rest: true, jumpleft: true,
         jumpright: true, walkleft: true, walkright: true,
         psyche_up: true, wincrowd: true } },
-    { name: "closerange_archer", from: 28, to: 51, actions: {
+    // Byte-verified: this span Stops at 37, not 51. Frame 51 carries an
+    // unreached Stop that no mapped path enters.
+    { name: "closerange_archer", from: 28, to: 37, actions: {
         bash_attack: true, shove: true, taunt: true, jumpleft: true,
         jumpright: true, walkright: true, psyche_up: true, wincrowd: true } }
 ];
+
+// The frame gate is necessary but not sufficient: several labels carry their
+// own byte-verified availability conditions on top of the controller. wincrowd
+// needs herolevel >= 3 everywhere; psyche_up needs stamina at 7% of maximum on
+// the warrior frames and 3% on the archer frames; taunt and rest share one
+// slot chosen by whether stamina is at least half. A step can therefore sit on
+// the right controller and still not be wired, in which case getphase sets a
+// decision nothing dispatches. That failure looks like a stall rather than a
+// wait, because the controller IS the expected one - check the trace for an
+// autopilot line with no following action-armed.
 
 function controllerForFrame(frame) {
     for (var ci = 0; ci < CONTROLLERS.length; ci++) {
@@ -467,6 +486,18 @@ emit({
 // ---------------------------------------------------------------------------
 loadMovieNum(config.gameUrl, 1);
 
+// Draws the armed window made after the tape ran out; reported on the end
+// line. See finishTrace.
+var overdrawCount = 0;
+// Minted inside the player, from values the launcher does not supply, so an
+// observation carries at least one field the operator did not choose. This is
+// not a security boundary - nothing here is - but sessionId and observationId
+// are both operator strings, and independence should not rest entirely on
+// them.
+// Evaluated here, well before the Math tap is installed, so this is the
+// player's own RNG and consumes nothing from the tape.
+var launchNonce = String(getTimer()) + "-" + String(Math.floor(Math.random() * 2147483647));
+
 var currentHook = "unattributed";   // set/cleared by function wraps
 var battleHooked = false;
 var actionDepth = 0;                // > 0 while inside checkattackroll
@@ -612,7 +643,11 @@ function tappedRandom() {
     }
     // Tape exhausted or passive: record the raw uniform draw in the
     // diagnostics log; the integer roll it produced is reconstructed
-    // during analysis from the surrounding evidence.
+    // during analysis from the surrounding evidence. Counted as well as
+    // logged - delog strips dbg lines, so without the count an armed window
+    // that drew more times than the candidate models would leave no trace of
+    // having done so.
+    if (armed) overdrawCount++;
     var raw = originalMathRandom();
     trace("{\"t\":\"dbg\",\"at\":\"mrand\",\"r\":" + raw + ",\"cursor\":" + tapeCursor + "}");
     tapeCursor++;
@@ -667,6 +702,15 @@ function beginAction() {
     if (ov.criticalhit != undefined) {
         emit({ t: "var", name: "criticalhit", value: ov.criticalhit });
     }
+    // The spell ingress has no direction chain, so a cast is identified by
+    // the inventory id the caller used. Without this line ingest cannot
+    // project scenario.spellId and no spell trace can ever be evidence.
+    // Recorded whenever the game has one; a physical action leaves it unset.
+    if (ov.spell_id != undefined) {
+        emit({ t: "var", name: "spell_id", value: ov.spell_id });
+    } else if (_global.spell_id != undefined) {
+        emit({ t: "var", name: "spell_id", value: _global.spell_id });
+    }
 }
 
 function finishTrace() {
@@ -676,7 +720,20 @@ function finishTrace() {
     dumpSide("final", "villain");
     // The post-session hash check has not run yet; ingest re-runs it live
     // and refuses the trace when it fails.
-    emit({ t: "end", installHashVerifiedAfter: null });
+    //
+    // overdraw is the count of draws the armed window made AFTER the tape ran
+    // out. It has to be reported, because those draws are otherwise invisible:
+    // they fall through to the live RNG and are logged only as dbg lines,
+    // which delog strips. A run that drew more times than the candidate models
+    // would then be indistinguishable from one that matched it. launchNonce is
+    // minted here rather than supplied, so a record carries one field the
+    // operator did not choose.
+    emit({
+        t: "end",
+        installHashVerifiedAfter: null,
+        overdraw: overdrawCount,
+        launchNonce: launchNonce
+    });
     finalsDumped = true;
     traceClosed = true;
 }

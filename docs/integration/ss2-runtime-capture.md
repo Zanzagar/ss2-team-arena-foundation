@@ -113,11 +113,18 @@ The wrapper source is committed as an unvalidated draft at
 `tools/runtime-capture/ss2-capture-wrapper.as`. It instruments without
 patching:
 
-- wraps the three mapped `randomBetween` definitions (overlay frame 52 blocks
-  `0x23f835`/`0x240c7f`, root frame 35 block `0x40198e`) to serve an injected
-  deterministic tape and log each call with label, bounds, value, and call
-  site — `injected-tape-runtime` capture drives the game's own bytecode with
-  the candidate fixture's exact rolls;
+- serves the injected deterministic tape from a tap on the shared `Math`
+  singleton underneath every `randomBetween` body, because frame 52 re-defines
+  `randomBetween` and calls it in the same script execution, so a slot wrap
+  cannot interpose there. The wraps on the three mapped `randomBetween`
+  definitions (overlay frame 52 blocks `0x23f835`/`0x240c7f`, root frame 35
+  block `0x40198e`) are diagnostic passthrough only. **A consequence that
+  matters for how evidence is read: the tap receives no arguments, so the
+  `label`, `min`, `max`, `value` and `callSite` on every emitted `roll` line
+  are copied from the tape entry being served — that is, from the candidate
+  fixture — and are not observations.** What the trace observes about the
+  rolls is their *count* and their *position* in the armed window. See
+  [what a match establishes](#what-a-match-actually-establishes);
 - uses AS2 `Object.watch` on every projected field of `_root.game.hero` and
   `_root.game.villain` for per-assignment mutation capture
   (`mutationGranularity: "property-watch"`);
@@ -136,12 +143,78 @@ patching:
 
 ### Reading divergent traces
 
-Injection is tape-positional: when the live action diverges from the
-fixture's expected roll order, later injected labels attach to whatever call
-happens to match the next tape entry's bounds, not to that call's semantic
-role, and non-matching calls appear as `unexpected-N` with live values.
-Interpret divergent raw traces by bounds and position, and treat injected
-values on a divergent run as controlled experimental inputs, which they are.
+Injection is tape-positional and unvalidated: the tap serves tape entry *n*
+to the *n*th draw in the armed window, whatever that draw actually is. There
+is no bounds comparison and no fallback labelling — an earlier revision of
+this document described one, and it was never implemented.
+
+Two consequences when a run diverges. First, a served value is remapped by
+the game: the tap returns the fraction `(value - min + 0.5) / span` computed
+from the *tape's* bounds, and the game's own `randomBetween(a, b)` then
+derives `floor(fraction * (b - a + 1)) + a` from its *real* bounds. Feeding a
+`21..23` entry to a real `5..20` call yields 13, not 22. Second, once the tape
+is exhausted the tap falls through to the live RNG and records the draw only
+as a `dbg` line, which `delog` strips — so a run that made *more* draws than
+the fixture models is not visible in the trace at all. Check
+`"at":"mrand"` in the raw log to rule that out; a capture whose count is
+trusted must show none.
+
+Interpret divergent raw traces by position, and treat injected values on a
+divergent run as controlled experimental inputs, which they are.
+
+### What a match actually establishes
+
+A MATCH is narrower than "the formula is verified", and the gap is worth
+stating precisely, because everything downstream rests on it.
+
+**Genuinely observed** — these come from the running build and can contradict
+a candidate:
+
+- the ordered mutation trace, from `Object.watch` on the persistent combat
+  objects (this is the substantive evidence);
+- the semantic events — `defender-hurt` with its dispatched method,
+  `defender-blocked`, `death`, and the overlay label — so, in particular,
+  whether an attack **hit or missed** is measured, not assumed;
+- the staged and final state dumps;
+- `attack_direction` and `fight_mode`, read from the game;
+- the **number** of draws in the armed window.
+
+**Not observed** — these are echoed or derived, and a match cannot contradict
+them:
+
+- every `roll` line's label, bounds, value and call site (copied from the
+  tape, hence from the candidate);
+- `howDied`, which `capture-ingest.js` synthesizes with the same static rule
+  the candidate uses;
+- `attackerSide`, which is a launcher FlashVar;
+- `expected.calculation` and `expected.mutation` in their entirety — matching
+  never compares them, so `chance`, `rollNeeded`, `deflectionThreshold`,
+  `armourRemovalRoll`, `knockback` and `enchantmentRoll` are candidate
+  assertions that no observation has tested.
+
+**Two known weaknesses in the chain itself**, recorded so they are not
+rediscovered as surprises:
+
+- the capture method is a string in the trace's meta line, so the
+  simulated-evidence rejection is only as strong as that string. A
+  `synthetic-simulator` trace with the method rewritten ingests, matches and
+  promotes, reproducing a committed observation's digest exactly. The raw
+  logs under `captures/` are what actually distinguish a live run, and they
+  are not committed;
+- session independence is `sessionId` and `observationId`, both supplied by
+  the operator. Nothing binds an observation to a distinct process.
+
+**How to strengthen a match rather than repeat it.** Because three of the
+seven tape slots in the prisoner scenario write nothing observable (the
+defender has no armour, so the removal roll is inert, and the knockback and
+enchantment draws write nothing), many different roll orderings produce an
+identical observation. Repeating that capture adds sessions, not information.
+A *discriminating* tape does: stage an armoured defender so the removal roll
+above 66 is visible, choose a deflection roll at the threshold, and choose a
+knockback value that crosses its gate. The power band is the worked example
+of the other half of the discipline — its candidates were derived from the
+map before any power session existed, so the eight sessions that matched them
+confirmed a prediction rather than a fit.
 
 ### Reference traces (simulator)
 
@@ -197,7 +270,11 @@ An observation matches a fixture when all of the following are exactly equal:
 - scenario (numeric staged state, attacker side, attack direction);
 - ordered samples — label, source, bounds, and value, with cosmetic
   `armour-debris-*` opcode rolls excluded from both sides (no instrumentation
-  can observe the opcode stream, and the rolls never change combat state);
+  can observe the opcode stream, and the rolls never change combat state).
+  Note what this comparison can and cannot fail on: an injected run's sample
+  fields are copied from the fixture's own tape, so in practice this clause
+  tests the **number** of draws and their position, not their metadata (see
+  [what a match establishes](#what-a-match-actually-establishes));
 - ordered mutation trace on the `(sequence, path, before, after)` contract —
   `reason` strings are annotations (static-analysis labels in fixtures,
   hook attributions in observations) and are deliberately not compared;
