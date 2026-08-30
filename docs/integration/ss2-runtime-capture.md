@@ -129,6 +129,15 @@ patching:
   when it passes;
 - emits only the JSONL trace grammar below (no screenshots, no assets).
 
+### Reading divergent traces
+
+Injection is tape-positional: when the live action diverges from the
+fixture's expected roll order, later injected labels attach to whatever call
+happens to match the next tape entry's bounds, not to that call's semantic
+role, and non-matching calls appear as `unexpected-N` with live values.
+Interpret divergent raw traces by bounds and position, and treat injected
+values on a divergent run as controlled experimental inputs, which they are.
+
 ### Reference traces (simulator)
 
 `node tools/capture-session.mjs simulate --fixture <candidate.json>` writes

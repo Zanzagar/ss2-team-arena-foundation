@@ -103,6 +103,17 @@ This split is the first adapter seam. Team mode should use combatant IDs and
 keep `clipByCombatantId` outside deterministic state; it should not multiply
 the existing hero/villain globals.
 
+Runtime-observed 2026-08-30 (second capture, a charge collision): charge
+impacts are dispatched through `checkattackroll` with `attack_direction`
+still **undefined** — the applied damage equals the attacker's `min_damage`,
+a −20..20 critical sample is drawn, and the standard deflection/removal/
+damage path follows. The same capture observed the first-blood duel defeat
+end-to-end (hp 30 of 40 in `duel` mode → `death` → `combatwon`), the
+post-death knockback and enchantment rolls in the mapped order, the
+overflow mutation order with `armourclass` left negative until the clamp,
+and the byte-decoded death status-clear order, all live. A future schema
+revision may model direction-undefined charge attacks as fixtures.
+
 Runtime-observed 2026-08-30: the persistent combat objects leave the status
 flags (`burning`, `frozen`, `poison`, `life_stolen`, `taunted1`, `taunted2`)
 **undefined** until something sets them, and do not carry `gladiator_dir` at
