@@ -227,14 +227,26 @@ var CONTROLLERS = [
 ];
 
 // The frame gate is necessary but not sufficient: several labels carry their
-// own byte-verified availability conditions on top of the controller. wincrowd
-// needs herolevel >= 3 everywhere; psyche_up needs stamina at 7% of maximum on
-// the warrior frames and 3% on the archer frames; taunt and rest share one
-// slot chosen by whether stamina is at least half. A step can therefore sit on
-// the right controller and still not be wired, in which case getphase sets a
-// decision nothing dispatches. That failure looks like a stall rather than a
-// wait, because the controller IS the expected one - check the trace for an
-// autopilot line with no following action-armed.
+// own byte-verified availability conditions on top of the controller.
+// wincrowd needs herolevel >= 3 everywhere; psyche_up needs HEROLEVEL >= 7 on
+// the warrior frames and >= 3 on the archer frames (an earlier revision of
+// this comment misattributed those two constants to a stamina percentage -
+// they are level gates); taunt and rest share one slot, and THAT is the
+// stamina-driven choice, selected by whether stamina is at least half.
+//
+// So a step can sit on the right controller and still not be wired. The table
+// above models the controller, not these conditions, so such a step is issued
+// and getphase sets a decision nothing dispatches. That failure looks like a
+// stall rather than a wait, because the controller IS the expected one -
+// check the trace for an autopilot line with no following action-armed.
+//
+// Open question worth settling before trusting the gate too far: the map's
+// byte-verified reading is that the phase machine never consults the
+// controller frame, which would mean getphase accepts a label whatever is on
+// screen, and the controller only decides which BUTTONS exist. If so this
+// gate is stricter than the build. Being stricter is the safe direction - it
+// fails loudly instead of silently - but it has not been tested by issuing a
+// label to a controller that does not offer it.
 
 function controllerForFrame(frame) {
     for (var ci = 0; ci < CONTROLLERS.length; ci++) {

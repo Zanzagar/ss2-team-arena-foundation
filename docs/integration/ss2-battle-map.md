@@ -137,9 +137,14 @@ two-frame loop while `attacker.onEnterFrame` runs the phase machine.
 
 A further `Stop` sits at frame 51 (`DoAction@0x23d773`), immediately before
 `heroactions`. No label was verified between 28 and 52, so frames 38–51 are
-not reachable from any mapped path. Unverified: the project inspector does not
-decode `FrameLabel` (tag 43), so a ninth label in that gap cannot be excluded
-from the action stream alone; decoding tag 43 for sprite 862 would settle it.
+not reachable from any mapped path. This map previously left open whether a
+ninth label might hide in that gap, because the project inspector does not
+decode `FrameLabel` (tag 43). **Settled**: tag 43 was decoded for sprite 862 in
+[the arena route](ss2-arena-route.md) §Method note, and the sprite carries
+exactly eight labels, at frames 1, 5, 13, 20, 28, 52, 62 and 74 — the same
+eight already verified here from the action stream. There is no ninth. The
+decode used a throwaway out-of-repo reader, so the project's own tooling still
+cannot reproduce it; a `--labels` mode on `tools/inspect-swf.mjs` would.
 
 ### Buttons wired per controller frame
 
@@ -303,9 +308,21 @@ normalizes undefined status flags to `false` and reads the facing from the
 clip. Live captures also confirmed the `battlevalues` armour sums three
 times over (boot 4 + greaves 4 → 20; helmet 2 + shield 2 → 44; breastplate 1
 + gauntlet 1 → 21), the full physical roll order of a normal attack, the
-`attack_chances` normal formula (attack 3 vs defence 1 → chance 60, hit at
-diceroll 50), the deflection threshold with helmet 2 (97), the armour-first
-damage path, and the unconditional breastplate-stamina write.
+`attack_chances` normal formula (attack 3 vs defence 1 → chance 60, and a hit
+against the derived `rollneeded` 40), the deflection threshold with helmet 2
+(97), the armour-first damage path, and the unconditional breastplate-stamina
+write.
+
+**What a capture can and cannot confirm.** Every claim above rests on the
+observed channels: the ordered mutation trace, the semantic events, the result
+event, the state dumps, `attack_direction`, `fight_mode`, and the *number* of
+draws in the armed window. A capture never observes a roll's bounds or value —
+the wrapper's tap sits on `Math.random`, which takes no arguments, so each
+`roll` line is echoed from the injected tape, which was generated from the
+fixture under test (runtime-capture §What a match actually establishes). So
+where a runtime note in this map names a roll value, that value was *supplied*
+to the build; what the run measured is the outcome the build reached with it.
+Only the draw count constrains the roll stream itself.
 
 Observed data fields include:
 
@@ -334,7 +351,18 @@ hitpointsmax = herolevel * 10 + vitality * 20
 staminamax = 100 + stamina * 10
 movement_speed = clamp(round(speed * 1.5), 4, 60)
 armourclass_max = sum(the active per-piece defence values)
+character_xp = secondary_min_damage + secondary_max_damage * 10
+             + min_damage + max_damage * 20
+             + weapon_enchantment_damage * 10
+             + secondary_weapon_enchantment_damage * 10
+             + herolevel^2 + armourclass * 10 + 150
 ```
+
+`character_xp` is listed here because it is the input to the win reward
+(§Battle result and reward callbacks): the gold a fight pays out is a function
+of the *defeated* combatant's equipment, not the winner's level. Its offsets
+(`+0x3b82`–`+0x3c0c` in the same root frame 35 block) are cited from
+[the arena route](ss2-arena-route.md) §4, not re-read here.
 
 The armour piece multipliers assigned in this function are breastplate 16,
 helmet 10, shinguard 6, greaves 3, shoulderguard 8, gauntlet 5, boot 2, and
@@ -488,8 +516,15 @@ from any distance still resolves. The phase machine itself never consults the
 controller frame, so a driver that calls `getphase` directly can reach a label
 the current controller does not wire.
 
-The direction-30 grievous is reachable only through the `psyche_up` counter,
-whose full lifecycle is: the phase plays `psyche_up`, `psyche_up2` or
+Direction 30 has exactly two producers in the table above: the `psyche_up`
+counter and `cast_whirlwind`. Only the first is a player action with a
+`getphase` label — `cast_*` labels are consumed by the phase machine and have
+no callable entry point (§Spell and vanilla AI surface) — so `psyche_up` is the
+only route a capture can drive, and every controller wires it (above:
+`herolevel >= 7` on the warrior frames, `>= 3` on the archer frames).
+
+The `psyche_up` counter's full lifecycle is: the phase plays
+`psyche_up`, `psyche_up2` or
 `psyche_up3` for counter values 1, 2 and >= 3 (`+0x658a`, `+0x65b9`, `+0x65ef`);
 at 3 it fires the range-gated grievous and then writes
 `game_attacker.psyche_up = 1` at `+0x6738`; when the animation reports back
@@ -553,20 +588,58 @@ Every `remove_armour` call therefore consumes exactly one interceptable
 `piece != 0` test (`+0x0328` for helmet, and the matching tests in the other
 groups), so the sample is consumed even when the selected piece is not
 equipped and nothing is destroyed. A `cast_weaken_armour` cast consumes three
-of them. Directions outside 1–12 fall through all three group tests and
+of them.
+
+Directions outside 1–12 fall through all three group tests and
 consume nothing; the unmatched path reaches only the trailing
 `armourclass` / `armourclass_max` zero-clamp (`+0x0d4d`–`+0x0da4`). That is the
 byte-level reason the direction-30 grievous's unconditional `remove_armour`
 call cannot destroy equipment, as the earlier section suspected.
+
+**Runtime-resolved 2026-08-30.** The draw-before-the-equipped-test ordering
+above, and the physical path's `> 66` removal gate, are now measured — by the
+one probe pair whose arms are separated by the **draw count alone**. The pair
+`golden-probe-armour-removal-gate-{below,above}` stages a direction-5 hit
+against the unarmoured tutorial prisoner and moves only the injected removal
+roll, 66 against 67. Events, mutation trace and final state are identical; the
+67 arm draws one extra `randomBetween(1, 2)` in the mapped position. So 66 does
+not clear the gate and 67 does, and the group selection is drawn even against a
+defender who wears nothing in the selected group. Because that defender wears
+no armour, the extra draw is the *only* trace the call leaves — which is
+exactly why the pair is evidence where a repeated kill capture would not be.
 
 ### Attack roll dispatcher
 
 `checkattackroll` is an anonymous function assigned in overlay frame 52. It
 calls `attack_chances`, rolls `diceroll = randomBetween(1, 100)`, derives damage
 and a critical sample from `attack_direction`, then computes
-`rollneeded = 100 - chance`. Control flow is consistent with a hit when
-`diceroll >= rollneeded`; the miss branch runs only when
-`diceroll < rollneeded`.
+`rollneeded = 100 - chance`. A hit runs when `diceroll >= rollneeded`; the miss
+branch runs only when `diceroll < rollneeded`.
+
+**Runtime-resolved 2026-08-30.** That comparison used to be recorded here as
+only *consistent with* the control flow. Three promoted probe pairs settle it.
+Each pair stages one fight (attacker attack 1 against defender defence 0, so
+`ratio = 10/9`) twice and moves the injected `diceroll` by one, and the arms
+separate in an observed channel — `defender-blocked` against `defender-hurt`:
+
+| Band | Direction | `chance` | Miss at | Hit at | Goldens |
+| --- | --- | --- | --- | --- | --- |
+| quick | 1 | 73 | 26 | 27 | `golden-probe-quick-rollneeded-{miss,hit}` |
+| normal | 5 | 56 | 43 | 44 | `golden-probe-normal-rollneeded-{miss,hit}` |
+| power | 9 | 37 | 62 | 63 | `golden-probe-power-rollneeded-{miss,hit}` |
+
+The three smallest hitting rolls are exactly `100 - chance`, which is the
+inclusive reading. A strict `diceroll > rollneeded` would require chances
+74 / 57 / 38, and none of the factors in the table above yields any of them at
+this ratio — so the three pairs together decide the comparison's *polarity*,
+not merely three thresholds. The miss arms are also evidence for the ordering
+in the sentence above — a miss still consumes its band's damage and critical
+draws and nothing after them — but only to the strength of the draw count,
+which catches a run that drew *fewer* samples than the fixture models more
+readily than one that drew more (runtime-capture §Reading divergent traces).
+Note what these pairs do **not** establish: the injected dicerolls themselves
+are echoed back from the tape, never measured. What the capture measured is
+which side of the bracket each arm landed on.
 
 | `attack_direction` | Damage | Critical sample | Chance field |
 | --- | --- | --- | --- |
@@ -586,8 +659,21 @@ dispatches `defender_hurt("critical")`, and all other hits dispatch
 critical. Its threshold simplifies to
 `(100 - 1.5 * game_defender.helmet) + game_defender.greaves`; an inclusive
 1–100 roll at or above that threshold clears the critical, except that direction
-30 remains grievous. This counterintuitive operand mix also needs a fixture.
-A miss calls `defender_blocked()`.
+30 remains grievous. A miss calls `defender_blocked()`.
+
+**Runtime-resolved 2026-08-30 — the comparison, not the formula.** The
+inclusive "at or above" reading is now measured. The pair
+`golden-probe-deflection-threshold-{critical,cleared}` stages one fight against
+a defender wearing neither helmet nor greaves, so the threshold is
+`100 - 0 + 0` — the largest
+value the roll can take — and move only the deflection roll, 99 against 100.
+The arms are identical in mutations, final state and draw count; the single
+channel that moves is the dispatched method, `critical` against `normal`. A
+strictly-above reading would have predicted `critical` on both. This settles
+the boundary and nothing else: the operand mix in the threshold formula is
+still unobserved, and `candidate-deflection-threshold-discriminator`, whose
+injected roll 85 sits between the rival readings 83 < 85 < 87 against helmet 10
+and greaves 2, is still the fixture that would settle it.
 
 `defender_hurt` selects an animation label (`hurtN`, adjusted for ranged
 directions, or `knockback`), calls
@@ -835,8 +921,14 @@ The root `arena` instance is sprite 2249. Its result timeline includes:
 - `initbattle` frame 1, `combat` 71, `combat_won` 81,
   `combat_wonitem` 94, `combat_delay` 189, `combat_exp` 222, and
   `combat_lost` 250;
-- frame 88: attaches export 777, `fight_win_stuff`, and begins win/reward UI;
-- frames 189, 222, and 231: continue win item/reward/transition processing;
+- frame 88: attaches export 777, `fight_win_stuff`, and settles the win —
+  gold, battle counters, and the branch below;
+- frames 94–188 (`combat_wonitem`): the **tournament**-victory screen, not the
+  ordinary one; frame 182 attaches the `won_tournament` linkage at depth
+  100005 and the span stops at 188;
+- frames 189–221 (`combat_delay`): animation only; frame 222 removes
+  `won_tournament` and reveals `fight_win_stuff`; frame 231 awards experience
+  and detects a level-up; frame 249 stops on the reward panel;
 - frame 315: increments fights and losses, restores the hero, clears
   `battle_started`, sends tournament losses to game-over, or otherwise deducts
   `ceil(herolevel^2 * 50)` gold (clamped at zero) and displays
@@ -845,6 +937,44 @@ The root `arena` instance is sprite 2249. Its result timeline includes:
   and town-square transitions; button 778 is tournament-win progression;
 - the non-tournament loss panel embeds button 2244, whose release returns the
   root timeline to the town square.
+
+**Correction: the reward is not `ceil(herolevel^2 * 50)`.** An earlier revision
+of this map recorded that figure as the fight reward. It is the **loss
+deduction** — `goldlost = ceil(herolevel * herolevel * 50)`, clamped at zero,
+computed on the loss frame 315 (`+0x041d`–`+0x046a`). The win reward is a
+different formula on a different frame, and this map did not record it at all:
+
+```text
+hero.goldpieces += round(villain.character_xp
+                    * (100 + _global.crowd_interest) / 100);  // 2249/frame:88 +0x078c..+0x07ff
+if (hero.herolevel == 1) hero.goldpieces = 2500;              // +0x0867..+0x08b8
+```
+
+`character_xp` is a `battlevalues` derivation on the *defeated opponent*, not a
+stored field, and `crowd_interest` is derived from `herolevel` at
+`sprite:2224/frame:1` `+0x0f48` with a `RandomNumber(899)` opcode draw. Two
+consequences worth stating. The reward is a function of the **defeated**
+combatant's damage, enchantments, armour and level, not of the winner's —
+though generated opponents are built at the hero's own level, so in ordinary
+play the two track each other. And because `crowd_interest` comes from the
+opcode rather than `randomBetween`, **the win gold is neither recordable nor
+injectable** by a capture wrapper. The level-1 override is a flat set, not an
+addition.
+
+**Correction: an ordinary win skips frames 94–188.** This map previously
+described frames 94/189/222/231 as a single run of "win item/reward/transition
+processing". Frame 88 branches instead: with `tournament_in_progress` true and
+the post-win `tournament_ranking` reaching 1 it heads for the tournament
+screen, and in every other case — including every non-tournament win — it goes
+straight to `combat_delay` at 189. The label written on the tournament arm is
+`combatwonitem`, while the label defined on sprite 2249 is `combat_wonitem`, so
+that `gotoAndPlay` matches nothing and is inert; the playhead simply runs on
+from 88 into 94, which is where it was going. A reconstruction must not "fix"
+that into a real jump.
+
+All three of the above were decoded in [the leveled-gladiator arena
+route](ss2-arena-route.md) §4 and §7 against the same build and fingerprint;
+the offsets are cited from there rather than re-read here.
 
 Team mode must declare victory only when a team has no living combatants, wait
 for the final defeat animation, and invoke a one-shot result bridge. It must not
@@ -926,6 +1056,19 @@ fingerprint-keyed candidate schema, strict ordered `randomBetween` and
 `RandomNumber` tape, isolated physical-attack reconstruction, and one-shot
 result bridge. It does not change `classicStyleRules`, and its static candidates
 do not yet count as vanilla parity.
+
+**Eighteen goldens are promoted** as of 2026-08-30, all from the one staged
+tutorial fight: eight kills (`golden-prisoner-normal-kill*` at directions 5–8
+and `golden-prisoner-power-kill*` at 9–12 — both bands complete; the quick band
+has no kill golden yet) and ten `golden-probe-*` in five pairs. The probes are
+the reason four claims in this map moved from static reading to measurement:
+the dispatcher's `>=` hit comparison and each melee band's `rollneeded`
+(§Attack roll dispatcher), the inclusive critical-deflection boundary (same
+section), and the `> 66` removal gate with its draw-before-the-equipped-test
+ordering (§Spell-path reuse of `attack_direction`). Each pair moves one
+injected value and is predicted to separate in a channel the capture genuinely
+observes; the staging behind them is in
+[the capture staging guide](ss2-capture-staging.md).
 
 ## Next checkpoint
 
