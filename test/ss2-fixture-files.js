@@ -24,7 +24,8 @@ export const SS2_FIXTURE_FILES = [
   "candidate-bombard-threshold.json",
   "candidate-duel-absorbed-normal-hit.json",
   "candidate-duel-firstblood-normal-kill.json",
-  "candidate-prisoner-normal-kill.json"
+  "candidate-prisoner-normal-kill.json",
+  "candidate-prisoner-normal-kill-dir8.json"
 ];
 
 export async function loadSs2Fixtures() {
