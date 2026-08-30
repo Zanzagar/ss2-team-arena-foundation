@@ -402,53 +402,33 @@ test("loadFamily refuses a family prefix no candidate matches", async () => {
   );
 });
 
-test("computeCoverage pins the current prisoner-normal-kill evidence state", async () => {
+test("computeCoverage reports the prisoner-normal-kill family as fully promoted", async () => {
   const coverage = await computeCoverage(FAMILY);
 
   assert.equal(coverage.family, FAMILY);
-  assert.deepEqual(coverage.rows.map(summarize), [
-    {
-      direction: 5,
-      fixtureId: "candidate-prisoner-normal-kill-dir5",
-      goldenId: "golden-prisoner-normal-kill-dir5",
-      hasGolden: true,
-      observationIds: ["obs-camp1", "obs-nav6"],
-      sessionCount: 2,
-      promotable: false
-    },
-    {
-      direction: 6,
-      fixtureId: "candidate-prisoner-normal-kill-dir6",
-      goldenId: "golden-prisoner-normal-kill-dir6",
-      hasGolden: true,
-      // Three matching observations from three independent sessions: one more
-      // than the two the golden was promoted on.
-      observationIds: ["obs-camp2", "obs-diag", "obs-gold3"],
-      sessionCount: 3,
-      promotable: false
-    },
-    {
-      direction: 7,
-      fixtureId: "candidate-prisoner-normal-kill",
-      goldenId: "golden-prisoner-normal-kill",
-      hasGolden: true,
-      observationIds: ["obs-20260830-t1", "obs-camp3"],
-      sessionCount: 2,
-      promotable: false
-    },
-    {
-      direction: 8,
-      fixtureId: "candidate-prisoner-normal-kill-dir8",
-      goldenId: "golden-prisoner-normal-kill-dir8",
-      hasGolden: true,
-      observationIds: ["obs-20260830-u1", "obs-camp4"],
-      sessionCount: 2,
-      promotable: false
-    }
-  ]);
-
-  const dir6 = coverage.rows.find((row) => row.direction === 6);
-  assert.equal(new Set(dir6.observations.map((o) => o.sessionId)).size, 3);
+  // Asserted as invariants rather than as a roster of observation ids. Every
+  // campaign round adds evidence to whichever direction the game happened to
+  // draw, so pinning the exact set would make this test fail on success —
+  // which it did, the first time a later campaign filed three more matching
+  // observations against this family.
+  assert.deepEqual(coverage.rows.map((row) => row.direction), [5, 6, 7, 8]);
+  for (const row of coverage.rows) {
+    assert.equal(row.hasGolden, true, `direction ${row.direction} lost its golden`);
+    assert.equal(row.promotable, false, `direction ${row.direction} is golden and cannot be re-promoted`);
+    // The gate's substance: at least two matching observations, from at least
+    // as many distinct sessions as there are observations.
+    assert.ok(row.observations.length >= 2, `direction ${row.direction} has too little evidence`);
+    assert.equal(
+      row.sessionCount,
+      new Set(row.observations.map((observation) => observation.sessionId)).size
+    );
+    assert.ok(row.sessionCount >= 2, `direction ${row.direction} lacks independent sessions`);
+  }
+  // Direction 7 is the family member whose fixture id carries no dirN suffix.
+  assert.equal(
+    coverage.rows.find((row) => row.direction === 7).fixtureId,
+    "candidate-prisoner-normal-kill"
+  );
   // Every cited observation names the file it was actually read from, and the
   // file name is not the observation id.
   for (const row of coverage.rows) {
