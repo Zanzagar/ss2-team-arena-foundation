@@ -50,7 +50,11 @@ Root frame 221 does the following:
 
 1. Creates `_root.arena.gladiators` as an empty movie clip.
 2. Attaches the `overlay` linkage at depth 40000 and an `overlay_villain`
-   linkage at depth 40001.
+   linkage at depth 40001 — both as children of `_root.arena.gladiators`
+   with instance names `overlay` and `overlay_villain` (byte-verified
+   2026-08-30 at block `+0x04cf`/`+0x04f6`: `_root.arena.gladiators
+   .attachMovie("overlay", "overlay", 40000)`), so the live controller path
+   is `_root.arena.gladiators.overlay`.
 3. Attaches two `hero_battle` linkage instances beneath
    `_root.arena.gladiators`: `hero` at depth 301 and `villain` at depth 300.
 4. Calls `skincharacter` with `_root.game.hero` and `_root.game.villain`.

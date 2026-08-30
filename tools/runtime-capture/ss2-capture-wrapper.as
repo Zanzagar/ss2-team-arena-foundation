@@ -151,9 +151,9 @@ var resultSeen = false;
 
 function gameRoot() { return _level1; }
 function gameObject(side) { return gameRoot().game[side == "hero" ? "hero" : "villain"]; }
-// VALIDATION ITEM: confirm the overlay controller instance path on the live
-// timeline (the battle map records the linkage, not the instance name).
-function overlayClip() { return gameRoot().arena.overlay; }
+// Byte-verified: root frame 221 runs
+// _root.arena.gladiators.attachMovie("overlay", "overlay", 40000).
+function overlayClip() { return gameRoot().arena.gladiators.overlay; }
 
 function dumpSide(kind, side) {
     var source = gameObject(side);

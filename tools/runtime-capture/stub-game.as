@@ -42,10 +42,12 @@ this.createEmptyMovieClip("arena", 1);
 arena.createEmptyMovieClip("gladiators", 2);
 arena.gladiators.createEmptyMovieClip("hero", 301);
 arena.gladiators.createEmptyMovieClip("villain", 300);
-arena.createEmptyMovieClip("overlay", 3);
+// Matches the byte-verified vanilla path: the overlay controller is a child
+// of arena.gladiators, attached at depth 40000.
+arena.gladiators.createEmptyMovieClip("overlay", 40000);
 
 var stubRoot = this;
-var ov = arena.overlay;
+var ov = arena.gladiators.overlay;
 ov.attack_direction = 5;
 
 ov.randomBetween = function (a, b) {
