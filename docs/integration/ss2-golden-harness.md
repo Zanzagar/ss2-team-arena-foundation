@@ -86,19 +86,32 @@ are ignored.
 
 ## Promotion procedure
 
-1. Keep the installed SWF read-only and recheck its hash.
+Steps 4–6 below are fully tooled, and the whole procedure becomes executable
+end to end once a raw capture trace exists; producing that trace (steps 2–3)
+is still blocked on an approved local AVM1 player and the instrumentation
+wrapper. See [the runtime-capture workflow](ss2-runtime-capture.md) for the
+session protocol, trace grammar, and CLI.
+
+1. Keep the installed SWF read-only and recheck its hash
+   (`tools/capture-session.mjs verify-install`) before and after every
+   session; both attestations are required record fields.
 2. Prepare a controlled 1v1 state and an explicit sample tape without saving
    original assets or extracted code.
 3. Record only numeric inputs, ordered call-site metadata, mutations, and
-   semantic events.
-4. Repeat the observation and compare it with the candidate.
-5. If exact, copy the independently authored JSON to a future runtime-goldens
-   directory, change its classification/provenance, and record observation date,
-   capture-tool version, per-run observation IDs and digests, repetition count,
-   and the capture-manifest SHA-256.
-6. If it differs, retain both traces, correct the isolated candidate, and add a
-   regression before touching team rules.
+   semantic events (the raw JSONL trace stays in ignored `captures/`).
+4. Normalize with `capture-session.mjs ingest`, then compare with the
+   candidate via `capture-session.mjs verify`; repeat in an independent
+   session.
+5. If exact at least twice across at least two sessions,
+   `capture-session.mjs promote` writes the golden into
+   `test/fixtures/ss2-1v1-golden/` with `licensed-observation` provenance,
+   observation date, capture-tool version, per-run observation IDs and
+   digests, repetition count, and the capture-manifest SHA-256 — all enforced
+   by `src/golden/promote-1v1-golden.js`.
+6. If it differs, the divergence report is preserved under
+   `test/fixtures/ss2-1v1-divergences/`; correct the isolated candidate and
+   add a regression before touching team rules.
 
-The next implementation stage is runtime promotion of the boundary, overflow,
-critical, status, and result candidates, followed by the team-aware SS2 adapter
-described in the [roadmap](../roadmap.md).
+The next implementation stage is running the first controlled captures for the
+boundary, overflow, critical, status, and result candidates, followed by the
+team-aware SS2 adapter described in the [roadmap](../roadmap.md).

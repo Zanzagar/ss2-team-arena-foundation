@@ -190,7 +190,7 @@ function assertCombatantShape(combatant, path) {
   }
 }
 
-function assertNoAssetPayload(value, path = "fixture") {
+export function assertNoAssetPayload(value, path = "fixture") {
   if (typeof value === "string") {
     if (
       value.length > 512 ||
@@ -210,6 +210,39 @@ function assertNoAssetPayload(value, path = "fixture") {
   for (const [key, item] of Object.entries(value)) assertNoAssetPayload(item, `${path}.${key}`);
 }
 
+function rethrowAs(ErrorClass, run) {
+  try {
+    run();
+  } catch (error) {
+    if (ErrorClass !== GoldenFixtureValidationError && error instanceof GoldenFixtureValidationError) {
+      throw new ErrorClass(error.message, { cause: error });
+    }
+    throw error;
+  }
+}
+
+/** Shared ordered-mutation-trace shape check for fixtures and observations. */
+export function assertSs2MutationTraceShape(trace, path = "mutationTrace", ErrorClass = GoldenFixtureValidationError) {
+  rethrowAs(ErrorClass, () => {
+    if (!Array.isArray(trace)) {
+      throw new GoldenFixtureValidationError(`${path} must be an ordered array.`);
+    }
+    trace.forEach((entry, index) => {
+      if (!isPlainObject(entry)) throw new GoldenFixtureValidationError(`${path}[${index}] must be an object.`);
+      assertExactKeys(entry, MUTATION_TRACE_KEYS, `${path}[${index}]`);
+      if (
+        entry.sequence !== index + 1 ||
+        typeof entry.path !== "string" ||
+        !/^\/(?:hero|villain|result)(?:\/[a-z][a-z0-9_]*)?$/.test(entry.path) ||
+        typeof entry.reason !== "string" ||
+        !/^[a-z][a-z-]{0,63}$/.test(entry.reason)
+      ) {
+        throw new GoldenFixtureValidationError(`${path}[${index}] has invalid ordering or metadata.`);
+      }
+    });
+  });
+}
+
 function assertExpectedShape(expected) {
   if (!isPlainObject(expected)) throw new GoldenFixtureValidationError("expected must be an object.");
   assertExactKeys(expected, EXPECTED_KEYS, "expected");
@@ -219,21 +252,39 @@ function assertExpectedShape(expected) {
   if (!Array.isArray(expected.mutationTrace)) {
     throw new GoldenFixtureValidationError("expected.mutationTrace must be an ordered array.");
   }
-  expected.mutationTrace.forEach((entry, index) => {
-    if (!isPlainObject(entry)) throw new GoldenFixtureValidationError(`mutationTrace[${index}] must be an object.`);
-    assertExactKeys(entry, MUTATION_TRACE_KEYS, `mutationTrace[${index}]`);
-    if (
-      entry.sequence !== index + 1 ||
-      typeof entry.path !== "string" ||
-      !/^\/(?:hero|villain|result)(?:\/[a-z_]+)?$/.test(entry.path) ||
-      typeof entry.reason !== "string" ||
-      !/^[a-z][a-z-]{0,63}$/.test(entry.reason)
-    ) {
-      throw new GoldenFixtureValidationError(`mutationTrace[${index}] has invalid ordering or metadata.`);
-    }
-  });
+  assertSs2MutationTraceShape(expected.mutationTrace, "mutationTrace");
   if (!isPlainObject(expected.state)) throw new GoldenFixtureValidationError("expected.state must be an object.");
   assertExactKeys(expected.state, ["hero", "result", "villain"], "expected.state");
+}
+
+/** Shared 1v1 scenario shape check for fixtures and observations. */
+export function assertSs2ScenarioShape(scenario, path = "scenario", ErrorClass = GoldenFixtureValidationError) {
+  rethrowAs(ErrorClass, () => {
+    if (!isPlainObject(scenario)) {
+      throw new GoldenFixtureValidationError(`${path} must be an object containing hero and villain.`);
+    }
+    assertAllowedKeys(scenario, SCENARIO_KEYS, path);
+    if (scenario.attackerSide !== "hero" && scenario.attackerSide !== "villain") {
+      throw new GoldenFixtureValidationError(`${path}.attackerSide must be hero or villain.`);
+    }
+    if (!Number.isSafeInteger(scenario.attackDirection)) {
+      throw new GoldenFixtureValidationError(`${path}.attackDirection must be an integer.`);
+    }
+    if (scenario.result !== null) {
+      throw new GoldenFixtureValidationError("A one-action 1v1 fixture must start with result=null.");
+    }
+    if (scenario.transient !== undefined) {
+      if (
+        !isPlainObject(scenario.transient) ||
+        Object.keys(scenario.transient).length !== 1 ||
+        !Number.isFinite(scenario.transient.criticalhit)
+      ) {
+        throw new GoldenFixtureValidationError(`${path}.transient may contain only numeric criticalhit.`);
+      }
+    }
+    assertCombatantShape(scenario.hero, `${path}.hero`);
+    assertCombatantShape(scenario.villain, `${path}.villain`);
+  });
 }
 
 function assertJsonValue(value, path, ancestors) {
@@ -370,30 +421,7 @@ export function validateSs2OneVsOneFixture(fixture) {
   } else {
     throw new GoldenFixtureValidationError("classification must be candidate or golden.");
   }
-  if (!isPlainObject(fixture.scenario)) {
-    throw new GoldenFixtureValidationError("scenario must be an object containing hero and villain.");
-  }
-  assertAllowedKeys(fixture.scenario, SCENARIO_KEYS, "scenario");
-  if (fixture.scenario.attackerSide !== "hero" && fixture.scenario.attackerSide !== "villain") {
-    throw new GoldenFixtureValidationError("scenario.attackerSide must be hero or villain.");
-  }
-  if (!Number.isSafeInteger(fixture.scenario.attackDirection)) {
-    throw new GoldenFixtureValidationError("scenario.attackDirection must be an integer.");
-  }
-  if (fixture.scenario.result !== null) {
-    throw new GoldenFixtureValidationError("A one-action 1v1 fixture must start with result=null.");
-  }
-  if (fixture.scenario.transient !== undefined) {
-    if (
-      !isPlainObject(fixture.scenario.transient) ||
-      Object.keys(fixture.scenario.transient).length !== 1 ||
-      !Number.isFinite(fixture.scenario.transient.criticalhit)
-    ) {
-      throw new GoldenFixtureValidationError("scenario.transient may contain only numeric criticalhit.");
-    }
-  }
-  assertCombatantShape(fixture.scenario.hero, "scenario.hero");
-  assertCombatantShape(fixture.scenario.villain, "scenario.villain");
+  assertSs2ScenarioShape(fixture.scenario, "scenario");
   if (!Array.isArray(fixture.samples)) throw new GoldenFixtureValidationError("samples must be an array.");
   assertJsonSafe(fixture.build, "build");
   assertJsonSafe(fixture.provenance, "provenance");

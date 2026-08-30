@@ -5,3 +5,5 @@ coverage/
 .tools/
 local-mod-work/*
 !local-mod-work/README.md
+captures/*
+!captures/README.md

@@ -58,6 +58,22 @@ executes those static candidates with strict, named RNG samples. Candidate
 fixtures are deliberately separate from runtime-observed goldens and from the
 shared 1–3 combatant engine.
 
+The [controlled runtime-capture workflow](docs/integration/ss2-runtime-capture.md)
+turns instrumented licensed-build sessions into digested observation records
+and promotes a candidate only after at least two matching observations from
+independent sessions:
+
+```powershell
+node tools/capture-session.mjs verify-install
+node tools/capture-session.mjs ingest --trace <raw.jsonl> --fixture <candidate.json> --out <observation.json>
+node tools/capture-session.mjs verify --fixture <candidate.json> --observation <observation.json>
+node tools/capture-session.mjs promote --fixture <candidate.json> --manifest <manifest.json> --observation <obs1.json> --observation <obs2.json>
+```
+
+Raw traces stay in ignored `captures/`; divergent observations are preserved
+under `test/fixtures/ss2-1v1-divergences/` and drive candidate corrections.
+Live capture still needs an approved local AVM1 player (none is installed).
+
 The project includes a read-only AVM1 metadata inspector:
 
 ```powershell

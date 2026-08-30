@@ -11,7 +11,7 @@ of team scope or a separate game mode architecture.
 | 0. Deterministic foundation | Asset-free 1–3 combatants per team, AI, hot-seat/remote controller identities, replay, wire state, and state hashes | complete |
 | 1. Licensed-build map | Battle entry, state objects, RNG, formulas, spells, results, clips, and Collection mod route | complete for the fingerprinted build |
 | 2. 1v1 parity harness | Fingerprint-keyed static candidates, strict ordered RNG/mutation traces, isolated rule candidate, acknowledgement-token result bridge | complete (static candidates) |
-| 3. Runtime golden capture | Repeat controlled attacks in the licensed build and promote matching candidates to runtime-observed goldens | next |
+| 3. Runtime golden capture | Repeat controlled attacks in the licensed build and promote matching candidates to runtime-observed goldens | in progress — observation/ingest/promotion pipeline and CLI landed with tests; live captures blocked on an approved local AVM1 player (see `integration/ss2-runtime-capture.md`) |
 | 4. SS2 adapter and UI seam | Convert vanilla combatants to canonical state; bind events to fighter clips, panels, and final result acknowledgement | planned |
 | 5. 2v2 campaign co-op | Player-controlled allies, AI fill, two-team elimination, campaign roster/save/reward integration, and a four-slot arena | planned |
 | 6. 3v3 campaign co-op | Up to three allied controllers or AI fills, six-slot arena, team targeting, persistence, and balance passes | planned |

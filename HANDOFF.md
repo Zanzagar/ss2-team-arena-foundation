@@ -29,9 +29,15 @@ intentional placeholders until they can be validated against the licensed game.
 The fingerprinted Steam build now has a read-only battle map and an isolated
 asset-free 1v1 candidate harness with strict ordered RNG fixtures. Static
 candidates are not runtime goldens and do not replace the placeholder engine
-rules. The next technical gate is controlled licensed 1v1 observation, followed
-by the SS2 state/UI adapter. The delivery target remains 2v2 and 3v3 cooperative
-campaign support; see `docs/roadmap.md`.
+rules. The Stage 3 runtime-capture pipeline is also in place: observation
+records with digests, raw-trace ingestion, a two-independent-observation
+promotion gate, preserved divergence reports, and the
+`tools/capture-session.mjs` CLI, all documented in
+`docs/integration/ss2-runtime-capture.md`. The next technical gate is running
+the first controlled licensed 1v1 captures (blocked on approving a local AVM1
+player such as Ruffle), followed by the SS2 state/UI adapter. The delivery
+target remains 2v2 and 3v3 cooperative campaign support; see
+`docs/roadmap.md`.
 
 ## Keep the project lawful and reversible
 

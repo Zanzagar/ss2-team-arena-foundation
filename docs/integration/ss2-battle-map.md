@@ -447,6 +447,9 @@ do not yet count as vanilla parity.
 
 ## Next checkpoint
 
+The controlled capture, verification, and promotion pipeline for these steps
+is specified in [the runtime-capture workflow](ss2-runtime-capture.md).
+
 1. Observe the boundary, miss, armour overflow/equality, status, critical, and
    result candidates in controlled licensed 1v1 runs.
 2. Finish unresolved spell/status duration and action-to-animation ordering.
