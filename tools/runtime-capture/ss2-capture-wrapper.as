@@ -356,15 +356,17 @@ function hookBattle() {
 
     registerSlot(function () { return overlayClip(); }, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
     registerSlot(function () { return gameRoot(); }, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));
-    // Every action begins with getphase(whatsdoing) - byte-verified from
-    // the phase-button handlers - so arming keys on it; melee actions also
-    // pass through checkattackroll, whose return closes the trace early.
+    // getphase(whatsdoing) begins every action; it only contributes the
+    // phase_action metadata line. Recording arms at checkattackroll - the
+    // roll/mutation scope proven against live melee captures. Range actions
+    // that skip checkattackroll (e.g. taunts) roll through the raw
+    // RandomNumber opcode and are observed to be uncapturable by function
+    // wraps; they are out of tape scope by design.
     registerSlot(function () { return overlayClip(); }, "getphase", function (original) {
         return function () {
             var previous = currentHook;
             currentHook = "getphase";
             if (!actionCaptured) {
-                beginAction();
                 emit({ t: "var", name: "phase_action", value: String(arguments[0]) });
             }
             var result = original.apply(this, arguments);

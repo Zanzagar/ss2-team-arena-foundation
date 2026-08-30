@@ -142,7 +142,8 @@ this.onEnterFrame = function () {
         ov.damagecharacter = buildDamagecharacter();
     }
     if (stubFrame == 9) {
-        // Real actions arm at getphase before any roll happens.
+        // getphase contributes the phase_action metadata line; recording
+        // itself arms at checkattackroll.
         ov.getphase("normal_attack");
     }
     if (stubFrame == 10) {
