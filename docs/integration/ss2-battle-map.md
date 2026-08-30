@@ -227,7 +227,12 @@ directions, or `knockback`), calls
 `damagecharacter(defender, attacker, game_defender, game_attacker,
 damage_method, attack_direction)`, then plays the defender animation.
 Physical knockback force is signed
-`damage + game_attacker.strength * 6` and forced to a minimum magnitude of 20.
+`damage + game_attacker.strength * 6` and forced to a minimum magnitude of
+20 — where `damage` is the timeline-aliased register read AFTER the
+armour-overflow rewrite (byte-verified 2026-08-30: the force reads
+`this.damage` at `+0x1afd`/`+0x1b60`, the same storage rewritten to the
+overflow remainder at `+0x1848`), so an armour-overflowing hit knocks back
+with the overflow remainder, not the selected damage.
 A defender facing left receives the positive force; other mapped facing values
 receive the negative force.
 A magnitude above 80 selects the knockback animation, but the unbounded force is
@@ -412,9 +417,11 @@ the baseline additions and cost accounting above.
 ## Battle result and reward callbacks
 
 `death(whichcharacter, how_died)` in overlay frame 52 is the immediate combat
-result boundary. It clears burning/frozen/poison/life-steal and taunt flags on
-both vanilla objects, assigns the death sequence, then compares the defeated
-clip with `arena.gladiators.villain` or `.hero`:
+result boundary. It clears the status flags on both vanilla objects in the
+byte-verified order frozen, burning, poison, life_stolen — the hero's group
+first, then the villain's — followed by taunted1 (hero, villain) and
+taunted2 (hero, villain), assigns the death sequence, then compares the
+defeated clip with `arena.gladiators.villain` or `.hero`:
 
 - defeated villain -> `this.gotoAndPlay("combatwon")` on the overlay controller;
 - defeated hero -> `this.gotoAndPlay("combatlost")` on the overlay controller.

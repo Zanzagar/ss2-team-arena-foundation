@@ -51,7 +51,7 @@ The operator cannot freely set opponent stats. Two supported routes:
 | `candidate-power-critical-armour-bypass` | 9–12 (power attack) | villain breastplate 1 (armour 16); critical sample must survive at 20 | power sub-direction is an opcode roll |
 | `candidate-taunt-charisma-floor` | 20 (taunt) | hero charisma 5 vs villain charisma 30 | finding a charisma-30 opponent; floor roll needs the tape |
 | `candidate-armour-removal-debris` | 5–8 | villain helmet 1 + shield 2 (armour 34) | debris opcode rolls are unobservable (excluded from matching) |
-| `candidate-grievous-knockback` | 30 (grievous) | hero strength 9, 2/10 weapon; villain breastplate 1, 50 hp | which player action produces direction 30 is not yet mapped — identify it before staging |
+| `candidate-grievous-knockback` | 30 (grievous) | hero strength 9, 2/10 weapon; villain breastplate 1, 50 hp with armour worn down to 4 of 16 mid-battle (the knockback force uses the overflow remainder) | which player action produces direction 30 is not yet mapped — identify it before staging |
 | `candidate-snipe-shield-boost` | 22 (snipe) | hero bow drawn with shield 10 equipped (shield contributes no armour while `using_bow`) | ammunition and range staging; confirm shield stays equipped while sniping |
 | `candidate-deflection-threshold-discriminator` | 5–8 | villain helmet 10 + greaves 2 (armour 106); needs injected critical 20 and deflection 85 | the roll between rival thresholds (83 < 85 < 87) is the whole point — inject exactly |
 | `candidate-frozen-enchantment-proc` | 5–8 | hero weapon enchantment type 3 potency 5 | none |

@@ -9,7 +9,9 @@
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
-const STATUS_FIELDS = Object.freeze(["burning", "frozen", "poison", "life_stolen"]);
+// Byte-verified death() clear order: frozen, burning, poison, life_stolen —
+// hero's group first, then villain's, then taunted1/taunted2 per field.
+const STATUS_FIELDS = Object.freeze(["frozen", "burning", "poison", "life_stolen"]);
 const ENCHANTMENT_STATUS = Object.freeze({
   2: "burning",
   3: "frozen",
@@ -482,7 +484,10 @@ export function resolveSs2PhysicalAttackCandidate(scenario, rolls) {
   if ((direction >= 5 && direction <= 12) || direction === 30) {
     const knockbackRoll = rolls.randomBetween("knockback-roll", 1, 4);
     if (knockbackRoll > 3 || direction === 30) {
-      const magnitude = Math.max(20, selectedDamage + attacker.strength * 6);
+      // Byte-verified: the vanilla force reads the timeline-aliased damage
+      // register AFTER the armour-overflow rewrite, so an overflowing hit
+      // knocks back with the overflow remainder, not the selected damage.
+      const magnitude = Math.max(20, vanillaDamageRegister + attacker.strength * 6);
       const force = defender.gladiator_dir === "left" ? magnitude : -magnitude;
       knockback = { roll: knockbackRoll, force, animation: Math.abs(force) > 80 };
     } else {

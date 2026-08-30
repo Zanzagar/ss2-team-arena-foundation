@@ -44,7 +44,7 @@
       "staminaleft": 20,
       "staminamax": 100,
       "gladiator_dir": "left",
-      "armourclass": 16,
+      "armourclass": 4,
       "armourclass_max": 16,
       "breastplate": 1
     }
@@ -104,8 +104,8 @@
       "effectiveDamageMethod": "grievous"
     },
     "mutation": {
-      "armourDamage": 16,
-      "hitpointDamage": 26,
+      "armourDamage": 4,
+      "hitpointDamage": 38,
       "staminaBonus": 1,
       "armourRemovalRoll": 10,
       "armourRemovals": [
@@ -117,7 +117,7 @@
       ],
       "knockback": {
         "roll": 2,
-        "force": 96,
+        "force": 92,
         "animation": true
       },
       "enchantmentRoll": 100,
@@ -127,15 +127,15 @@
       {
         "sequence": 1,
         "path": "/villain/armourclass",
-        "before": 16,
-        "after": -26,
+        "before": 4,
+        "after": -38,
         "reason": "physical-damage"
       },
       {
         "sequence": 2,
         "path": "/villain/hitpoints",
         "before": 50,
-        "after": 24,
+        "after": 12,
         "reason": "physical-damage"
       },
       {
@@ -148,7 +148,7 @@
       {
         "sequence": 4,
         "path": "/villain/armourclass",
-        "before": -26,
+        "before": -38,
         "after": 0,
         "reason": "stat-clamp"
       }
@@ -176,7 +176,7 @@
         "shield": 0
       },
       "villain": {
-        "hitpoints": 24,
+        "hitpoints": 12,
         "armourclass": 0,
         "armourclass_max": 16,
         "staminaleft": 21,

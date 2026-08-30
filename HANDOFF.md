@@ -27,7 +27,7 @@ identities, replays, wire snapshots, and state hashes. Its formulas are
 intentional placeholders until they can be validated against the licensed game.
 
 The fingerprinted Steam build now has a read-only battle map and an isolated
-asset-free 1v1 candidate harness with eleven strict ordered-RNG fixtures.
+asset-free 1v1 candidate harness with fifteen strict ordered-RNG fixtures.
 Static candidates are not runtime goldens and do not replace the placeholder
 engine rules. The Stage 3 runtime-capture pipeline is in place: observation
 records with digests, raw-trace ingestion, a two-independent-observation
