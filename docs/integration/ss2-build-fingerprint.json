@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-08-29",
+  "source": "licensed-local-steam-install",
+  "steam": {
+    "appId": 1055430,
+    "buildId": 24807725,
+    "depotId": 1055432,
+    "depotManifest": "8233185473219625516"
+  },
+  "collection": {
+    "airApplicationId": "com.game.whiskeybarrelstudios.swordsandsandalsclassic",
+    "airApplicationVersion": "1.7.2",
+    "launcher": {
+      "relativePath": "swords_and_sandals_classic.swf",
+      "bytes": 99259496,
+      "sha256": "6A58E0843967AF5B781133E878A8E8DEB66F0D9EA265D0AAC8A0A4E53712D397",
+      "swfVersion": 51,
+      "actionScriptVm": "AVM2"
+    },
+    "ss2": {
+      "relativePath": "swf/swords_sandals2_download.swf",
+      "bytes": 7586504,
+      "sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA",
+      "signature": "FWS",
+      "swfVersion": 11,
+      "actionScriptVm": "AVM1",
+      "frameRate": 30,
+      "rootFrameCount": 270,
+      "actionBlocks": 1049,
+      "sprites": 740,
+      "exports": 502,
+      "namedInstances": 671,
+      "editTextFields": 256,
+      "doActionTags": 644,
+      "doInitActionTags": 63,
+      "doAbcTags": 0
+    }
+  },
+  "inspection": {
+    "originalsModified": false,
+    "gameLaunched": false,
+    "scriptsOrAssetsExported": false,
+    "originalFilesCopiedIntoProject": false
+  }
+}

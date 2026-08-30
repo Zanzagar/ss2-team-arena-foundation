@@ -40,3 +40,8 @@ play on one rules path and avoids trusting client-side damage rolls.
 With a supplied licensed SS2 build, complete a 1v1 adapter first and compare it
 with vanilla combat. Then render two static allies, progress to 2v2 with the
 second ally controlled by AI, and only then enable 3v3 and remote clients.
+
+The licensed build's read-only static map is now recorded in
+[the SS2 battle map](integration/ss2-battle-map.md). Its formulas are evidence
+for the 1v1 golden harness; they must not replace the prototype rules until the
+observed roll and mutation order is verified end to end.

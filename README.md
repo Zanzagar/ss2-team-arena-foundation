@@ -18,8 +18,14 @@ them isolated so a licensed SS2 adapter can substitute verified formulas.
 ## Run the verification suite
 
 ```powershell
-Set-Location C:\Users\cjh5690.PSU\Documents\Codex\2026-08-29\would-it-be-possible-if-at\outputs\ss2-team-arena-foundation
 npm test
+```
+
+There are no package dependencies. If Node is installed but the `npm`
+launcher is unavailable, the exact package test entry can also be run with:
+
+```powershell
+node test/engine.test.js
 ```
 
 ## Goal status
@@ -33,3 +39,26 @@ npm test
 
 See [the adapter contract](docs/ss2-adapter-contract.md) for the safe next
 reverse-engineering step once a licensed SS2 installation is available.
+
+## Licensed-build integration checkpoint
+
+The first read-only map is in
+[the SS2 battle map](docs/integration/ss2-battle-map.md), with the exact local
+build recorded in
+[the asset-free fingerprint](docs/integration/ss2-build-fingerprint.json).
+It maps the battle entry, hero/villain state split, RNG, hit/damage/spell path,
+result transition, UI clips, and Collection mod-loading route. Reconstructed
+formulas remain evidence for golden tests, not replacements for the prototype
+rules yet.
+
+The project includes a read-only AVM1 metadata inspector:
+
+```powershell
+node tools/inspect-swf.mjs <path-to-licensed-ss2-swf>
+node tools/inspect-swf.mjs <path-to-licensed-ss2-swf> --function '^attack_chances$'
+```
+
+Portable FFDec can be installed under ignored `.tools/` with
+`tools/install-ffdec.ps1` and launched with `tools/ffdec.ps1`. Do not export,
+copy, commit, or redistribute original game scripts or assets. Use
+`local-mod-work/` only for independently authored local experiments.
