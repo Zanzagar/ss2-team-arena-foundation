@@ -29,7 +29,9 @@ powershell -File tools\runtime-capture\run-campaign.ps1 `
 #>
 [CmdletBinding()]
 param(
-    # Maximum number of sessions to run. A round takes roughly 70 seconds.
+    # Maximum number of sessions to run. A round takes roughly 24 seconds at
+    # the default frame rate, of which about 7 is fixed setup (hash
+    # verification of the installed build, plus the wrapper compile).
     [int] $Rounds = 4,
     # Candidate family: every fixture whose id starts candidate-<Family>.
     [string] $Family = 'prisoner-normal-kill',
@@ -42,7 +44,13 @@ param(
     [switch] $StopWhenComplete,
     [int] $LaunchTimeoutSec = 300,
     [int] $NavigateTimeoutSec = 180,
-    [int] $BattleTimeoutSec = 180
+    [int] $BattleTimeoutSec = 180,
+    # Locked player frame rate. The prologue the navigator has to sit through
+    # is ~84% of an unattended run, and this is a time dilation rather than a
+    # frame shortcut - every frame still executes in order - so it is safe in
+    # a way that jumping the playhead is not. Validated at 120: two sessions
+    # at 4x still matched their candidates exactly, with the same draw count.
+    [int] $FrameRate = 120
 )
 
 $ErrorActionPreference = 'Stop'
@@ -107,7 +115,7 @@ for ($round = 1; $round -le $Rounds; $round++) {
             -FixturePath $seedFixture -SessionId $sessionId -ObservationId $observationId `
             -Autopilot $Autopilot -Navigate $Navigate -SkipPipeline `
             -LaunchTimeoutSec $LaunchTimeoutSec -NavigateTimeoutSec $NavigateTimeoutSec `
-            -BattleTimeoutSec $BattleTimeoutSec
+            -BattleTimeoutSec $BattleTimeoutSec -FrameRate $FrameRate
         if ($LASTEXITCODE -ne 0) { throw "run-capture.ps1 exited $LASTEXITCODE" }
     } catch {
         Write-Host "Round $round did not produce a session: $($_.Exception.Message)"
