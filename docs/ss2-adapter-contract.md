@@ -39,9 +39,15 @@ play on one rules path and avoids trusting client-side damage rolls.
 
 With a supplied licensed SS2 build, complete a 1v1 adapter first and compare it
 with vanilla combat. Then render two static allies, progress to 2v2 with the
-second ally controlled by AI, and only then enable 3v3 and remote clients.
+second ally controlled by AI, then enable 2v2 campaign co-op, 3v3 campaign
+co-op, and remote clients. These stages share one verified resolver; 1v1 is a
+parity gate, not the final scope.
 
 The licensed build's read-only static map is now recorded in
 [the SS2 battle map](integration/ss2-battle-map.md). Its formulas are evidence
 for the 1v1 golden harness; they must not replace the prototype rules until the
 observed roll and mutation order is verified end to end.
+
+The isolated [golden harness](integration/ss2-golden-harness.md) now enforces
+the build identity, candidate-versus-observed provenance, and exact named roll
+order. The longer delivery sequence is tracked in [the roadmap](roadmap.md).

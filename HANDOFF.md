@@ -26,6 +26,13 @@ gladiators per team. It provides targeting, AI turns, local/hot-seat controller
 identities, replays, wire snapshots, and state hashes. Its formulas are
 intentional placeholders until they can be validated against the licensed game.
 
+The fingerprinted Steam build now has a read-only battle map and an isolated
+asset-free 1v1 candidate harness with strict ordered RNG fixtures. Static
+candidates are not runtime goldens and do not replace the placeholder engine
+rules. The next technical gate is controlled licensed 1v1 observation, followed
+by the SS2 state/UI adapter. The delivery target remains 2v2 and 3v3 cooperative
+campaign support; see `docs/roadmap.md`.
+
 ## Keep the project lawful and reversible
 
 Use only a licensed local copy for inspection. Keep originals untouched, work in

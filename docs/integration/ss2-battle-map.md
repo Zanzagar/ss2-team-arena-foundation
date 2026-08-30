@@ -153,8 +153,9 @@ floor(Math.random() * (b - a + 1)) + a
 ```
 
 The battle code also uses AVM1's direct `RandomNumber` opcode. Some direct uses
-are cosmetic (`destroy_armour` debris and crowd movement), while others choose
-`attack_direction` and therefore affect combat. Exact deterministic parity
+are cosmetic (`destroy_armour` consumes three direction-dependent debris rolls
+after a piece is selected, and crowd movement consumes others), while some
+choose `attack_direction` and therefore affect combat. Exact deterministic parity
 cannot be achieved by replacing only `randomBetween`; both sources must be
 routed through one ordered roll stream, with cosmetic rolls either represented
 in that stream or removed from authoritative simulation.
@@ -187,9 +188,9 @@ No magicka clamp occurs in this function.
 The shield adjustment reconstructs as
 `ceil(base * (100 + attacker.shield * 1.5) / 100)`. The bytecode explicitly
 reads `game_attacker.shield`, so a larger attacker shield increases bombard and
-snipe chance. This is counterintuitive; treat it as a verified build behavior
-or possible vanilla bug and confirm it with golden runs before encoding
-measured rules.
+snipe chance. This is counterintuitive; treat it as a statically mapped build
+behavior or possible vanilla bug and confirm it with golden runs before
+encoding measured rules.
 
 ### Attack roll dispatcher
 
@@ -208,7 +209,7 @@ and a critical sample from `attack_direction`, then computes
 | 20 | `round(attacker.charisma * 4) - defender.charisma`, floored to a random 1–3 | forced sentinel 21 | `taunt_percentage` |
 | 21 | `randomBetween(min_damage, max_damage)` | `randomBetween(-20, 20)` | `bombard_percentage` |
 | 22 | `min_damage` | 0 | `snipe_percentage` |
-| 23 | `ceil(min_damage / 2)` | 0 | `bash_percentage` |
+| 23 | `ceil(min_damage / 2)` | unchanged; inherits the prior transient value | `bash_percentage` |
 | 30 | `ceil(max_damage * 1.5)` with a level-based fallback | forced 20 | `normal_percentage` |
 
 On a hit, direction 30 dispatches `defender_hurt("grievous")`, direction 20
@@ -227,6 +228,8 @@ directions, or `knockback`), calls
 damage_method, attack_direction)`, then plays the defender animation.
 Physical knockback force is signed
 `damage + game_attacker.strength * 6` and forced to a minimum magnitude of 20.
+A defender facing left receives the positive force; other mapped facing values
+receive the negative force.
 A magnitude above 80 selects the knockback animation, but the unbounded force is
 still passed to `knockback`; 80 is not a force clamp.
 
@@ -235,17 +238,29 @@ still passed to `knockback`; 80 is not a force clamp.
 - rounds damage upward;
 - uses different damage-splat/crowd cues for critical, taunt, and grievous;
 - makes every physical damage invocation roll an inclusive 1–100 armour-removal
-  chance and remove a piece when the roll is greater than 66; grievous also
-  removes one piece unconditionally first and can therefore remove two;
+  chance and call `remove_armour` when the roll is greater than 66; grievous
+  also calls it once unconditionally. The removal function only maps directions
+  1–12 into piece groups, so the direction-30 grievous calls appear to be
+  no-ops for equipment in this build and require runtime confirmation;
 - subtracts normal/grievous damage from `armourclass` first, carrying only
   overflow into `hitpoints`; critical damage bypasses that armour-class branch
   even though its separate removal roll can still destroy a piece;
 - after hitpoint-applicable or overflow damage, grants the defender
   `ceil(game_defender.breastplate * appliedDamage / 100)` stamina and clamps;
 - can set `burning`, `frozen`, `poison`, or `life_stolen` from weapon
-  enchantment types 2–5 after a potency roll;
+  enchantment types 2–5 after a potency roll. When the secondary weapon is
+  active, the type comes from its secondary field but the comparison still
+  reads the primary weapon potency field in this build;
 - sets `phasecomplete` and calls `death(...)` when the relevant mode's defeat
   condition is reached.
+
+Two transient/boundary behaviors need explicit runtime fixtures. Direction 23
+does not assign `criticalhit`, so bash can inherit the previous action's value.
+When incoming normal/grievous damage exactly equals remaining armour, bytecode
+sets armour to zero but does not rewrite the local damage register to overflow;
+the subsequent non-positive-armour branch therefore appears to apply the full
+original damage to hitpoints. Both are recorded as static candidates, not
+promoted vanilla rules.
 
 `magic_damage_character` is the parallel spell/effect ingress. It receives an
 already calculated `damage` argument, applies armour then hitpoint overflow,
@@ -422,15 +437,26 @@ Do not replace `classicStyleRules` with partially reconstructed formulas. Keep
 it explicitly provisional until a golden harness compares vanilla 1v1 and the
 adapter with controlled samples.
 
+## Golden-harness checkpoint
+
+The asset-free [1v1 golden harness](ss2-golden-harness.md) now supplies the
+fingerprint-keyed candidate schema, strict ordered `randomBetween` and
+`RandomNumber` tape, isolated physical-attack reconstruction, and one-shot
+result bridge. It does not change `classicStyleRules`, and its static candidates
+do not yet count as vanilla parity.
+
 ## Next checkpoint
 
-1. Finish the spell/status and stamina/resource mutation order.
-2. Build an asset-free 1v1 fixture schema keyed to the fingerprint above.
-3. Add a rules seam that accepts explicit random samples; record roll order.
-4. Compare chance, hit/miss, damage, armour overflow, status, and result events
-   against licensed vanilla runs without persisting original assets.
+1. Observe the boundary, miss, armour overflow/equality, status, critical, and
+   result candidates in controlled licensed 1v1 runs.
+2. Finish unresolved spell/status duration and action-to-animation ordering.
+3. Promote exact repeated observations to runtime goldens and correct any
+   divergent candidates.
+4. Add canonical SS2 equipment/status state and an event/UI adapter while
+   preserving the generic 1–3 combatant engine.
 5. Render two static ally slots using a `clipByCombatantId` registry, then move
-   to 2v2 AI only after 1v1 golden parity passes.
+   through 2v2 AI to 2v2 and 3v3 cooperative campaign support as tracked in the
+   [roadmap](../roadmap.md).
 
 ## Reproduce the read-only inventory
 

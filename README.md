@@ -25,7 +25,7 @@ There are no package dependencies. If Node is installed but the `npm`
 launcher is unavailable, the exact package test entry can also be run with:
 
 ```powershell
-node test/engine.test.js
+node --test
 ```
 
 ## Goal status
@@ -33,12 +33,14 @@ node test/engine.test.js
 | Goal | Foundation supplied here | Still required |
 | --- | --- | --- |
 | Player plus ally vs. AI team | Team model, AI, targeting | SS2 roster/UI/animation adapter |
-| 2v2 and 3v3 teams | Generic 1–3 roster engine | Balance, arena layout, campaign mode |
+| 2v2 and 3v3 campaign co-op | Generic 1–3 roster engine and controller model | SS2 adapter, arena layout, campaign saves/rewards |
 | Local hot-seat | Named controllers and turn validation | Input/UI binding in SS2 |
-| Online 2v2 | Deterministic action/replay/state-hash protocol | Matchmaking, transport, auth, reconnects |
+| Online co-op | Deterministic action/replay/state-hash protocol | Matchmaking, transport, auth, reconnects |
 
-See [the adapter contract](docs/ss2-adapter-contract.md) for the safe next
-reverse-engineering step once a licensed SS2 installation is available.
+See [the adapter contract](docs/ss2-adapter-contract.md) for the guarded
+licensed-build integration boundary.
+The staged path to 2v2 and 3v3 cooperative campaign play is in
+[the project roadmap](docs/roadmap.md).
 
 ## Licensed-build integration checkpoint
 
@@ -50,6 +52,11 @@ It maps the battle entry, hero/villain state split, RNG, hit/damage/spell path,
 result transition, UI clips, and Collection mod-loading route. Reconstructed
 formulas remain evidence for golden tests, not replacements for the prototype
 rules yet.
+
+The asset-free [1v1 golden harness](docs/integration/ss2-golden-harness.md)
+executes those static candidates with strict, named RNG samples. Candidate
+fixtures are deliberately separate from runtime-observed goldens and from the
+shared 1–3 combatant engine.
 
 The project includes a read-only AVM1 metadata inspector:
 
