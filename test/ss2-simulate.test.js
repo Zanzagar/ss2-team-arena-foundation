@@ -9,7 +9,7 @@ import {
 } from "../src/golden/observation.js";
 import { promoteSs2CandidateToGolden } from "../src/golden/promote-1v1-golden.js";
 import { SimulationError, simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
-import { wrapperTapeForFixture } from "../tools/capture-session.mjs";
+import { extractCaptureTraceFromRuffleLog, wrapperTapeForFixture } from "../tools/capture-session.mjs";
 
 import { loadSs2Fixtures } from "./ss2-fixture-files.js";
 
@@ -121,6 +121,25 @@ test("wrapper tape strings carry only injectable randomBetween samples", () => {
   for (const entry of tape.split(",")) {
     assert.match(entry, /^[a-z0-9-]+:-?\d+:-?\d+:-?\d+$/);
   }
+});
+
+test("ruffle logs delog into clean traces, dropping non-capture lines", () => {
+  const fixture = fixtures[0];
+  const trace = simulateSs2CaptureTrace(fixture);
+  const logText = trace
+    .trim()
+    .split("\n")
+    .map((line) => `2026-08-30T16:00:00.000000Z  INFO avm_trace: ${line}`)
+    .concat([
+      "2026-08-30T16:00:01.000000Z  INFO avm_trace: some game-internal trace text",
+      "2026-08-30T16:00:02.000000Z  INFO avm_trace: [\"an\",\"array\"]",
+      "2026-08-30T16:00:03.000000Z  WARN ruffle_core: unrelated runtime noise"
+    ])
+    .join("\r\n");
+  const { trace: extracted, dropped } = extractCaptureTraceFromRuffleLog(logText);
+  assert.equal(extracted, trace);
+  assert.equal(dropped, 2);
+  assert.equal(extractCaptureTraceFromRuffleLog("no trace lines at all").trace, "");
 });
 
 test("the simulator rejects invalid identity metadata", () => {

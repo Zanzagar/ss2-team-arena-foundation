@@ -78,7 +78,10 @@ evidence. The unvalidated AS2 wrapper draft lives in
 
 Raw traces stay in ignored `captures/`; divergent observations are preserved
 under `test/fixtures/ss2-1v1-divergences/` and drive candidate corrections.
-Live capture still needs an approved local AVM1 player (none is installed).
+The capture vehicle (portable Ruffle 0.5.0 plus an FFDec-compiled AS2
+wrapper) is installed and validated end to end by
+`tools/runtime-capture/validate-vehicle.ps1`; real sessions are driven by
+`tools/runtime-capture/launch-capture.ps1`.
 
 The project includes a read-only AVM1 metadata inspector:
 

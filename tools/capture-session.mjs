@@ -306,6 +306,46 @@ async function commandManifestDigest(options) {
   return 0;
 }
 
+/**
+ * Extract the raw capture trace from a Ruffle stdout log
+ * (RUST_LOG=avm_trace=info): keep each avm_trace payload that is a JSON
+ * object with a `t` field, drop everything else (game-internal traces,
+ * runtime noise). Returns { trace, dropped }.
+ */
+export function extractCaptureTraceFromRuffleLog(logText) {
+  const lines = [];
+  let dropped = 0;
+  for (const rawLine of logText.split(/\r?\n/)) {
+    const match = /avm_trace:\s(.*)$/.exec(rawLine);
+    if (!match) continue;
+    const payload = match[1];
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.t === "string") {
+        lines.push(payload);
+      } else {
+        dropped += 1;
+      }
+    } catch {
+      dropped += 1;
+    }
+  }
+  return { trace: lines.length > 0 ? `${lines.join("\n")}\n` : "", dropped };
+}
+
+async function commandDelog(options) {
+  const logText = await readFile(require_(options, "trace", "--trace"), "utf8");
+  const { trace, dropped } = extractCaptureTraceFromRuffleLog(logText);
+  if (trace.length === 0) {
+    throw new Error("No capture-trace lines found in the log (is RUST_LOG=avm_trace=info set?).");
+  }
+  const outPath = require_(options, "out", "--out");
+  await mkdir(path.dirname(outPath), { recursive: true });
+  await writeFile(outPath, trace, "utf8");
+  console.log(`Extracted ${trace.trimEnd().split("\n").length} trace line(s) to ${outPath} (${dropped} non-trace line(s) dropped).`);
+  return 0;
+}
+
 /** The wrapper's `tape` FlashVars value: injectable randomBetween samples only. */
 export function wrapperTapeForFixture(fixture) {
   return fixture.samples
@@ -327,7 +367,8 @@ const COMMANDS = new Map([
   ["verify", commandVerify],
   ["promote", commandPromote],
   ["manifest-digest", commandManifestDigest],
-  ["tape", commandTape]
+  ["tape", commandTape],
+  ["delog", commandDelog]
 ]);
 
 async function main() {

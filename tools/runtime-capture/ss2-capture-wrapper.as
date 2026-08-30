@@ -91,10 +91,15 @@ var config = {
     injected: _root.injected == "true"
 };
 
+// FlashVars land as _root properties, and timeline vars ARE _root
+// properties, so the raw string MUST be captured before any variable named
+// "tape" is declared (validated the hard way: `var tape = []` silently
+// clobbers the -Ptape FlashVar).
+var rawTape = _root.tape;
 var tape = [];      // [{label, min, max, value}] in fixture order
 var tapeCursor = 0;
-if (_root.tape != undefined && _root.tape != "") {
-    var entries = _root.tape.split(",");
+if (rawTape != undefined && rawTape != "") {
+    var entries = rawTape.split(",");
     for (var t = 0; t < entries.length; t++) {
         var parts = entries[t].split(":");
         tape.push({ label: parts[0], min: Number(parts[1]), max: Number(parts[2]), value: Number(parts[3]) });

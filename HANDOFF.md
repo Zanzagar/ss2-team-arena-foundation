@@ -38,9 +38,12 @@ promotion gate, preserved divergence reports, a reference-trace simulator
 were re-verified opcode-by-opcode on 2026-08-30 (see the defeat-gate and
 `magic_damage_character` sections), which corrected the breastplate-stamina
 rule in the isolated candidate. The next technical gate is running the first
-controlled licensed 1v1 captures (blocked on approving a local AVM1 player
-such as Ruffle), followed by the SS2 state/UI adapter. The delivery target
-remains 2v2 and 3v3 cooperative campaign support; see `docs/roadmap.md`.
+controlled licensed 1v1 captures — the capture vehicle (portable Ruffle
+0.5.0 plus the FFDec-compiled wrapper) is installed and validated end to end
+by `tools/runtime-capture/validate-vehicle.ps1`, and
+`tools/runtime-capture/launch-capture.ps1` drives real sessions — followed
+by the SS2 state/UI adapter. The delivery target remains 2v2 and 3v3
+cooperative campaign support; see `docs/roadmap.md`.
 
 ## Keep the project lawful and reversible
 

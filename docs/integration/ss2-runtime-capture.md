@@ -47,8 +47,8 @@ Module responsibilities:
 | `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks |
 | `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate, promotion, divergence reports |
 | `src/golden/simulate-capture-trace.js` | reference trace generator (`synthetic-simulator` method, never promotable) for pipeline dry runs and wrapper validation |
-| `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `ingest`, `verify`, `promote`, `manifest-digest` |
-| `tools/runtime-capture/ss2-capture-wrapper.as` | unvalidated AS2 instrumentation wrapper draft (see its README for the validation gate) |
+| `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `tape`, `delog`, `ingest`, `verify`, `promote`, `manifest-digest` |
+| `tools/runtime-capture/` | AS2 wrapper source, shell/stub builders, the `validate-vehicle.ps1` gate, and `launch-capture.ps1` (see its README for validation status) |
 
 ## Capture session protocol
 
@@ -83,21 +83,26 @@ sessions, per-observation manifest attestation, and the capture-manifest
 SHA-256. `candidateFlags` do not carry over; a promoted quirk (for example the
 armour-equality behavior) is thereby confirmed as build behavior.
 
-## Instrumentation vehicle
+## Instrumentation vehicle (installed and stub-validated 2026-08-30)
 
-No AVM1-capable runtime is currently installed on this machine (checked
-2026-08-30: no Ruffle, no standalone Flash projector; `.tools/` holds only
-FFDec and a JRE). Live capture is therefore blocked on installing a player,
-which needs explicit approval before anything is downloaded. The proposed
-vehicle, in order of preference:
+Portable **Ruffle 0.5.0** is installed under ignored `.tools/` by
+`tools/install-ruffle.ps1` (pinned official release, SHA-256 verified
+against the GitHub-published digest; installation was explicitly approved).
+The wrapper is compiled from source on demand: `make-wrapper-shell.mjs`
+assembles a minimal FWS v8 shell and portable FFDec compiles
+`ss2-capture-wrapper.as` into it via `-importScript`.
 
-1. **Ruffle (open-source Flash emulator), desktop or web build.** An
-   independently authored wrapper movie loads the installed
-   `swf/swords_sandals2_download.swf` in place by absolute path — reading it
-   into memory the same way `tools/inspect-swf.mjs` already does, with no copy
-   written anywhere — and instruments it from outside the game's code.
-2. A licensed AIR/projector runtime, with the same wrapper, if Ruffle's AVM1
-   fidelity proves insufficient for the battle timeline.
+`tools/runtime-capture/validate-vehicle.ps1` is the one-command validation
+gate: it rebuilds the wrapper and the structural stub game, runs the wrapper
+against the stub with `candidate-lethal-result`'s tape injected, and
+requires the full `delog -> ingest -> verify` round trip to MATCH the
+fixture. The gate passes, which proves every wrapper mechanism (FlashVars,
+tape injection, `Object.watch` capture, cross-level function wrapping,
+`loadMovieNum` isolation, event ordering, hash-check stamping) under
+Ruffle's AVM1. `tools/runtime-capture/launch-capture.ps1` drives a real
+session the same way, loading the installed SWF in place via a `file:` URL.
+A licensed AIR/projector runtime remains the fallback vehicle if Ruffle's
+AVM1 fidelity proves insufficient on the real battle timeline.
 
 The wrapper source is committed as an unvalidated draft at
 `tools/runtime-capture/ss2-capture-wrapper.as`. It instruments without
@@ -201,16 +206,16 @@ the isolated candidate module/fixture to the observed behavior, add a
 regression test, and only then attempt promotion again. Divergences do not
 touch `classicStyleRules` or the team engine directly.
 
-## What still blocks live capture
+## What remains before the first golden
 
-1. Approval to install an AVM1-capable player (Ruffle) — nothing may be
-   downloaded without explicit sign-off.
-2. Compiling and validating the committed wrapper draft against that player
-   (`Object.watch` and function-wrap fidelity, level isolation, the overlay
-   instance path), then reproducing the simulator's reference traces before
-   any real trace is trusted.
-3. The first two controlled sessions per candidate, starting with
-   `candidate-normal-threshold-hit`.
+1. First real sessions must confirm what only the licensed timeline can:
+   the `arena.overlay` instance path, live battle-flow timing, the END-key
+   non-lethal finish, and which `fight_mode` values ordinary fights use
+   (the defeat gate's first-blood term in the battle map).
+2. Two matching controlled sessions per candidate, starting with
+   `candidate-normal-threshold-hit`, staged per
+   [the staging guide](ss2-capture-staging.md) and driven by
+   `tools/runtime-capture/launch-capture.ps1`.
 
 The 2v2 and then 3v3 cooperative campaign targets are unchanged: one shared
 resolver, team elimination, AI fill, controller-independent combatants, and a
