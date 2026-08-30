@@ -63,6 +63,10 @@ recorded as integer range 0 through `n - 1`.
 | `candidate-armour-removal-debris` | removal roll above 66 removes a selected piece before damage; the native cosmetic debris `RandomNumber` stream stays documented in the samples but is excluded from runtime matching (flagged for the deflection-threshold operand mix) |
 | `candidate-grievous-knockback` | direction 30: `ceil(max_damage * 1.5)`, undeflectable grievous dispatch, no-op equipment removal (flagged), forced knockback with the above-80 animation threshold |
 | `candidate-snipe-shield-boost` | the flagged attacker-shield ranged-chance adjustment, clamped at 99, with a threshold hit at diceroll 1 |
+| `candidate-deflection-threshold-discriminator` | deflection roll 85 against mapped threshold 87 (helmet 10, greaves 2): the surviving critical discriminates the flagged operand mix from its rival readings at runtime |
+| `candidate-frozen-enchantment-proc` | enchantment type 3 applies frozen below the potency threshold |
+| `candidate-bash-inherited-critical` | bash (23) at its chance threshold inheriting the transient criticalhit register — first fixture exercising `scenario.transient` end to end |
+| `candidate-bombard-threshold` | bombard (21) threshold hit with its critical-before-damage roll order and no knockback roll |
 
 The candidate module also preserves the mapped ranged attacker-shield chance
 adjustment, critical-deflection threshold, native cosmetic debris rolls when a

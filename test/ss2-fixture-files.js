@@ -17,7 +17,11 @@ export const SS2_FIXTURE_FILES = [
   "candidate-taunt-charisma-floor.json",
   "candidate-armour-removal-debris.json",
   "candidate-grievous-knockback.json",
-  "candidate-snipe-shield-boost.json"
+  "candidate-snipe-shield-boost.json",
+  "candidate-deflection-threshold-discriminator.json",
+  "candidate-frozen-enchantment-proc.json",
+  "candidate-bash-inherited-critical.json",
+  "candidate-bombard-threshold.json"
 ];
 
 export async function loadSs2Fixtures() {
