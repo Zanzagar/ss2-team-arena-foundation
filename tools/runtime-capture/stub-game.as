@@ -49,6 +49,7 @@ arena.gladiators.createEmptyMovieClip("overlay", 40000);
 var stubRoot = this;
 var ov = arena.gladiators.overlay;
 ov.attack_direction = 5;
+_global.fight_mode = "misc";
 
 ov.randomBetween = function (a, b) {
     return Math.floor(Math.random() * (b - a + 1)) + a;
@@ -73,12 +74,39 @@ ov.death = function (whichcharacter, how_died) {
     this.gotoAndPlay("combatwon");
 };
 
-ov.damagecharacter = function (damage) {
-    stubRoot.game.villain.hitpoints = stubRoot.game.villain.hitpoints - damage;
-    if (stubRoot.game.villain.hitpoints <= 0) {
-        this.death(stubRoot.arena.gladiators.villain, "slain");
-    }
-};
+// Builders let the stub simulate vanilla's frame-52 re-execution, which
+// REASSIGNS the combat functions mid-battle: the wrapper's resilient wraps
+// must survive that clobber for the gate to pass.
+function buildDamagecharacter() {
+    return function (damage) {
+        stubRoot.game.villain.hitpoints = stubRoot.game.villain.hitpoints - damage;
+        if (stubRoot.game.villain.hitpoints <= 0) {
+            this.death(stubRoot.arena.gladiators.villain, "slain");
+        }
+    };
+}
+
+function buildCheckattackroll() {
+    // One lethal exchange replaying candidate-lethal-result's tape order:
+    // hit, damage, critical, deflection, removal, dispatch, knockback,
+    // enchantment (death fires inside the dispatch, before the last two).
+    return function () {
+        var diceroll = this.randomBetween(1, 100);
+        var damage = this.randomBetween(12, 20);
+        var critical = this.randomBetween(1, 20);
+        if (diceroll >= 50) {
+            this.randomBetween(1, 100); // critical deflection
+            this.randomBetween(1, 100); // armour removal chance (<= 66: none)
+            this.defender_hurt("normal", damage);
+            this.randomBetween(1, 4); // knockback
+            this.randomBetween(1, 100); // enchantment potency
+        } else {
+            this.defender_blocked();
+        }
+    };
+}
+
+ov.damagecharacter = buildDamagecharacter();
 
 ov.defender_hurt = function (method, damage) {
     this.damagecharacter(damage);
@@ -86,29 +114,22 @@ ov.defender_hurt = function (method, damage) {
 
 ov.defender_blocked = function () {};
 
-// One lethal exchange replaying candidate-lethal-result's tape order:
-// hit, damage, critical, deflection, removal, dispatch, knockback,
-// enchantment (death fires inside the dispatch, before the last two rolls).
-ov.checkattackroll = function () {
-    var diceroll = this.randomBetween(1, 100);
-    var damage = this.randomBetween(12, 20);
-    var critical = this.randomBetween(1, 20);
-    if (diceroll >= 50) {
-        this.randomBetween(1, 100); // critical deflection
-        this.randomBetween(1, 100); // armour removal chance (<= 66: none)
-        this.defender_hurt("normal", damage);
-        this.randomBetween(1, 4); // knockback
-        this.randomBetween(1, 100); // enchantment potency
-    } else {
-        this.defender_blocked();
-    }
-};
+ov.checkattackroll = buildCheckattackroll();
 
+// Decoy rolls before the action: real battles roll AI-decision dice outside
+// checkattackroll, which the wrapper must neither inject nor record.
 var stubFrame = 0;
 this.onEnterFrame = function () {
     stubFrame++;
     if (stubFrame == 5) {
         _global.battle_started = true;
+        ov.randomBetween(1, 100);
+        ov.randomBetween(1, 100);
+    }
+    if (stubFrame == 7) {
+        // Simulate the overlay timeline looping through frame 52 again.
+        ov.checkattackroll = buildCheckattackroll();
+        ov.damagecharacter = buildDamagecharacter();
     }
     if (stubFrame == 10) {
         ov.checkattackroll();

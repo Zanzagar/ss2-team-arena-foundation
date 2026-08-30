@@ -323,6 +323,9 @@ export function extractCaptureTraceFromRuffleLog(logText) {
       const parsed = JSON.parse(payload);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.t === "string") {
         lines.push(payload);
+        // A capture is a single action; anything after the end line is
+        // post-session runtime noise, not evidence.
+        if (parsed.t === "end") break;
       } else {
         dropped += 1;
       }
