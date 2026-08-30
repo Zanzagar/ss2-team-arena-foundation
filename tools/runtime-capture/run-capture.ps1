@@ -58,14 +58,24 @@ if (Get-Process ruffle -ErrorAction SilentlyContinue) {
 }
 
 Write-Host 'Launching instrumented session...'
-$launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden -ArgumentList @(
+# The launcher must have its streams redirected: started hidden without
+# redirection it fails to bring up the window (observed repeatedly), and the
+# captured output doubles as the pipeline log for this run.
+$launchOut = Join-Path $projectRoot "captures\$SessionId\launcher.log"
+New-Item -ItemType Directory -Path (Split-Path -Parent $launchOut) -Force | Out-Null
+# Every path is quoted: this repo lives under a directory containing spaces,
+# and Start-Process joins an argument array with plain spaces, which
+# otherwise truncates -File at the first space.
+$launcherScript = Join-Path $PSScriptRoot 'launch-capture.ps1'
+$launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" -ArgumentList @(
     '-NoProfile', '-ExecutionPolicy', 'Bypass',
-    '-File', (Join-Path $PSScriptRoot 'launch-capture.ps1'),
-    '-FixturePath', $FixturePath,
-    '-SessionId', $SessionId,
-    '-ObservationId', $ObservationId,
-    '-Autopilot', $Autopilot,
-    '-Navigate', $Navigate
+    '-File', "`"$launcherScript`"",
+    '-FixturePath', "`"$FixturePath`"",
+    '-SessionId', "`"$SessionId`"",
+    '-ObservationId', "`"$ObservationId`"",
+    '-Autopilot', "`"$Autopilot`"",
+    '-Navigate', "`"$Navigate`""
 )
 
 # Hash verification of ~107 MB plus the FFDec wrapper compile happen before
@@ -93,3 +103,7 @@ Write-Host 'Closing the window so the pipeline runs...'
 Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
 $launch.WaitForExit()
 Write-Host "Launcher exit code: $($launch.ExitCode)"
+Write-Host '--- pipeline result ---'
+Get-Content $launchOut -ErrorAction SilentlyContinue |
+    Select-String -Pattern 'Extracted', 'MATCH', 'DIVERGE', 'rejected', 'Post-session' |
+    Select-Object -Last 5 | ForEach-Object { $_.Line }
