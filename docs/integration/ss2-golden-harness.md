@@ -60,7 +60,7 @@ recorded as integer range 0 through `n - 1`.
 | `candidate-quick-threshold-profile` | quick direction (1–4) fixed `min_damage` profile, -20..20 critical sample, and no knockback roll |
 | `candidate-power-critical-armour-bypass` | a surviving critical (sample 20) bypasses the armour-class branch: full damage to hitpoints while armour class is untouched |
 | `candidate-taunt-charisma-floor` | taunt (direction 20) charisma damage below 1 floors to a 1–3 roll; dispatch taunt, damage path normal |
-| `candidate-armour-removal-debris` | removal roll above 66 removes a selected piece before damage, consuming the native cosmetic debris `RandomNumber` stream |
+| `candidate-armour-removal-debris` | removal roll above 66 removes a selected piece before damage; the native cosmetic debris `RandomNumber` stream stays documented in the samples but is excluded from runtime matching (flagged for the deflection-threshold operand mix) |
 | `candidate-grievous-knockback` | direction 30: `ceil(max_damage * 1.5)`, undeflectable grievous dispatch, no-op equipment removal (flagged), forced knockback with the above-80 animation threshold |
 | `candidate-snipe-shield-boost` | the flagged attacker-shield ranged-chance adjustment, clamped at 99, with a threshold hit at diceroll 1 |
 

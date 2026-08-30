@@ -58,16 +58,17 @@ Module responsibilities:
    statuses, positions) in a controlled 1v1.
 3. Run the instrumented action once, writing the raw JSONL trace to
    `captures/<session-id>/<observation-id>.jsonl`.
-4. `verify-install` again; record both attestations in the trace meta/end
-   lines.
-5. `node tools/capture-session.mjs ingest --trace <raw> --fixture
+4. `node tools/capture-session.mjs ingest --trace <raw> --fixture
    test/fixtures/ss2-1v1/<candidate>.json --out
-   test/observations/ss2-1v1/<observation-id>.json`.
-6. `node tools/capture-session.mjs verify --fixture <candidate> --observation
+   test/observations/ss2-1v1/<observation-id>.json` — for wrapper traces
+   (whose end line carries the `null` attestation placeholder) ingest re-runs
+   the installed-hash verification itself and refuses the trace when the
+   post-session check fails.
+5. `node tools/capture-session.mjs verify --fixture <candidate> --observation
    <record>`; a divergence is preserved automatically, never deleted.
-7. Repeat from step 1 in a fresh game launch (a new `sessionId`) until at
+6. Repeat from step 1 in a fresh game launch (a new `sessionId`) until at
    least two matching observations from at least two sessions exist.
-8. Write the capture manifest listing every session and observation, then
+7. Write the capture manifest listing every session and observation, then
    `node tools/capture-session.mjs promote --fixture <candidate> --manifest
    <manifest> --observation <record1> --observation <record2>`.
 
@@ -108,10 +109,15 @@ patching:
   (`mutationGranularity: "property-watch"`);
 - wraps `defender_hurt`, `defender_blocked`, `death`, and observes the overlay
   `combatwon`/`combatlost` transitions for semantic events;
-- records — but cannot inject — AVM1 `RandomNumber` opcode rolls; the cosmetic
-  armour-debris rolls are therefore compared structurally (position and
-  bounds), never by value, and `attack_direction` is observed and recorded
-  rather than forced;
+- can neither inject nor record AVM1 `RandomNumber` opcode rolls (the opcode
+  is bytecode, not a wrappable function): the cosmetic armour-debris rolls
+  are therefore excluded from observation matching on both sides — fixtures
+  keep documenting them, and the static harness still replays them — and
+  `attack_direction` is observed and recorded rather than forced;
+- emits the end line with a `null` post-session attestation placeholder: the
+  hash check cannot have run yet, so `capture-session.mjs ingest` re-runs the
+  installed-hash verification live and stamps `installHashVerifiedAfter` only
+  when it passes;
 - emits only the JSONL trace grammar below (no screenshots, no assets).
 
 ### Reference traces (simulator)
@@ -121,8 +127,11 @@ the exact JSONL a perfect wrapper would emit for that fixture's staged
 scenario and injected tape (default output under ignored
 `captures/simulated/`). These traces exercise `ingest` and `verify` end to
 end and are the wrapper's executable specification: during validation the
-wrapper must reproduce them (modulo meta identity and passive roll values)
-before a real capture counts as evidence. Their capture method is
+wrapper must reproduce them (modulo meta identity, passive roll values, and
+per-roll callSite attribution) before a real capture counts as evidence. The
+simulator also fails fast on any fixture that cannot produce a
+self-verifying reference trace, blaming the fixture rather than the trace.
+Their capture method is
 `synthetic-simulator`, which observation validation accepts but promotion
 rejects unconditionally — a simulated trace can never become runtime
 evidence, and simulated records do not belong in `test/observations/`.
@@ -138,7 +147,7 @@ evidence, and simulated records do not belong in `test/observations/`.
 | `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` is the wrapper's attribution (`damagecharacter`, `remove-armour`, `death`, ...) |
 | `event` | action | `defender-hurt`/`defender-blocked`/`death`/`overlay-label` |
 | `final` | after the action, one per side | post-action field dump |
-| `end` | last | `installHashVerifiedAfter: true` |
+| `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails |
 
 Ingestion (`src/golden/capture-ingest.js`) enforces integrity before a record
 exists: every `set` must chain from the staged value or the previous `after`
@@ -163,8 +172,9 @@ observations always digest uniquely — exactly what golden provenance requires.
 An observation matches a fixture when all of the following are exactly equal:
 
 - scenario (numeric staged state, attacker side, attack direction);
-- ordered samples — label, source, bounds, and value, except that cosmetic
-  `armour-debris-*` opcode rolls match on position and bounds only;
+- ordered samples — label, source, bounds, and value, with cosmetic
+  `armour-debris-*` opcode rolls excluded from both sides (no instrumentation
+  can observe the opcode stream, and the rolls never change combat state);
 - ordered mutation trace on the `(sequence, path, before, after)` contract —
   `reason` strings are annotations (static-analysis labels in fixtures,
   hook attributions in observations) and are deliberately not compared;

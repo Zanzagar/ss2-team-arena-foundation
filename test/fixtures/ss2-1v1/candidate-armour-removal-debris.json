@@ -15,6 +15,9 @@
       "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
       "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter",
       "overlay:862/frame:52/DoAction@0x23d7fe/remove_armour"
+    ],
+    "candidateFlags": [
+      "critical-deflection-threshold-operand-mix"
     ]
   },
   "scenario": {
@@ -42,10 +45,12 @@
       "staminaleft": 20,
       "staminamax": 100,
       "gladiator_dir": "left",
-      "armourclass": 20,
-      "armourclass_max": 20,
+      "armourclass": 34,
+      "armourclass_max": 34,
       "helmet": 1,
-      "helmet_defence": 5
+      "helmet_defence": 10,
+      "shield": 2,
+      "shield_defence": 24
     }
   },
   "samples": [
@@ -154,7 +159,7 @@
           "request": 1,
           "selected": "helmet",
           "removed": true,
-          "defenceRemoved": 5,
+          "defenceRemoved": 10,
           "debrisRolls": {
             "horizontal": {
               "source": "randomNumber",
@@ -177,15 +182,15 @@
       {
         "sequence": 1,
         "path": "/villain/armourclass",
-        "before": 20,
-        "after": 15,
+        "before": 34,
+        "after": 24,
         "reason": "remove-armour-piece"
       },
       {
         "sequence": 2,
         "path": "/villain/armourclass_max",
-        "before": 20,
-        "after": 15,
+        "before": 34,
+        "after": 24,
         "reason": "remove-armour-piece"
       },
       {
@@ -198,8 +203,8 @@
       {
         "sequence": 4,
         "path": "/villain/armourclass",
-        "before": 15,
-        "after": 3,
+        "before": 24,
+        "after": 12,
         "reason": "physical-damage"
       }
     ],
@@ -227,8 +232,8 @@
       },
       "villain": {
         "hitpoints": 40,
-        "armourclass": 3,
-        "armourclass_max": 15,
+        "armourclass": 12,
+        "armourclass_max": 24,
         "staminaleft": 20,
         "burning": false,
         "frozen": false,
@@ -243,7 +248,7 @@
         "greaves": 0,
         "shinguard": 0,
         "boot": 0,
-        "shield": 0
+        "shield": 2
       },
       "result": null
     }

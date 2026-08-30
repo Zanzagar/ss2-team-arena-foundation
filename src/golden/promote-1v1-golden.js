@@ -264,17 +264,22 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   if (!Array.isArray(observations) || observations.length < 2) {
     throw new PromotionError("Promotion requires at least two independent runtime observations.");
   }
-  const manifestSha256 = computeSs2CaptureManifestDigest(manifest);
 
   const observationIds = new Set();
   const sessionIds = new Set();
   const divergences = [];
   const matches = [];
-  // Gate failures are deferred until every observation has been compared, so
-  // a later attestation problem can never discard an earlier observation's
-  // divergence evidence.
+  // Gate failures — the manifest included — are deferred until every
+  // observation has been compared, so an attestation problem can never
+  // discard an observation's divergence evidence.
   let gateError = null;
   const defer = (error) => { gateError ??= error; };
+  let manifestSha256 = null;
+  try {
+    manifestSha256 = computeSs2CaptureManifestDigest(manifest);
+  } catch (error) {
+    defer(error);
+  }
   for (const observation of observations) {
     try {
       validateSs2Observation(observation);
@@ -297,22 +302,24 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     }
     observationIds.add(observation.observationId);
     sessionIds.add(observation.capture.sessionId);
-    if (observation.capture.captureToolVersion !== manifest.captureToolVersion) {
-      defer(new PromotionError(
-        `Observation ${observation.observationId} was captured with a different tool version than the manifest.`
-      ));
-    }
-    const session = manifest.sessions.find((candidateSession) =>
-      candidateSession.sessionId === observation.capture.sessionId
-    );
-    if (!session || !session.observationIds.includes(observation.observationId)) {
-      defer(new PromotionError(
-        `Observation ${observation.observationId} is not attested by the capture manifest.`
-      ));
-    } else if (session.method !== observation.capture.method) {
-      defer(new PromotionError(
-        `Observation ${observation.observationId} disagrees with its manifest session about the capture method.`
-      ));
+    if (manifestSha256 !== null) {
+      if (observation.capture.captureToolVersion !== manifest.captureToolVersion) {
+        defer(new PromotionError(
+          `Observation ${observation.observationId} was captured with a different tool version than the manifest.`
+        ));
+      }
+      const session = manifest.sessions.find((candidateSession) =>
+        candidateSession.sessionId === observation.capture.sessionId
+      );
+      if (!session || !session.observationIds.includes(observation.observationId)) {
+        defer(new PromotionError(
+          `Observation ${observation.observationId} is not attested by the capture manifest.`
+        ));
+      } else if (session.method !== observation.capture.method) {
+        defer(new PromotionError(
+          `Observation ${observation.observationId} disagrees with its manifest session about the capture method.`
+        ));
+      }
     }
     const comparison = matchSs2ObservationToFixture(candidate, observation);
     if (!comparison.match) {

@@ -87,6 +87,28 @@ test("simulated observations can never be promoted", () => {
   );
 });
 
+test("the simulator fails fast on internally inconsistent fixtures", () => {
+  const fixture = JSON.parse(JSON.stringify(fixtures[0]));
+  fixture.scenario.villain.hitpoints += 1;
+  assert.throws(
+    () => simulateSs2CaptureTrace(fixture),
+    (error) => error instanceof SimulationError && new RegExp(fixture.fixtureId).test(error.message)
+  );
+});
+
+test("simulated traces omit unobservable opcode debris rolls", () => {
+  const debrisFixture = fixtures.find((fixture) => fixture.fixtureId === "candidate-armour-removal-debris");
+  assert.ok(debrisFixture.samples.some((sample) => sample.source === "randomNumber"));
+  const lines = simulateSs2CaptureTrace(debrisFixture)
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const rollLines = lines.filter((line) => line.t === "roll");
+  assert.ok(rollLines.every((line) => line.source === "randomBetween"));
+  const record = ingestSs2CaptureTrace(simulateSs2CaptureTrace(debrisFixture), debrisFixture);
+  assert.equal(matchSs2ObservationToFixture(debrisFixture, record).match, true);
+});
+
 test("the simulator rejects invalid identity metadata", () => {
   const fixture = fixtures[0];
   assert.throws(

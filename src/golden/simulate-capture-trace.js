@@ -10,10 +10,13 @@
  * "synthetic-simulator" and promotion rejects it unconditionally.
  */
 
+import { ingestSs2CaptureTrace } from "./capture-ingest.js";
 import {
   SS2_PROJECTED_COMBATANT_KEYS,
   SS2_SIMULATED_CAPTURE_METHOD,
-  deriveExpectedEventsFromSs2Fixture
+  deriveExpectedEventsFromSs2Fixture,
+  isCosmeticDebrisSample,
+  matchSs2ObservationToFixture
 } from "./observation.js";
 import { validateSs2OneVsOneFixture } from "./run-1v1-fixture.js";
 
@@ -80,7 +83,9 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
   const observedAt = identity.observedAt ?? "2026-08-30T00:00:00Z";
   if (Number.isNaN(Date.parse(observedAt))) throw new SimulationError("observedAt must be parseable.");
   const captureToolVersion = identity.captureToolVersion ?? "ss2-capture/0.1.0";
-  const callSite = fixture.provenance.sourceRefs[0];
+  // Block-level attribution, as the wrapper stamps it: the sourceRef minus
+  // its trailing function-name segment.
+  const callSite = fixture.provenance.sourceRefs[0].replace(/\/[A-Za-z_][A-Za-z0-9_]*$/, "");
 
   const events = deriveExpectedEventsFromSs2Fixture(fixture);
   const lines = [];
@@ -104,6 +109,10 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
     lines.push({ t: "var", name: "criticalhit", value: fixture.scenario.transient.criticalhit });
   }
   for (const sample of fixture.samples) {
+    // Cosmetic debris rolls come from the RandomNumber opcode, which the
+    // wrapper can neither inject nor record; a faithful reference trace
+    // omits them, and observation matching excludes them on both sides.
+    if (isCosmeticDebrisSample(sample)) continue;
     lines.push({
       t: "roll",
       ...sample,
@@ -134,5 +143,26 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
     lines.push({ t: "final", side, fields: { ...fixture.expected.state[side] } });
   }
   lines.push({ t: "end", installHashVerifiedAfter: true });
-  return `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+  const trace = `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+
+  // Fail fast: a reference trace that its own pipeline cannot ingest and
+  // match points at an internally inconsistent fixture, and the defect must
+  // be reported against the fixture, not the trace.
+  let record;
+  try {
+    record = ingestSs2CaptureTrace(trace, fixture);
+  } catch (error) {
+    throw new SimulationError(
+      `Fixture ${fixture.fixtureId} cannot produce an ingestable reference trace: ${error.message}`,
+      { cause: error }
+    );
+  }
+  const comparison = matchSs2ObservationToFixture(fixture, record);
+  if (!comparison.match) {
+    throw new SimulationError(
+      `Fixture ${fixture.fixtureId} is internally inconsistent: its reference trace does not match ` +
+      `its own expectations (first difference at ${comparison.differences[0].path}).`
+    );
+  }
+  return trace;
 }

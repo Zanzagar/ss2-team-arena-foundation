@@ -31,6 +31,7 @@ import {
 } from "../src/golden/promote-1v1-golden.js";
 import {
   GoldenClassification,
+  GoldenFixtureValidationError,
   GoldenProvenance,
   runSs2OneVsOneGoldenFixture,
   validateSs2OneVsOneFixture
@@ -804,6 +805,113 @@ test("a gate failure on one observation never discards another's divergence", ()
   assert.ok(blocked instanceof PromotionBlockedError);
   assert.equal(blocked.divergences.length, 1);
   assert.equal(blocked.divergences[0].observationId, "obs-a");
+});
+
+test("fixture validation enforces trace/result/state internal consistency", () => {
+  const fixture = fixturesById.get("candidate-lethal-result");
+
+  const noOp = cloneJson(fixturesById.get("candidate-normal-threshold-hit"));
+  noOp.expected.mutationTrace.push({
+    sequence: 2, path: "/villain/hitpoints", before: 28, after: 28, reason: "stat-clamp"
+  });
+  assert.throws(() => validateSs2OneVsOneFixture(noOp), /no-op assignment/);
+
+  const barePath = cloneJson(fixturesById.get("candidate-normal-threshold-hit"));
+  barePath.expected.mutationTrace[0].path = "/villain";
+  assert.throws(() => validateSs2OneVsOneFixture(barePath), GoldenFixtureValidationError);
+
+  const suffixedResult = cloneJson(fixture);
+  suffixedResult.expected.mutationTrace[2].path = "/result/pending";
+  assert.throws(() => validateSs2OneVsOneFixture(suffixedResult), GoldenFixtureValidationError);
+
+  const orphanResultEntry = cloneJson(fixture);
+  orphanResultEntry.expected.resultEvent = null;
+  assert.throws(
+    () => validateSs2OneVsOneFixture(orphanResultEntry),
+    /records \/result but expected\.resultEvent is null|result-bearing fixture/
+  );
+
+  const missingProjectionKey = cloneJson(fixture);
+  delete missingProjectionKey.expected.state.villain.boot;
+  assert.throws(() => validateSs2OneVsOneFixture(missingProjectionKey), GoldenFixtureValidationError);
+
+  const mismatchedStateResult = cloneJson(fixture);
+  mismatchedStateResult.expected.state.result = null;
+  assert.throws(() => validateSs2OneVsOneFixture(mismatchedStateResult), GoldenFixtureValidationError);
+});
+
+test("cosmetic debris samples are excluded from matching on both sides", () => {
+  const fixture = fixturesById.get("candidate-armour-removal-debris");
+  const withDebris = observationFromFixture(fixture, {
+    observationId: "obs-debris", sessionId: "session-debris"
+  });
+  assert.ok(withDebris.samples.some((sample) => sample.source === "randomNumber"));
+  assert.equal(matchSs2ObservationToFixture(fixture, withDebris).match, true);
+
+  const withoutDebris = observationFromFixture(fixture, {
+    observationId: "obs-wrapper", sessionId: "session-wrapper",
+    mutate: (draft) => {
+      draft.samples = draft.samples.filter((sample) => sample.source !== "randomNumber");
+    }
+  });
+  assert.equal(matchSs2ObservationToFixture(fixture, withoutDebris).match, true);
+  assert.equal(ss2ObservationsMatch(withDebris, withoutDebris).match, true);
+});
+
+test("an invalid manifest cannot discard divergence evidence during promotion", () => {
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const divergent = observationFromFixture(fixture, {
+    observationId: "obs-a", sessionId: "session-a",
+    mutate: (draft) => {
+      draft.finalState.villain.hitpoints = 27;
+      draft.mutationTrace[0] = { ...draft.mutationTrace[0], after: 27 };
+    }
+  });
+  const matching = observationFromFixture(fixture, { observationId: "obs-b", sessionId: "session-b" });
+  const invalidManifest = { schemaVersion: 1, kind: "ss2-capture-manifest" };
+
+  let blocked;
+  try {
+    promoteSs2CandidateToGolden(fixture, [divergent, matching], invalidManifest, {
+      recordedAt: "2026-08-30T21:00:00Z"
+    });
+    assert.fail("the divergence must block promotion even with an invalid manifest");
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof PromotionBlockedError);
+  assert.equal(blocked.divergences.length, 1);
+  assert.equal(blocked.divergences[0].observationId, "obs-a");
+
+  assert.throws(
+    () => promoteSs2CandidateToGolden(
+      fixture,
+      [observationFromFixture(fixture, { observationId: "obs-c", sessionId: "session-c" }), matching],
+      invalidManifest
+    ),
+    CaptureManifestError
+  );
+});
+
+test("ingest requires a live attestation for placeholder end lines", () => {
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const lines = thresholdTraceLines();
+  lines[lines.length - 1] = { t: "end", installHashVerifiedAfter: null };
+  assert.throws(
+    () => ingestSs2CaptureTrace(traceText(lines), fixture),
+    /null after-attestation placeholder/
+  );
+  const record = ingestSs2CaptureTrace(traceText(lines), fixture, { installHashVerifiedAfter: true });
+  assert.equal(record.capture.installHashVerifiedAfter, true);
+  assert.throws(
+    () => ingestSs2CaptureTrace(
+      traceText(lines.map((line) =>
+        line.t === "end" ? { t: "end", installHashVerifiedAfter: false } : line
+      )),
+      fixture
+    ),
+    /true or the null placeholder/
+  );
 });
 
 test("projected combatant keys stay aligned with the fixture state projection", () => {

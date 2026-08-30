@@ -17,13 +17,17 @@ import { createHash } from "node:crypto";
 import { RollSource, createOrderedRollTape } from "./ordered-rolls.js";
 import {
   SS2_BUILD_SHA256,
+  SS2_PROJECTED_COMBATANT_KEYS,
   SS2_STEAM_BUILD_ID,
   assertJsonSafe,
   assertNoAssetPayload,
   assertSs2MutationTraceShape,
+  assertSs2ResultEventShape,
   assertSs2ScenarioShape,
   validateSs2OneVsOneFixture
 } from "./run-1v1-fixture.js";
+
+export { SS2_PROJECTED_COMBATANT_KEYS };
 
 export const SS2_OBSERVATION_SCHEMA_VERSION = 1;
 export const SS2_OBSERVATION_KIND = "ss2-1v1-observation";
@@ -68,38 +72,6 @@ const CAPTURE_KEYS = Object.freeze([
   "sessionId"
 ]);
 const SAMPLE_KEYS = Object.freeze(["callSite", "injected", "label", "max", "min", "source", "value"]);
-const RESULT_EVENT_KEYS = Object.freeze([
-  "arenaLabel",
-  "completionToken",
-  "loserSide",
-  "overlayLabel",
-  "reason",
-  "status",
-  "type",
-  "winnerSide"
-]);
-
-/** Exact key set every final-state combatant projection must carry. */
-export const SS2_PROJECTED_COMBATANT_KEYS = Object.freeze([
-  "armourclass",
-  "armourclass_max",
-  "boot",
-  "breastplate",
-  "burning",
-  "frozen",
-  "gauntlet",
-  "greaves",
-  "helmet",
-  "hitpoints",
-  "life_stolen",
-  "poison",
-  "shield",
-  "shinguard",
-  "shoulderguard",
-  "staminaleft",
-  "taunted1",
-  "taunted2"
-]);
 const PROJECTED_BOOLEAN_KEYS = new Set([
   "burning",
   "frozen",
@@ -252,9 +224,12 @@ function tapeProjection(samples) {
 }
 
 /**
- * Cosmetic debris rolls come from the uninterceptable AVM1 RandomNumber
- * opcode after a piece is already removed; they never change combat state, so
- * comparisons check their position and bounds but not their values.
+ * Cosmetic debris rolls come from the AVM1 RandomNumber opcode after a piece
+ * is already removed. The opcode can be neither injected nor recorded by the
+ * function-wrap instrumentation, and the rolls never change combat state, so
+ * they are excluded from observation comparisons entirely. Fixtures still
+ * document them (and the static harness replays them) as part of the native
+ * roll stream.
  */
 export function isCosmeticDebrisSample(sample) {
   return sample.source === RollSource.RANDOM_NUMBER && COSMETIC_DEBRIS_PATTERN.test(sample.label);
@@ -290,32 +265,7 @@ function assertEventShape(event, index) {
 }
 
 function assertResultEventShape(resultEvent) {
-  if (resultEvent === null) return;
-  if (!isPlainObject(resultEvent)) {
-    throw new ObservationValidationError("resultEvent must be null or an object.");
-  }
-  assertExactKeys(resultEvent, RESULT_EVENT_KEYS, "resultEvent");
-  const { winnerSide, loserSide } = resultEvent;
-  if (
-    resultEvent.type !== "battle-result-pending" ||
-    resultEvent.status !== "pending-animation" ||
-    resultEvent.reason !== "elimination" ||
-    (winnerSide !== "hero" && winnerSide !== "villain") ||
-    (loserSide !== "hero" && loserSide !== "villain") ||
-    winnerSide === loserSide
-  ) {
-    throw new ObservationValidationError("resultEvent must be a battle-result-pending event with distinct sides.");
-  }
-  const expectedOverlay = winnerSide === "hero" ? "combatwon" : "combatlost";
-  const expectedArena = winnerSide === "hero" ? "combat_won" : "combat_lost";
-  const expectedToken = `ss2-1v1:${winnerSide}:${loserSide}:${expectedArena}`;
-  if (
-    resultEvent.overlayLabel !== expectedOverlay ||
-    resultEvent.arenaLabel !== expectedArena ||
-    resultEvent.completionToken !== expectedToken
-  ) {
-    throw new ObservationValidationError("resultEvent labels and completion token must follow the 1v1 convention.");
-  }
+  assertSs2ResultEventShape(resultEvent, "resultEvent", ObservationValidationError);
 }
 
 function assertFinalStateShape(finalState, resultEvent) {
@@ -444,20 +394,23 @@ export function validateSs2Observation(record) {
 }
 
 function comparableSamples(samples) {
-  return samples.map((sample) => ({
-    label: sample.label,
-    source: sample.source,
-    min: sample.min,
-    max: sample.max,
-    value: isCosmeticDebrisSample(sample) ? null : sample.value
-  }));
+  return samples
+    .filter((sample) => !isCosmeticDebrisSample(sample))
+    .map((sample) => ({
+      label: sample.label,
+      source: sample.source,
+      min: sample.min,
+      max: sample.max,
+      value: sample.value
+    }));
 }
 
 /**
  * The projection two independent observations must agree on. Identity and
- * capture metadata are excluded (they must differ); cosmetic debris roll
- * values are redacted; mutation reasons are wrapper hook attributions and are
- * kept because independent runs of the same tooling must attribute alike.
+ * capture metadata are excluded (they must differ); cosmetic debris rolls are
+ * excluded (unobservable and combat-irrelevant); mutation reasons are wrapper
+ * hook attributions and are kept because independent runs of the same tooling
+ * must attribute alike.
  */
 export function projectSs2ObservationForComparison(record) {
   return cloneJson({
@@ -580,7 +533,7 @@ export function matchSs2ObservationToFixture(fixture, observation) {
     observation.target.fixtureId !== fixture.fixtureId &&
     observation.target.fixtureId !== candidateIdFor(fixture.fixtureId)
   ) {
-    differences.push({
+    pushDifference(differences, {
       path: "/target/fixtureId",
       expected: fixture.fixtureId,
       actual: observation.target.fixtureId
@@ -589,21 +542,20 @@ export function matchSs2ObservationToFixture(fixture, observation) {
   collectDifferences(fixture.build, observation.build, "/build", differences);
   collectDifferences(fixture.scenario, observation.scenario, "/scenario", differences);
 
+  // Cosmetic debris rolls are excluded from both sides: fixtures document
+  // them, but no instrumentation can observe the opcode stream.
+  const expectedSamples = fixture.samples.filter((sample) => !isCosmeticDebrisSample(sample));
   const observed = comparableSamples(observation.samples);
-  if (fixture.samples.length !== observed.length) {
-    differences.push({
+  if (expectedSamples.length !== observed.length) {
+    pushDifference(differences, {
       path: "/samples/length",
-      expected: fixture.samples.length,
+      expected: expectedSamples.length,
       actual: observed.length
     });
   }
-  const sharedSamples = Math.min(fixture.samples.length, observed.length);
+  const sharedSamples = Math.min(expectedSamples.length, observed.length);
   for (let index = 0; index < sharedSamples; index += 1) {
-    const expectedSample = fixture.samples[index];
-    const observedSample = observed[index];
-    const cosmetic = isCosmeticDebrisSample(expectedSample) && observedSample.value === null;
-    const comparableExpected = cosmetic ? { ...expectedSample, value: null } : expectedSample;
-    collectDifferences(comparableExpected, observedSample, `/samples/${index}`, differences);
+    collectDifferences(expectedSamples[index], observed[index], `/samples/${index}`, differences);
   }
 
   collectDifferences(

@@ -199,7 +199,32 @@ async function commandSimulate(options) {
 async function commandIngest(options) {
   const fixture = await readJson(require_(options, "fixture", "--fixture"));
   const rawText = await readFile(require_(options, "trace", "--trace"), "utf8");
-  const record = ingestSs2CaptureTrace(rawText, fixture);
+  let record;
+  try {
+    record = ingestSs2CaptureTrace(rawText, fixture);
+  } catch (error) {
+    if (/null after-attestation placeholder/.test(error.message)) {
+      // Wrapper traces cannot attest the post-session hash themselves; run
+      // the same check verify-install performs, live, and stamp the result.
+      const check = await verifyInstallAgainstFingerprint(options);
+      if (!check.ok) {
+        throw new Error(
+          "Post-session hash verification FAILED: the installed build no longer matches the pinned " +
+          "fingerprint, so this trace cannot be ingested as evidence."
+        );
+      }
+      console.log("Post-session hash verification passed; stamping installHashVerifiedAfter.");
+      record = ingestSs2CaptureTrace(rawText, fixture, { installHashVerifiedAfter: true });
+    } else if (/at least one injected sample/.test(error.message)) {
+      throw new Error(
+        `${error.message}\nEvery roll fell back to the live RNG, so this session fully diverged from ` +
+        "the fixture's expected tape before the first sample matched. The raw trace itself is the " +
+        "divergence evidence; keep it in captures/ and correct the isolated candidate's roll order from it."
+      );
+    } else {
+      throw error;
+    }
+  }
   const outPath = require_(options, "out", "--out");
   await writeJson(outPath, record);
   console.log(`Wrote observation ${record.observationId} (digest ${record.digest}) to ${outPath}`);

@@ -107,6 +107,38 @@ const BOOLEAN_COMBATANT_KEYS = new Set([
   "taunted2"
 ]);
 
+/** Exact key set of every projected combatant state (fixtures and observations). */
+export const SS2_PROJECTED_COMBATANT_KEYS = Object.freeze([
+  "armourclass",
+  "armourclass_max",
+  "boot",
+  "breastplate",
+  "burning",
+  "frozen",
+  "gauntlet",
+  "greaves",
+  "helmet",
+  "hitpoints",
+  "life_stolen",
+  "poison",
+  "shield",
+  "shinguard",
+  "shoulderguard",
+  "staminaleft",
+  "taunted1",
+  "taunted2"
+]);
+const RESULT_EVENT_KEYS = Object.freeze([
+  "arenaLabel",
+  "completionToken",
+  "loserSide",
+  "overlayLabel",
+  "reason",
+  "status",
+  "type",
+  "winnerSide"
+]);
+
 export class GoldenFixtureError extends Error {
   constructor(message, options = {}) {
     super(message, options);
@@ -233,14 +265,73 @@ export function assertSs2MutationTraceShape(trace, path = "mutationTrace", Error
       if (
         entry.sequence !== index + 1 ||
         typeof entry.path !== "string" ||
-        !/^\/(?:hero|villain|result)(?:\/[a-z][a-z0-9_]*)?$/.test(entry.path) ||
+        !/^\/(?:(?:hero|villain)\/[a-z][a-z0-9_]*|result)$/.test(entry.path) ||
         typeof entry.reason !== "string" ||
         !/^[a-z][a-z-]{0,63}$/.test(entry.reason)
       ) {
         throw new GoldenFixtureValidationError(`${path}[${index}] has invalid ordering or metadata.`);
       }
+      if (jsonValuesEqual(entry.before ?? null, entry.after ?? null)) {
+        throw new GoldenFixtureValidationError(
+          `${path}[${index}] is a no-op assignment (before equals after); ` +
+          "no-op sets are dropped at ingest and can never match."
+        );
+      }
     });
   });
+}
+
+/**
+ * Shared battle-result event shape check. The convention ties the labels and
+ * completion token to the winner side; `null` means no result was produced.
+ */
+export function assertSs2ResultEventShape(resultEvent, path = "resultEvent", ErrorClass = GoldenFixtureValidationError) {
+  rethrowAs(ErrorClass, () => {
+    if (resultEvent === null) return;
+    if (!isPlainObject(resultEvent)) {
+      throw new GoldenFixtureValidationError(`${path} must be null or an object.`);
+    }
+    assertExactKeys(resultEvent, RESULT_EVENT_KEYS, path);
+    const { winnerSide, loserSide } = resultEvent;
+    if (
+      resultEvent.type !== "battle-result-pending" ||
+      resultEvent.status !== "pending-animation" ||
+      resultEvent.reason !== "elimination" ||
+      (winnerSide !== "hero" && winnerSide !== "villain") ||
+      (loserSide !== "hero" && loserSide !== "villain") ||
+      winnerSide === loserSide
+    ) {
+      throw new GoldenFixtureValidationError(
+        `${path} must be a battle-result-pending event with distinct sides.`
+      );
+    }
+    const expectedOverlay = winnerSide === "hero" ? "combatwon" : "combatlost";
+    const expectedArena = winnerSide === "hero" ? "combat_won" : "combat_lost";
+    const expectedToken = `ss2-1v1:${winnerSide}:${loserSide}:${expectedArena}`;
+    if (
+      resultEvent.overlayLabel !== expectedOverlay ||
+      resultEvent.arenaLabel !== expectedArena ||
+      resultEvent.completionToken !== expectedToken
+    ) {
+      throw new GoldenFixtureValidationError(
+        `${path} labels and completion token must follow the 1v1 convention.`
+      );
+    }
+  });
+}
+
+function assertProjectedCombatantShape(projection, path) {
+  if (!isPlainObject(projection)) throw new GoldenFixtureValidationError(`${path} must be an object.`);
+  assertExactKeys(projection, SS2_PROJECTED_COMBATANT_KEYS, path);
+  for (const [key, value] of Object.entries(projection)) {
+    if (BOOLEAN_COMBATANT_KEYS.has(key)) {
+      if (typeof value !== "boolean") {
+        throw new GoldenFixtureValidationError(`${path}.${key} must be boolean.`);
+      }
+    } else if (!Number.isFinite(value)) {
+      throw new GoldenFixtureValidationError(`${path}.${key} must be numeric.`);
+    }
+  }
 }
 
 function assertExpectedShape(expected) {
@@ -255,6 +346,42 @@ function assertExpectedShape(expected) {
   assertSs2MutationTraceShape(expected.mutationTrace, "mutationTrace");
   if (!isPlainObject(expected.state)) throw new GoldenFixtureValidationError("expected.state must be an object.");
   assertExactKeys(expected.state, ["hero", "result", "villain"], "expected.state");
+  assertProjectedCombatantShape(expected.state.hero, "expected.state.hero");
+  assertProjectedCombatantShape(expected.state.villain, "expected.state.villain");
+  assertSs2ResultEventShape(expected.resultEvent, "expected.resultEvent");
+
+  // The /result mutation entry and the result event must agree: a lethal
+  // outcome records exactly one /result entry whose payload is the event.
+  const resultEntries = expected.mutationTrace.filter((entry) => entry.path === "/result");
+  if (expected.resultEvent === null) {
+    if (resultEntries.length !== 0) {
+      throw new GoldenFixtureValidationError(
+        "expected.mutationTrace records /result but expected.resultEvent is null."
+      );
+    }
+    if (expected.state.result !== null) {
+      throw new GoldenFixtureValidationError(
+        "expected.state.result must be null when no result event is expected."
+      );
+    }
+  } else {
+    const resultPayload = { ...expected.resultEvent };
+    delete resultPayload.type;
+    if (
+      resultEntries.length !== 1 ||
+      resultEntries[0].before !== null ||
+      !jsonValuesEqual(resultEntries[0].after, resultPayload)
+    ) {
+      throw new GoldenFixtureValidationError(
+        "a result-bearing fixture needs exactly one /result mutation whose payload equals the result event."
+      );
+    }
+    if (!jsonValuesEqual(expected.state.result, resultPayload)) {
+      throw new GoldenFixtureValidationError(
+        "expected.state.result must equal the expected result event payload."
+      );
+    }
+  }
 }
 
 /** Shared 1v1 scenario shape check for fixtures and observations. */

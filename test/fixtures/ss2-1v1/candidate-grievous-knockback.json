@@ -28,8 +28,8 @@
       "defence": 11,
       "strength": 9,
       "charisma": 5,
-      "min_damage": 12,
-      "max_damage": 20,
+      "min_damage": 20,
+      "max_damage": 28,
       "hitpoints": 60,
       "hitpointsmax": 60,
       "staminaleft": 20,
@@ -44,9 +44,9 @@
       "staminaleft": 20,
       "staminamax": 100,
       "gladiator_dir": "left",
-      "armourclass": 12,
-      "armourclass_max": 12,
-      "breastplate": 5
+      "armourclass": 16,
+      "armourclass_max": 16,
+      "breastplate": 1
     }
   },
   "samples": [
@@ -62,7 +62,7 @@
       "source": "randomBetween",
       "min": 1,
       "max": 100,
-      "value": 99
+      "value": 100
     },
     {
       "label": "armour-removal-roll",
@@ -93,10 +93,10 @@
       "rollNeeded": 50,
       "diceroll": 75,
       "hit": true,
-      "selectedDamage": 30,
+      "selectedDamage": 42,
       "criticalSample": 20,
       "inheritedCritical": false,
-      "deflectionRoll": 99,
+      "deflectionRoll": 100,
       "deflectionThreshold": 100,
       "criticalCleared": false,
       "criticalSampleAfterDeflection": 20,
@@ -104,8 +104,8 @@
       "effectiveDamageMethod": "grievous"
     },
     "mutation": {
-      "armourDamage": 12,
-      "hitpointDamage": 18,
+      "armourDamage": 16,
+      "hitpointDamage": 26,
       "staminaBonus": 1,
       "armourRemovalRoll": 10,
       "armourRemovals": [
@@ -117,7 +117,7 @@
       ],
       "knockback": {
         "roll": 2,
-        "force": 84,
+        "force": 96,
         "animation": true
       },
       "enchantmentRoll": 100,
@@ -127,15 +127,15 @@
       {
         "sequence": 1,
         "path": "/villain/armourclass",
-        "before": 12,
-        "after": -18,
+        "before": 16,
+        "after": -26,
         "reason": "physical-damage"
       },
       {
         "sequence": 2,
         "path": "/villain/hitpoints",
         "before": 50,
-        "after": 32,
+        "after": 24,
         "reason": "physical-damage"
       },
       {
@@ -148,7 +148,7 @@
       {
         "sequence": 4,
         "path": "/villain/armourclass",
-        "before": -18,
+        "before": -26,
         "after": 0,
         "reason": "stat-clamp"
       }
@@ -176,9 +176,9 @@
         "shield": 0
       },
       "villain": {
-        "hitpoints": 32,
+        "hitpoints": 24,
         "armourclass": 0,
-        "armourclass_max": 12,
+        "armourclass_max": 16,
         "staminaleft": 21,
         "burning": false,
         "frozen": false,
@@ -188,7 +188,7 @@
         "taunted2": false,
         "helmet": 0,
         "shoulderguard": 0,
-        "breastplate": 5,
+        "breastplate": 1,
         "gauntlet": 0,
         "greaves": 0,
         "shinguard": 0,

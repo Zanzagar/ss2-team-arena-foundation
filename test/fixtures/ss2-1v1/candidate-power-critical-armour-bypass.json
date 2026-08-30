@@ -41,9 +41,9 @@
       "staminaleft": 20,
       "staminamax": 100,
       "gladiator_dir": "left",
-      "armourclass": 15,
-      "armourclass_max": 15,
-      "breastplate": 5
+      "armourclass": 16,
+      "armourclass_max": 16,
+      "breastplate": 1
     }
   },
   "samples": [
@@ -161,8 +161,8 @@
       },
       "villain": {
         "hitpoints": 30,
-        "armourclass": 15,
-        "armourclass_max": 15,
+        "armourclass": 16,
+        "armourclass_max": 16,
         "staminaleft": 21,
         "burning": false,
         "frozen": false,
@@ -172,7 +172,7 @@
         "taunted2": false,
         "helmet": 0,
         "shoulderguard": 0,
-        "breastplate": 5,
+        "breastplate": 1,
         "gauntlet": 0,
         "greaves": 0,
         "shinguard": 0,

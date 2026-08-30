@@ -114,8 +114,11 @@ function readEnd(lines) {
   if (keys.length !== 2 || keys[0] !== "installHashVerifiedAfter" || keys[1] !== "t") {
     fail(lineNumber, "the end line must carry only installHashVerifiedAfter.");
   }
-  if (entry.installHashVerifiedAfter !== true) {
-    fail(lineNumber, "the installed hash must be verified after the session (installHashVerifiedAfter=true).");
+  // `null` is the wrapper's placeholder: the after-attestation cannot be
+  // known while the game is still running, so ingest must supply it from a
+  // live verify-install run.
+  if (entry.installHashVerifiedAfter !== true && entry.installHashVerifiedAfter !== null) {
+    fail(lineNumber, "installHashVerifiedAfter must be true or the null placeholder.");
   }
   return entry;
 }
@@ -137,11 +140,19 @@ function projectFields(fields, requiredKeys, context, lineNumber) {
  * observation scenario; the recorded values are always the observed ones, so
  * a mis-staged scenario surfaces later as an explicit fixture mismatch.
  */
-export function ingestSs2CaptureTrace(rawText, fixture) {
+export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
   validateSs2OneVsOneFixture(fixture);
   const lines = parseLines(rawText);
   const meta = readMeta(lines);
   const end = readEnd(lines);
+  const installHashVerifiedAfter =
+    end.installHashVerifiedAfter === true || options.installHashVerifiedAfter === true;
+  if (!installHashVerifiedAfter) {
+    throw new CaptureTraceError(
+      "The trace carries the null after-attestation placeholder; ingest requires a live " +
+      "post-session hash verification (options.installHashVerifiedAfter=true from verify-install)."
+    );
+  }
 
   const staged = { hero: null, villain: null };
   const finals = { hero: null, villain: null };
@@ -350,7 +361,7 @@ export function ingestSs2CaptureTrace(rawText, fixture) {
       method: meta.method,
       observedAt: meta.observedAt,
       installHashVerifiedBefore: meta.installHashVerifiedBefore,
-      installHashVerifiedAfter: end.installHashVerifiedAfter,
+      installHashVerifiedAfter,
       mutationGranularity: meta.mutationGranularity
     },
     target: { fixtureId: fixture.fixtureId },
