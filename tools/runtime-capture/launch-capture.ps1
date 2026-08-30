@@ -37,6 +37,13 @@ $ruffle = Get-ChildItem -LiteralPath (Join-Path $projectRoot '.tools') -Filter '
     Select-Object -First 1
 if (-not $ruffle) { throw 'Portable Ruffle is not installed. Run tools/install-ruffle.ps1 first.' }
 
+# One session at a time: a stale window that loaded older save state flushes
+# it back on exit, silently clobbering everything a newer session saved
+# (observed live - last writer wins).
+if (Get-Process ruffle -ErrorAction SilentlyContinue) {
+    throw 'A Ruffle window is already open; close every capture window before launching a session.'
+}
+
 Write-Host 'Pre-session install verification...'
 & $nodeExe tools/capture-session.mjs verify-install
 if ($LASTEXITCODE -ne 0) { throw 'The installed build does not match the pinned fingerprint. Aborting.' }
