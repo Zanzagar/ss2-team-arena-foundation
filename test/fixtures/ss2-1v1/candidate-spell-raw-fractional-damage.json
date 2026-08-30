@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-spell-raw-fractional-damage",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "candidateFlags": [
+      "spell-ingress",
+      "spell-id-in-attack-direction",
+      "raw-unceiled-applied-damage",
+      "synthetic-fractional-armour",
+      "armour-left-negative-until-clamp"
+    ],
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/magic_damage_character",
+      "overlay:862/frame:52/DoAction@0x23e7cf/villain_cast_spells"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 30,
+    "result": null,
+    "hero": {
+      "magicka": 12,
+      "hitpoints": 200,
+      "hitpointsmax": 200,
+      "staminaleft": 70,
+      "staminamax": 150
+    },
+    "villain": {
+      "magicka": 4,
+      "hitpoints": 200,
+      "hitpointsmax": 200,
+      "staminaleft": 40,
+      "staminamax": 150,
+      "armourclass": 90.5,
+      "armourclass_max": 96,
+      "breastplate": 6,
+      "breastplate_defence": 96
+    }
+  },
+  "samples": [
+    {
+      "label": "fireball-damage-roll",
+      "source": "randomBetween",
+      "min": 80,
+      "max": 160,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "spellId": 30,
+      "spell": "fireball",
+      "damageMethod": "burning",
+      "fightMode": "tournament",
+      "rolledDamage": 100,
+      "incomingDamage": 100,
+      "displayedBonus": 100,
+      "armourBefore": 90.5,
+      "armourAfterDamage": -9.5,
+      "armourEquality": false,
+      "overflowRewritten": true,
+      "appliedDamage": 9.5,
+      "hitpointsApplied": true
+    },
+    "mutation": {
+      "appliedDamage": 9.5,
+      "armourDamage": 90.5,
+      "hitpointDamage": 9.5,
+      "staminaBonus": 1,
+      "psycheUpApplied": true
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/armourclass",
+        "before": 90.5,
+        "after": -9.5,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/hitpoints",
+        "before": 200,
+        "after": 190.5,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 3,
+        "path": "/villain/psyche_up",
+        "before": null,
+        "after": 1,
+        "reason": "psyche-up"
+      },
+      {
+        "sequence": 4,
+        "path": "/villain/staminaleft",
+        "before": 40,
+        "after": 41,
+        "reason": "breastplate-stamina"
+      },
+      {
+        "sequence": 5,
+        "path": "/villain/armourclass",
+        "before": -9.5,
+        "after": 0,
+        "reason": "stat-clamp"
+      }
+    ],
+    "resultEvent": null,
+    "state": {
+      "hero": {
+        "hitpoints": 200,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 70,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 190.5,
+        "armourclass": 0,
+        "armourclass_max": 96,
+        "staminaleft": 41,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 6,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": null
+    }
+  }
+}

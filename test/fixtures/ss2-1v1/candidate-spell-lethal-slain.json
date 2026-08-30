@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-spell-lethal-slain",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "candidateFlags": [
+      "spell-ingress",
+      "spell-id-in-attack-direction",
+      "magic-ingress-has-no-direction-chain",
+      "armour-left-negative-until-clamp",
+      "unconditional-breastplate-stamina"
+    ],
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/magic_damage_character",
+      "overlay:862/frame:52/DoAction@0x240c7f/death"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "villain",
+    "attackDirection": 32,
+    "fightMode": "misc",
+    "result": null,
+    "hero": {
+      "magicka": 5,
+      "hitpoints": 260,
+      "hitpointsmax": 260,
+      "staminaleft": 80,
+      "staminamax": 180,
+      "armourclass": 96,
+      "armourclass_max": 96,
+      "breastplate": 6,
+      "breastplate_defence": 96,
+      "poison": true
+    },
+    "villain": {
+      "magicka": 18,
+      "hitpoints": 240,
+      "hitpointsmax": 240,
+      "staminaleft": 65,
+      "staminamax": 150,
+      "taunted2": true
+    }
+  },
+  "samples": [
+    {
+      "label": "dire-fireball-damage-roll",
+      "source": "randomBetween",
+      "min": 300,
+      "max": 600,
+      "value": 400
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "spellId": 32,
+      "spell": "dire-fireball",
+      "damageMethod": null,
+      "fightMode": "misc",
+      "rolledDamage": 400,
+      "incomingDamage": 400,
+      "displayedBonus": 400,
+      "armourBefore": 96,
+      "armourAfterDamage": -304,
+      "armourEquality": false,
+      "overflowRewritten": true,
+      "appliedDamage": 304,
+      "hitpointsApplied": true
+    },
+    "mutation": {
+      "appliedDamage": 304,
+      "armourDamage": 96,
+      "hitpointDamage": 260,
+      "staminaBonus": 19,
+      "psycheUpApplied": true
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/hero/armourclass",
+        "before": 96,
+        "after": -304,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/hero/hitpoints",
+        "before": 260,
+        "after": -44,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 3,
+        "path": "/hero/psyche_up",
+        "before": null,
+        "after": 1,
+        "reason": "psyche-up"
+      },
+      {
+        "sequence": 4,
+        "path": "/hero/staminaleft",
+        "before": 80,
+        "after": 99,
+        "reason": "breastplate-stamina"
+      },
+      {
+        "sequence": 5,
+        "path": "/hero/hitpoints",
+        "before": -44,
+        "after": 0,
+        "reason": "stat-clamp"
+      },
+      {
+        "sequence": 6,
+        "path": "/hero/armourclass",
+        "before": -304,
+        "after": 0,
+        "reason": "stat-clamp"
+      },
+      {
+        "sequence": 7,
+        "path": "/hero/poison",
+        "before": true,
+        "after": false,
+        "reason": "death-status-clear"
+      },
+      {
+        "sequence": 8,
+        "path": "/villain/taunted2",
+        "before": true,
+        "after": false,
+        "reason": "death-taunt-clear"
+      },
+      {
+        "sequence": 9,
+        "path": "/result",
+        "before": null,
+        "after": {
+          "status": "pending-animation",
+          "completionToken": "ss2-1v1:villain:hero:combat_lost",
+          "winnerSide": "villain",
+          "loserSide": "hero",
+          "reason": "elimination",
+          "howDied": "slain",
+          "overlayLabel": "combatlost",
+          "arenaLabel": "combat_lost"
+        },
+        "reason": "battle-result-pending"
+      }
+    ],
+    "resultEvent": {
+      "type": "battle-result-pending",
+      "status": "pending-animation",
+      "completionToken": "ss2-1v1:villain:hero:combat_lost",
+      "winnerSide": "villain",
+      "loserSide": "hero",
+      "reason": "elimination",
+      "howDied": "slain",
+      "overlayLabel": "combatlost",
+      "arenaLabel": "combat_lost"
+    },
+    "state": {
+      "hero": {
+        "hitpoints": 0,
+        "armourclass": 0,
+        "armourclass_max": 96,
+        "staminaleft": 99,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 6,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 240,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 65,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:villain:hero:combat_lost",
+        "winnerSide": "villain",
+        "loserSide": "hero",
+        "reason": "elimination",
+        "howDied": "slain",
+        "overlayLabel": "combatlost",
+        "arenaLabel": "combat_lost"
+      }
+    }
+  }
+}

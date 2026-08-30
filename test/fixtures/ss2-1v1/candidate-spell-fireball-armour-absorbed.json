@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-spell-fireball-armour-absorbed",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "candidateFlags": [
+      "spell-ingress",
+      "spell-id-in-attack-direction",
+      "unconditional-psyche-up",
+      "duel-absorbed-hit-does-not-defeat"
+    ],
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/magic_damage_character",
+      "overlay:862/frame:52/DoAction@0x23e7cf/villain_cast_spells"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 30,
+    "fightMode": "duel",
+    "result": null,
+    "hero": {
+      "magicka": 12,
+      "hitpoints": 180,
+      "hitpointsmax": 180,
+      "staminaleft": 90,
+      "staminamax": 140
+    },
+    "villain": {
+      "magicka": 4,
+      "hitpoints": 180,
+      "hitpointsmax": 180,
+      "staminaleft": 40,
+      "staminamax": 140,
+      "armourclass": 120,
+      "armourclass_max": 120,
+      "helmet": 6,
+      "helmet_defence": 60,
+      "shield": 5,
+      "shield_defence": 60
+    }
+  },
+  "samples": [
+    {
+      "label": "fireball-damage-roll",
+      "source": "randomBetween",
+      "min": 80,
+      "max": 160,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "spellId": 30,
+      "spell": "fireball",
+      "damageMethod": "burning",
+      "fightMode": "duel",
+      "rolledDamage": 100,
+      "incomingDamage": 100,
+      "displayedBonus": 100,
+      "armourBefore": 120,
+      "armourAfterDamage": 20,
+      "armourEquality": false,
+      "overflowRewritten": false,
+      "appliedDamage": 100,
+      "hitpointsApplied": false
+    },
+    "mutation": {
+      "appliedDamage": 100,
+      "armourDamage": 100,
+      "hitpointDamage": 0,
+      "staminaBonus": 0,
+      "psycheUpApplied": true
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/armourclass",
+        "before": 120,
+        "after": 20,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/psyche_up",
+        "before": null,
+        "after": 1,
+        "reason": "psyche-up"
+      }
+    ],
+    "resultEvent": null,
+    "state": {
+      "hero": {
+        "hitpoints": 180,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 90,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 180,
+        "armourclass": 20,
+        "armourclass_max": 120,
+        "staminaleft": 40,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 6,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 5
+      },
+      "result": null
+    }
+  }
+}

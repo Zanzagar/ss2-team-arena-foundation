@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-spell-first-blood-duel",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "candidateFlags": [
+      "spell-ingress",
+      "spell-id-in-attack-direction",
+      "first-blood-duel-gate",
+      "unconditional-psyche-up"
+    ],
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/magic_damage_character",
+      "overlay:862/frame:52/DoAction@0x240c7f/death"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 30,
+    "fightMode": "duel",
+    "result": null,
+    "hero": {
+      "magicka": 13,
+      "hitpoints": 220,
+      "hitpointsmax": 220,
+      "staminaleft": 75,
+      "staminamax": 150,
+      "taunted1": true
+    },
+    "villain": {
+      "magicka": 4,
+      "hitpoints": 220,
+      "hitpointsmax": 220,
+      "staminaleft": 50,
+      "staminamax": 150,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "burning": true
+    }
+  },
+  "samples": [
+    {
+      "label": "fireball-damage-roll",
+      "source": "randomBetween",
+      "min": 80,
+      "max": 160,
+      "value": 80
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "spellId": 30,
+      "spell": "fireball",
+      "damageMethod": "burning",
+      "fightMode": "duel",
+      "rolledDamage": 80,
+      "incomingDamage": 80,
+      "displayedBonus": 80,
+      "armourBefore": 0,
+      "armourAfterDamage": 0,
+      "armourEquality": false,
+      "overflowRewritten": false,
+      "appliedDamage": 80,
+      "hitpointsApplied": true
+    },
+    "mutation": {
+      "appliedDamage": 80,
+      "armourDamage": 0,
+      "hitpointDamage": 80,
+      "staminaBonus": 0,
+      "psycheUpApplied": true
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/hitpoints",
+        "before": 220,
+        "after": 140,
+        "reason": "magic-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/psyche_up",
+        "before": null,
+        "after": 1,
+        "reason": "psyche-up"
+      },
+      {
+        "sequence": 3,
+        "path": "/villain/burning",
+        "before": true,
+        "after": false,
+        "reason": "death-status-clear"
+      },
+      {
+        "sequence": 4,
+        "path": "/hero/taunted1",
+        "before": true,
+        "after": false,
+        "reason": "death-taunt-clear"
+      },
+      {
+        "sequence": 5,
+        "path": "/result",
+        "before": null,
+        "after": {
+          "status": "pending-animation",
+          "completionToken": "ss2-1v1:hero:villain:combat_won",
+          "winnerSide": "hero",
+          "loserSide": "villain",
+          "reason": "first-blood",
+          "howDied": "yield",
+          "overlayLabel": "combatwon",
+          "arenaLabel": "combat_won"
+        },
+        "reason": "battle-result-pending"
+      }
+    ],
+    "resultEvent": {
+      "type": "battle-result-pending",
+      "status": "pending-animation",
+      "completionToken": "ss2-1v1:hero:villain:combat_won",
+      "winnerSide": "hero",
+      "loserSide": "villain",
+      "reason": "first-blood",
+      "howDied": "yield",
+      "overlayLabel": "combatwon",
+      "arenaLabel": "combat_won"
+    },
+    "state": {
+      "hero": {
+        "hitpoints": 220,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 75,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 140,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 50,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "first-blood",
+        "howDied": "yield",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      }
+    }
+  }
+}
