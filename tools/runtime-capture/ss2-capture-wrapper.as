@@ -119,6 +119,18 @@ var DEFAULT_WATCH_FIELDS = [
     "attack", "defence", "strength", "charisma", "magicka",
     "min_damage", "max_damage", "hitpointsmax", "staminamax", "ammo_left"
 ];
+
+// Runtime-verified: vanilla leaves the status flags UNDEFINED until first
+// set. The trace normalizes undefined to false for exactly these fields, in
+// dumps and watch callbacks alike, so records satisfy the boolean schema.
+var STATUS_DEFAULT_FALSE = {
+    burning: true, frozen: true, poison: true, life_stolen: true,
+    taunted1: true, taunted2: true
+};
+function normalizeFieldValue(name, value) {
+    if (value === undefined && STATUS_DEFAULT_FALSE[name]) return false;
+    return value;
+}
 var watchFields = rawWatchFields != undefined && rawWatchFields != ""
     ? rawWatchFields.split(",")
     : DEFAULT_WATCH_FIELDS;
@@ -162,9 +174,15 @@ function dumpSide(kind, side) {
     var fields = {};
     for (var i = 0; i < watchFields.length; i++) {
         var name = watchFields[i];
-        if (source[name] !== undefined) fields[name] = source[name];
+        var value = normalizeFieldValue(name, source[name]);
+        if (value !== undefined) fields[name] = value;
     }
-    if (source.gladiator_dir !== undefined) fields.gladiator_dir = source.gladiator_dir;
+    // Runtime-verified: gladiator_dir lives on the fighter CLIP, not the
+    // persistent stat object (fall back to the stat object if present).
+    var clip = gameRoot().arena.gladiators[side];
+    var facing = clip != undefined ? clip.gladiator_dir : undefined;
+    if (facing === undefined) facing = source.gladiator_dir;
+    if (facing !== undefined) fields.gladiator_dir = facing;
     emit({ t: kind, side: side, fields: fields });
 }
 
@@ -176,8 +194,8 @@ function makeWatcher(side) {
             emit({
                 t: "set",
                 path: "/" + side + "/" + prop,
-                before: oldValue,
-                after: newValue,
+                before: normalizeFieldValue(prop, oldValue),
+                after: normalizeFieldValue(prop, newValue),
                 hook: currentHook
             });
         }

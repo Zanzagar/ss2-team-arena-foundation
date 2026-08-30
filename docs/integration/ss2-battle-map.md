@@ -103,6 +103,18 @@ This split is the first adapter seam. Team mode should use combatant IDs and
 keep `clipByCombatantId` outside deterministic state; it should not multiply
 the existing hero/villain globals.
 
+Runtime-observed 2026-08-30: the persistent combat objects leave the status
+flags (`burning`, `frozen`, `poison`, `life_stolen`, `taunted1`, `taunted2`)
+**undefined** until something sets them, and do not carry `gladiator_dir` at
+action time — the facing lives on the fighter clips. The capture wrapper
+normalizes undefined status flags to `false` and reads the facing from the
+clip. Live captures also confirmed the `battlevalues` armour sums three
+times over (boot 4 + greaves 4 → 20; helmet 2 + shield 2 → 44; breastplate 1
++ gauntlet 1 → 21), the full physical roll order of a normal attack, the
+`attack_chances` normal formula (attack 3 vs defence 1 → chance 60, hit at
+diceroll 50), the deflection threshold with helmet 2 (97), the armour-first
+damage path, and the unconditional breastplate-stamina write.
+
 Observed data fields include:
 
 | Group | Fields |
@@ -295,12 +307,17 @@ Both damage ingresses end with the same gate, decoded opcode-by-opcode from
   outside duels.
 - `death(whichcharacter, how_died)` itself contains no hitpoint or
   `fight_mode` reads (verified: its only branches are the two clip
-  comparisons), so nothing downstream statically prevents the first-blood
-  term from ending a fight. Because observable vanilla battles do not end on
-  first blood, the live `fight_mode` values during ordinary fights (only one
-  entry path is verified to set `"misc"`) are an **unresolved runtime
-  question** for the capture workflow; the candidate resolver deliberately
-  models the `hitpoints <= 0` term only.
+  comparisons).
+- **Runtime-resolved 2026-08-30** (first live captures): ordinary arena
+  duels run with `_global.fight_mode = "duel"`, so the non-tournament
+  `hitpoints < hitpointsmax` term is simply the **first-blood duel rule** —
+  the fight ends via `death(clip, "yield")` on the first hitpoint damage,
+  and a fully armour-absorbed hit does not trigger it (observed directly:
+  44 armour absorbed a 23-damage hit with no defeat). The candidate
+  resolver still models the `hitpoints <= 0` term only; lethal-outcome
+  captures should be staged in non-first-blood fights, and the live
+  `fight_mode` of tournament/campaign battles is still to be observed
+  (every capture now records it for free).
 
 ### Spell ingress `magic_damage_character` (byte-verified 2026-08-30)
 

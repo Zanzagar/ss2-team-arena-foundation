@@ -21,7 +21,8 @@ export const SS2_FIXTURE_FILES = [
   "candidate-deflection-threshold-discriminator.json",
   "candidate-frozen-enchantment-proc.json",
   "candidate-bash-inherited-critical.json",
-  "candidate-bombard-threshold.json"
+  "candidate-bombard-threshold.json",
+  "candidate-duel-absorbed-normal-hit.json"
 ];
 
 export async function loadSs2Fixtures() {

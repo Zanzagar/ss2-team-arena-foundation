@@ -67,6 +67,7 @@ recorded as integer range 0 through `n - 1`.
 | `candidate-frozen-enchantment-proc` | enchantment type 3 applies frozen below the potency threshold |
 | `candidate-bash-inherited-critical` | bash (23) at its chance threshold inheriting the transient criticalhit register — first fixture exercising `scenario.transient` end to end |
 | `candidate-bombard-threshold` | bombard (21) threshold hit with its critical-before-damage roll order and no knockback roll |
+| `candidate-duel-absorbed-normal-hit` | authored from the first live capture (2026-08-30): the operator's real gladiator's fully armour-absorbed normal attack in a first-blood duel; the resolver reproduces the observed trace exactly |
 
 The candidate module also preserves the mapped ranged attacker-shield chance
 adjustment, critical-deflection threshold, native cosmetic debris rolls when a

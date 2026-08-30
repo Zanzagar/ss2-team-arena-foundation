@@ -13,28 +13,26 @@
  * under test/observations/.
  */
 
+// Runtime-verified quirks mirrored here so the gate exercises them: status
+// flags stay UNDEFINED until something sets them (the wrapper must emit
+// false), and gladiator_dir lives on the fighter CLIPS, not these objects.
 var game = {
     hero: {
         attack: 11, defence: 11, strength: 5, charisma: 5, magicka: 0,
         min_damage: 12, max_damage: 20,
         hitpoints: 60, hitpointsmax: 60, staminaleft: 20, staminamax: 100,
         armourclass: 0, armourclass_max: 0,
-        burning: false, frozen: false, poison: false, life_stolen: false,
-        taunted1: false, taunted2: false,
         helmet: 0, shoulderguard: 0, breastplate: 0, gauntlet: 0,
-        greaves: 0, shinguard: 0, boot: 0, shield: 0,
-        gladiator_dir: "right"
+        greaves: 0, shinguard: 0, boot: 0, shield: 0
     },
     villain: {
         attack: 11, defence: 11, strength: 0, charisma: 0, magicka: 0,
         min_damage: 1, max_damage: 1,
         hitpoints: 12, hitpointsmax: 40, staminaleft: 20, staminamax: 100,
         armourclass: 0, armourclass_max: 0,
-        burning: true, frozen: false, poison: false, life_stolen: false,
-        taunted1: false, taunted2: false,
+        burning: true,
         helmet: 0, shoulderguard: 0, breastplate: 0, gauntlet: 0,
-        greaves: 0, shinguard: 0, boot: 0, shield: 0,
-        gladiator_dir: "left"
+        greaves: 0, shinguard: 0, boot: 0, shield: 0
     }
 };
 
@@ -42,6 +40,8 @@ this.createEmptyMovieClip("arena", 1);
 arena.createEmptyMovieClip("gladiators", 2);
 arena.gladiators.createEmptyMovieClip("hero", 301);
 arena.gladiators.createEmptyMovieClip("villain", 300);
+arena.gladiators.hero.gladiator_dir = "right";
+arena.gladiators.villain.gladiator_dir = "left";
 // Matches the byte-verified vanilla path: the overlay controller is a child
 // of arena.gladiators, attached at depth 40000.
 arena.gladiators.createEmptyMovieClip("overlay", 40000);
