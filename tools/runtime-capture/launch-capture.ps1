@@ -58,7 +58,13 @@ param(
     # with max_gladiators unset. Until that is understood, a session started
     # this way cannot reach a battle, and parallel capture stays blocked on
     # it.
-    [string] $SaveDirectory = ""
+    [string] $SaveDirectory = "",
+    # Extra Object.watch fields, comma separated, ADDED to the wrapper default
+    # list rather than replacing it. Needed by fixtures that stage the
+    # per-piece <piece>_defence fields, which the default omits and ingest
+    # refuses a trace for when the fixture stages them. Leave empty for every
+    # capture that matches an existing golden.
+    [string] $WatchFields = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -132,6 +138,7 @@ $ruffleArgs = @(
     "-Ptape=$tape",
     "-Pautopilot=$Autopilot",
     "-Pnavigate=$Navigate",
+    "-PwatchFields=$WatchFields",
     $wrapperSwf
 )
 if ($FrameRate -gt 0) { $ruffleArgs = @('--frame-rate', "$FrameRate") + $ruffleArgs }

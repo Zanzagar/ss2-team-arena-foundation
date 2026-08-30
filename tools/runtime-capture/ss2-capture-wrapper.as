@@ -142,9 +142,39 @@ function normalizeFieldValue(name, value) {
     if (value === undefined && STATUS_DEFAULT_FALSE[name]) return false;
     return value;
 }
-var watchFields = rawWatchFields != undefined && rawWatchFields != ""
-    ? rawWatchFields.split(",")
-    : DEFAULT_WATCH_FIELDS;
+// watchFields EXTENDS the default list; it does not replace it.
+//
+// Replacing was the original behaviour and it made the flag unusable for what
+// it is needed for. The armoured candidates stage the per-piece <piece>_defence
+// fields, which the default list omits, and ingest refuses a trace whose staged
+// dump lacks a field the fixture stages - so those fixtures could not be
+// captured at all. Replacing the list to add eight names would have dropped the
+// twenty-eight the projection depends on.
+//
+// Extending also keeps the default a fixed point: a session that passes nothing
+// watches exactly what every promoted golden was captured with, so the twenty-two
+// already in the repository stay reproducible. Widening the DEFAULT itself would
+// not have been safe - the watch fires per assignment, so a newly watched field
+// the game happens to write during an armed action would add mutation lines and
+// diverge every existing golden.
+var watchFields = DEFAULT_WATCH_FIELDS;
+if (rawWatchFields != undefined && rawWatchFields != "") {
+    var extraFields = rawWatchFields.split(",");
+    var seenField = {};
+    for (var wf = 0; wf < DEFAULT_WATCH_FIELDS.length; wf++) {
+        seenField[DEFAULT_WATCH_FIELDS[wf]] = true;
+    }
+    watchFields = DEFAULT_WATCH_FIELDS.concat([]);
+    for (var xf = 0; xf < extraFields.length; xf++) {
+        var extraName = extraFields[xf];
+        if (extraName != "" && seenField[extraName] != true) {
+            seenField[extraName] = true;
+            watchFields.push(extraName);
+        }
+    }
+    trace("{\"t\":\"dbg\",\"at\":\"watch-extended\",\"added\":" +
+        (watchFields.length - DEFAULT_WATCH_FIELDS.length) + "}");
+}
 
 // ---------------------------------------------------------------------------
 // Autopilot: performs the session's actions by calling the SAME entry point

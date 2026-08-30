@@ -185,9 +185,30 @@ probe back into a pair whose arms differ only in echoed values.
 
 ## What a session costs
 
-The prisoner route is save-neutral. `daybreak` sends a level-1 hero straight to
-the dungeon, and the one site that flushes the game's SharedObject sits on the
-town-square frame, which that route never enters.
+**The prisoner route writes the save on every run.** An earlier version of this
+section claimed the route was save-neutral because town square is the only
+flush site and the route never enters it. That reasoning is wrong, and it was
+wrong in a way that mattered: `refresh_gladiators` ends unconditionally with
+`SharedObject.getLocal("ss2_data")` and a `flush()`, and it is called from root
+frame 35 (`new_or_continue`) and root frame 84 (`load_saved_gladiators`) —
+both of which the navigator passes through, at `navStep 0` and `navStep 1`.
+Every capture session to date has flushed the store twice before reaching a
+fight.
+
+What is true, and what the evidence base actually rests on, is narrower and
+was verified rather than reasoned: the write is a near-identity rewrite, so the
+*content* does not change. `ss2_data.sol` has been byte-identical — 679 bytes,
+SHA-256 `6A06E9E8...` — before and after every capture, checked against a
+snapshot, while its modification time moves. So the data is safe, but that
+safety is a property of what `refresh_gladiators` happens to write, not of the
+route avoiding it.
+
+The distinction is load-bearing because the same function carries a **reset
+branch**: if `so_local.max_gladiators` reads as `undefined`, `0` or `NaN`, it
+blanks `character1`…`character11` to `"Empty,0"`, sets the count to zero, and
+flushes. That is almost certainly the "last writer wins" clobbering the
+launcher already warns about. Snapshot `ss2_data.sol` around **every** session,
+not only levelled ones.
 
 **A levelled session is not save-neutral.** Root frame 150 calls
 `save_character(_global.current_character)` on *every* entry to the town

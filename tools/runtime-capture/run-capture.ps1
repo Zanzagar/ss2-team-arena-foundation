@@ -37,7 +37,9 @@ param(
     # trace, instead of closing it immediately. Observational only - see the
     # block that uses it. Snapshot the save first: the post-victory route
     # reaches town square, which flushes the SharedObject.
-    [int] $LingerSec = 0
+    [int] $LingerSec = 0,
+    # See launch-capture.ps1 - extra watch fields, added to the default list.
+    [string] $WatchFields = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -94,6 +96,7 @@ $launcherArgs = @(
 )
 if ($SkipPipeline) { $launcherArgs += '-SkipPipeline' }
 if ($FrameRate -gt 0) { $launcherArgs += @('-FrameRate', "$FrameRate") }
+if ($WatchFields) { $launcherArgs += @('-WatchFields', "$WatchFields") }
 if ($SaveDirectory) { $launcherArgs += @('-SaveDirectory', "`"$SaveDirectory`"") }
 $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" `
