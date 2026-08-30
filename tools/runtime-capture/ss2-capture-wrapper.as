@@ -219,9 +219,16 @@ var CONTROLLERS = [
         sniperight: true, taunt: true, rest: true, jumpleft: true,
         jumpright: true, walkleft: true, walkright: true,
         psyche_up: true, wincrowd: true } },
-    // Byte-verified: this span Stops at 37, not 51. Frame 51 carries an
-    // unreached Stop that no mapped path enters.
-    { name: "closerange_archer", from: 28, to: 37, actions: {
+    // Two different frame numbers are true of this controller and must not be
+    // conflated. Its label OWNS frames 28-51 (the next label, heroactions, is
+    // at 52), but it RESTS on 37, where its Stop is; frame 51 carries a second
+    // Stop no mapped path reaches. This lookup maps a frame to its controller,
+    // so it wants the span it owns - the playhead can legitimately be anywhere
+    // inside it while the controller builds its buttons, and calling frames
+    // 38-51 "no controller" would accrue wait ticks against a step that is
+    // about to become available. Confirmed with the project's own tool:
+    // node tools/inspect-swf.mjs <swf> --labels --timeline 'sprite:862'
+    { name: "closerange_archer", from: 28, to: 51, actions: {
         bash_attack: true, shove: true, taunt: true, jumpleft: true,
         jumpright: true, walkright: true, psyche_up: true, wincrowd: true } }
 ];
