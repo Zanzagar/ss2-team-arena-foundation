@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-prisoner-normal-kill",
+  "observationId": "obs-diag",
+  "observationDigest": "d24f663423fb7f7b31647f74fee2d320ca87c81988c56987de8d82baff219cc0",
+  "sessionId": "session-diag",
+  "recordedAt": "2026-08-30T20:18:51.238Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 7,
+      "actual": 6
+    }
+  ]
+}

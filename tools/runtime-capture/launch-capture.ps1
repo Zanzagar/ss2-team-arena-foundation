@@ -20,6 +20,10 @@ param(
     [Parameter(Mandatory = $true)] [string] $SessionId,
     [Parameter(Mandatory = $true)] [string] $ObservationId,
     [ValidateSet('hero', 'villain')] [string] $AttackerSide = 'hero',
+    # Autopilot performs the in-battle actions by calling the game's own
+    # action entry point, e.g. 'walkright*5,normal_attack'. Leave empty to
+    # play the fight by hand.
+    [string] $Autopilot = '',
     [switch] $Passive
 )
 
@@ -86,6 +90,7 @@ $ruffleArgs = @(
     "-PattackerSide=$AttackerSide",
     "-Pinjected=$injected",
     "-Ptape=$tape",
+    "-Pautopilot=$Autopilot",
     $wrapperSwf
 )
 

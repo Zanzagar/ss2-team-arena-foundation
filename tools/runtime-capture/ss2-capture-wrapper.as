@@ -97,6 +97,7 @@ function dbg(label) {
 // ---------------------------------------------------------------------------
 var rawTape = _root.tape;
 var rawWatchFields = _root.watchFields;
+var rawAutopilot = _root.autopilot;
 var config = {
     gameUrl: _root.gameUrl,
     observationId: _root.observationId,
@@ -143,6 +144,59 @@ function normalizeFieldValue(name, value) {
 var watchFields = rawWatchFields != undefined && rawWatchFields != ""
     ? rawWatchFields.split(",")
     : DEFAULT_WATCH_FIELDS;
+
+// ---------------------------------------------------------------------------
+// Autopilot: performs the session's actions by calling the SAME entry point
+// the on-screen buttons call (getphase), so the game resolves everything
+// natively - the wrapper presses buttons, it never fabricates outcomes. This
+// is what makes unattended capture possible: the action icons are positioned
+// relative to the gladiator and move as he walks, so screen-coordinate
+// clicking cannot drive a multi-step fight, and OS input additionally
+// requires the window to stay focused and unobscured.
+//
+// Format: autopilot=walkright*5,normal_attack
+// ---------------------------------------------------------------------------
+var autopilotSteps = [];
+if (rawAutopilot != undefined && rawAutopilot != "") {
+    var apParts = rawAutopilot.split(",");
+    for (var ap = 0; ap < apParts.length; ap++) {
+        var seg = apParts[ap].split("*");
+        var repeat = seg.length > 1 ? Number(seg[1]) : 1;
+        for (var rep = 0; rep < repeat; rep++) autopilotSteps.push(seg[0]);
+    }
+}
+var autopilotIndex = 0;
+var autopilotIdleTicks = 0;
+var autopilotCooldown = 0;
+
+// Distinct overlay frames are logged once each: the controller sits on its
+// menu frames (button-building labels below heroactions=52) while waiting
+// for input, which is the readiness gate the autopilot uses.
+var seenFrames = {};
+function dbgFrame(f) {
+    if (seenFrames[f] == true) return;
+    seenFrames[f] = true;
+    trace("{\"t\":\"dbg\",\"at\":\"frame\",\"f\":" + f + "}");
+}
+
+function stepAutopilot() {
+    if (autopilotIndex >= autopilotSteps.length) return;
+    if (_global.battle_started != true) return;
+    var ov = overlayClip();
+    if (ov == undefined || typeof ov.getphase != "function") return;
+    if (autopilotCooldown > 0) { autopilotCooldown--; return; }
+    var frame = ov._currentframe;
+    dbgFrame(frame);
+    if (frame >= 52) { autopilotIdleTicks = 0; return; }
+    autopilotIdleTicks++;
+    if (autopilotIdleTicks < 8) return;
+    var step = autopilotSteps[autopilotIndex];
+    autopilotIndex++;
+    autopilotIdleTicks = 0;
+    autopilotCooldown = 30;
+    trace("{\"t\":\"dbg\",\"at\":\"autopilot\",\"step\":\"" + step + "\",\"n\":" + autopilotIndex + "}");
+    ov.getphase(step);
+}
 
 // Block-level call sites for the wrapped randomBetween definitions.
 var OVERLAY_CALL_SITE = "overlay:862/frame:52/DoAction@0x240c7f";
@@ -530,4 +584,5 @@ this.onEnterFrame = function () {
     sweepFieldWatches();
     sweepWraps();
     shadowMathScopes();
+    stepAutopilot();
 };
