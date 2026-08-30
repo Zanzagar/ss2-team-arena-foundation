@@ -169,6 +169,69 @@ if (rawAutopilot != undefined && rawAutopilot != "") {
 var autopilotIndex = 0;
 var autopilotIdleTicks = 0;
 var autopilotCooldown = 0;
+var autopilotWaitTicks = 0;
+var autopilotAborted = false;
+// Menu ticks a step may spend waiting for its controller before the run is
+// declared unreachable. Ticks accrue only while the controller is settled on
+// a menu frame that does not define the step, so this is not a wall-clock
+// timeout: walk and attack animations (frame >= 52) do not count against it.
+var AUTOPILOT_WAIT_LIMIT = 900;
+
+// ---------------------------------------------------------------------------
+// Which actions each controller offers.
+//
+// getphase only writes decisionA; whether that decision resolves into
+// anything is decided by the controller frame in scope, and the controllers
+// are not interchangeable. Read statically from sprite 862 (read-only
+// inspection, nothing exported): each label below is a getphase argument
+// that controller's own buttons pass.
+//
+// The controller plays THROUGH its label's span and rests on the span's last
+// frame while it waits for input - a live session settles on 12
+// (longrange_warrior) and 19 (closerange_warrior), never on the label frames
+// 5 and 13 - so the lookup has to be by span, not by label frame.
+//
+// Verified controller labels: initialise 1, longrange_warrior 5,
+// closerange_warrior 13, longrange_archer 20, closerange_archer 28,
+// heroactions 52, combatwon 62, combatlost 74.
+// ---------------------------------------------------------------------------
+var CONTROLLERS = [
+    { name: "initialise", from: 1, to: 4, actions: {
+        rest: true, runleft: true, runright: true, frozen: true,
+        burning: true, poisoned: true, life_stolen: true, swap_weapons: true } },
+    { name: "longrange_warrior", from: 5, to: 12, actions: {
+        taunt: true, rest: true, jumpleft: true, jumpright: true,
+        walkleft: true, walkright: true, chargeleft: true, chargeright: true,
+        psyche_up: true, wincrowd: true } },
+    { name: "closerange_warrior", from: 13, to: 19, actions: {
+        power_attack: true, normal_attack: true, quick_attack: true,
+        shove: true, jumpleft: true, jumpright: true, walkleft: true,
+        walkright: true, psyche_up: true, wincrowd: true } },
+    { name: "longrange_archer", from: 20, to: 27, actions: {
+        bombardleft: true, bombardright: true, snipeleft: true,
+        sniperight: true, taunt: true, rest: true, jumpleft: true,
+        jumpright: true, walkleft: true, walkright: true,
+        psyche_up: true, wincrowd: true } },
+    { name: "closerange_archer", from: 28, to: 51, actions: {
+        bash_attack: true, shove: true, taunt: true, jumpleft: true,
+        jumpright: true, walkright: true, psyche_up: true, wincrowd: true } }
+];
+
+function controllerForFrame(frame) {
+    for (var ci = 0; ci < CONTROLLERS.length; ci++) {
+        var controller = CONTROLLERS[ci];
+        if (frame >= controller.from && frame <= controller.to) return controller;
+    }
+    return undefined;
+}
+
+// An unknown label is passed through rather than blocked: this table is a
+// map of what the build offers, not a whitelist the wrapper enforces, and
+// blocking would make the wrapper the reason a new action cannot be probed.
+var knownAutopilotAction = {};
+for (var ci2 = 0; ci2 < CONTROLLERS.length; ci2++) {
+    for (var actionName in CONTROLLERS[ci2].actions) knownAutopilotAction[actionName] = true;
+}
 
 // Distinct overlay frames are logged once each: the controller sits on its
 // menu frames (button-building labels below heroactions=52) while waiting
@@ -324,6 +387,7 @@ function stepNavigator() {
 }
 
 function stepAutopilot() {
+    if (autopilotAborted) return;
     if (autopilotIndex >= autopilotSteps.length) return;
     if (_global.battle_started != true) return;
     var ov = overlayClip();
@@ -331,14 +395,53 @@ function stepAutopilot() {
     if (autopilotCooldown > 0) { autopilotCooldown--; return; }
     var frame = ov._currentframe;
     dbgFrame(frame);
+    // heroactions and the result labels: the controller is busy resolving the
+    // previous decision, so nothing is pressable.
     if (frame >= 52) { autopilotIdleTicks = 0; return; }
     autopilotIdleTicks++;
     if (autopilotIdleTicks < 8) return;
+
     var step = autopilotSteps[autopilotIndex];
+    var controller = controllerForFrame(frame);
+
+    // The step is only issued to a controller that offers it. Firing
+    // regardless is what an unattended run cannot afford: getphase would set
+    // a decision this controller never dispatches, the run would stall with
+    // no trace and no reason, and the session would have to be diagnosed
+    // from the frame log by hand.
+    if (knownAutopilotAction[step] == true &&
+        (controller == undefined || controller.actions[step] != true)) {
+        autopilotWaitTicks++;
+        if (autopilotWaitTicks == 1 || autopilotWaitTicks == AUTOPILOT_WAIT_LIMIT / 2) {
+            trace("{\"t\":\"dbg\",\"at\":\"autopilot-wait\",\"step\":\"" + step +
+                "\",\"frame\":" + frame + ",\"controller\":\"" +
+                (controller == undefined ? "none" : controller.name) +
+                "\",\"ticks\":" + autopilotWaitTicks + "}");
+        }
+        if (autopilotWaitTicks >= AUTOPILOT_WAIT_LIMIT) {
+            // Fail loudly and stop: a half-performed action sequence would
+            // still emit a trace, and a trace of the wrong action is worse
+            // evidence than no trace at all.
+            trace("{\"t\":\"dbg\",\"at\":\"autopilot-unavailable\",\"step\":\"" + step +
+                "\",\"frame\":" + frame + ",\"controller\":\"" +
+                (controller == undefined ? "none" : controller.name) + "\"}");
+            autopilotAborted = true;
+        }
+        return;
+    }
+    if (knownAutopilotAction[step] != true) {
+        // Probing a label this wrapper does not know about: allowed, but the
+        // log has to say so, or an unrecognised typo reads as a game bug.
+        dbg("autopilot-unknown:" + step);
+    }
+
     autopilotIndex++;
     autopilotIdleTicks = 0;
+    autopilotWaitTicks = 0;
     autopilotCooldown = 30;
-    trace("{\"t\":\"dbg\",\"at\":\"autopilot\",\"step\":\"" + step + "\",\"n\":" + autopilotIndex + "}");
+    trace("{\"t\":\"dbg\",\"at\":\"autopilot\",\"step\":\"" + step + "\",\"n\":" + autopilotIndex +
+        ",\"frame\":" + frame + ",\"controller\":\"" +
+        (controller == undefined ? "none" : controller.name) + "\"}");
     ov.getphase(step);
 }
 

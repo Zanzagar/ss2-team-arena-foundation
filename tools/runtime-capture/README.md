@@ -23,9 +23,15 @@ The capture vehicle is **validated end to end against a structural stub**:
    attribution, cross-level function wrapping, `loadMovieNum` level
    isolation, event emission and ordering, and the whole
    delog→ingest→verify pipeline.
-3. Not yet validated (needs the first real session): the licensed timeline's
-   actual instance paths (`arena.overlay`), live battle-flow timing, the
-   END-key non-lethal finish, and the real `fight_mode` values.
+3. Validated against the licensed build itself, by the sessions that produced
+   the four `golden-prisoner-normal-kill*` goldens: the real instance path
+   `arena.gladiators.overlay`, live battle-flow timing, the `misc` fight
+   mode, the direction-gated arming, the Math-shadow interception, and the
+   whole unattended navigate-fight-close cycle.
+4. Not yet exercised live: the END-key non-lethal finish (every capture so
+   far has been lethal), the archer controllers (this fight forces
+   `using_bow = false`, so `bombard*`/`snipe*`/`bash_attack` need a gladiator
+   that owns a bow), and any staged scenario with armour or status flags.
 
 Run `validate-vehicle.ps1` after every wrapper edit; run
 `launch-capture.ps1` for real sessions (it verifies hashes, rebuilds,

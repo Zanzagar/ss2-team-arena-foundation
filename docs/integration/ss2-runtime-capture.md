@@ -22,8 +22,11 @@ in [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json).
 - Raw instrumentation traces stay in the ignored `captures/` directory.
 - The unrelated third-party SWF previously found in Downloads is not evidence
   and must not be captured.
-- `classicStyleRules` and the shared 1–3 combatant engine remain untouched
-  until promoted goldens justify the adapter seam.
+- `classicStyleRules` stays the injected placeholder rule set, with its
+  formulas untouched, until a runtime-verified rule set is promoted into the
+  shared team resolver's seam (`src/team/rule-set.js`). The seam exists now;
+  nothing measured has been dropped into it, and the verified-claim gate
+  refuses to let a rule set say otherwise without citing a promoted golden.
 
 ## Pipeline
 
@@ -214,8 +217,9 @@ A mismatch never deletes evidence. `verify` and `promote` write a
 JSON-pointer differences) to `test/fixtures/ss2-1v1-divergences/`, and the raw
 trace stays in `captures/`. The follow-up is always: keep the report, correct
 the isolated candidate module/fixture to the observed behavior, add a
-regression test, and only then attempt promotion again. Divergences do not
-touch `classicStyleRules` or the team engine directly.
+regression test, and only then attempt promotion again. Divergences correct
+the isolated candidate only; they never reach into `classicStyleRules` or the
+shared team resolver.
 
 ## Campaign automation
 
