@@ -228,6 +228,46 @@ test("fixture classification and provenance must agree", () => {
   assert.throws(() => validateSs2OneVsOneFixture(extraCombatant), GoldenFixtureValidationError);
 });
 
+test("a scenario carries exactly one action identity", () => {
+  // `spellId` is a new optional key, so every fixture written against the
+  // earlier schema still validates untouched: it carries `attackDirection` and
+  // no `spellId`. The two are mutually exclusive because
+  // `magic_damage_character` "has no direction chain" (battle map line 317) —
+  // a spell action has no attack direction to name — and because the two id
+  // spaces overlap (inventory id 30 is fireball; attack direction 30 is the
+  // grievous attack), so one shared field could not be read unambiguously.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  assert.equal(validateSs2OneVsOneFixture(fixture), fixture);
+  for (const physical of fixtures) {
+    assert.equal(Number.isSafeInteger(physical.scenario.attackDirection), true);
+    assert.equal(physical.scenario.spellId, undefined);
+  }
+
+  const asSpell = cloneJson(fixture);
+  delete asSpell.scenario.attackDirection;
+  asSpell.scenario.spellId = 30;
+  assert.equal(validateSs2OneVsOneFixture(asSpell), asSpell);
+
+  const both = cloneJson(fixture);
+  both.scenario.spellId = 30;
+  assert.throws(() => validateSs2OneVsOneFixture(both), /exactly one action identity/);
+
+  const neither = cloneJson(fixture);
+  delete neither.scenario.attackDirection;
+  assert.throws(() => validateSs2OneVsOneFixture(neither), /exactly one action identity/);
+
+  const fractionalSpellId = cloneJson(asSpell);
+  fractionalSpellId.scenario.spellId = 30.5;
+  assert.throws(() => validateSs2OneVsOneFixture(fractionalSpellId), /spellId must be an integer/);
+
+  const fractionalDirection = cloneJson(fixture);
+  fractionalDirection.scenario.attackDirection = 5.5;
+  assert.throws(
+    () => validateSs2OneVsOneFixture(fractionalDirection),
+    /attackDirection must be an integer/
+  );
+});
+
 test("bombard and snipe chance use the attacker's shield", () => {
   const defender = { defence: 11, charisma: 11, magicka: 11, shield: 0 };
   const unshieldedAttacker = { attack: 11, charisma: 11, magicka: 11, shield: 0 };

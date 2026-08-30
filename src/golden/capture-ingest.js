@@ -9,10 +9,11 @@
  * Line grammar (one JSON object per line):
  *   meta   first line: session/observation identity and attestations
  *   state  staged pre-action dump, one per side
- *   var    named scalar (attack_direction, criticalhit)
+ *   var    named scalar (attack_direction, spell_id, fight_mode, criticalhit)
  *   roll   one ordered RNG sample with call-site metadata
  *   set    one watched property assignment (hook = wrapper attribution)
- *   event  semantic event (defender-hurt/defender-blocked/death/overlay-label)
+ *   event  semantic event (defender-hurt/defender-blocked/magic-damage/
+ *          death/overlay-label)
  *   final  post-action dump, one per side
  *   end    last line: closing hash attestation
  */
@@ -253,8 +254,9 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
           }
           // reason and howDied are derived from the recorded evidence per
           // the byte-verified defeat gate: elimination vs first blood from
-          // the loser's post-damage hitpoints; duels always yield, other
-          // modes dispatch the death string by attack_direction.
+          // the loser's post-damage hitpoints; duels always yield; outside
+          // duels the physical ingress dispatches the death string by
+          // attack_direction and the spell ingress always uses "slain".
           const loserHpPath = `/${loserSide}/hitpoints`;
           const loserHp = chain.has(loserHpPath)
             ? chain.get(loserHpPath)
@@ -264,8 +266,22 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
           }
           const fightMode = vars.get("fight_mode");
           const direction = vars.get("attack_direction");
+          // Which ingress produced the damage decides which dispatch applies,
+          // and the recorded dispatch event is the direct evidence of it: the
+          // spell ingress emits `magic-damage` where the physical one emits
+          // `defender-hurt`. Map lines 313-318: "Otherwise `damagecharacter`
+          // dispatches by `attack_direction` ... `magic_damage_character` has
+          // no direction chain and always uses `slain` outside duels." Keying
+          // the spell arm on `attack_direction` instead would be wrong twice
+          // over: it is a stale global during a cast, and its mapped inventory
+          // ids collide with the physical chain (id 30 = fireball would read as
+          // the grievous arm).
+          const spellIngress = events.some((event) => event.type === "magic-damage");
           let howDied;
+          // The duel arm is on the shared gate and so covers both ingresses
+          // (map lines 313-315): duel kills never route to slain.
           if (fightMode === "duel") howDied = "yield";
+          else if (spellIngress) howDied = "slain";
           else if (Number.isInteger(direction) && direction <= 12) howDied = "slain";
           else if (direction === 20) howDied = "taunt";
           else if (Number.isInteger(direction) && direction >= 21 && direction <= 23) howDied = "arrow";
@@ -324,7 +340,6 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
 
   const scenario = {
     attackerSide: meta.attackerSide,
-    attackDirection: vars.get("attack_direction"),
     result: null,
     hero: projectFields(
       staged.hero.fields,
@@ -339,8 +354,20 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
       staged.villain.lineNumber
     )
   };
-  if (scenario.attackDirection === undefined) {
-    throw new CaptureTraceError("The trace never recorded the attack_direction variable.");
+  // The action identity is projected onto whichever one the target fixture
+  // stages, exactly as fightMode and transient below are: a spell action has a
+  // caller inventory id and no attack direction (map line 317), so requiring
+  // `attack_direction` of a spell trace would refuse valid evidence.
+  if (fixture.scenario.spellId !== undefined) {
+    if (!vars.has("spell_id")) {
+      throw new CaptureTraceError("The trace never recorded the spell_id variable.");
+    }
+    scenario.spellId = vars.get("spell_id");
+  } else {
+    scenario.attackDirection = vars.get("attack_direction");
+    if (scenario.attackDirection === undefined) {
+      throw new CaptureTraceError("The trace never recorded the attack_direction variable.");
+    }
   }
   if (fixture.scenario.transient !== undefined) {
     if (!vars.has("criticalhit")) {

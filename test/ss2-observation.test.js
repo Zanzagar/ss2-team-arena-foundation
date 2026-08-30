@@ -37,18 +37,23 @@ import {
   validateSs2OneVsOneFixture
 } from "../src/golden/run-1v1-fixture.js";
 import { resolveSs2PhysicalAttackCandidate } from "../src/golden/ss2-attack-candidate.js";
+import { resolveSs2SpellDamageCandidate } from "../src/golden/ss2-spell-candidate.js";
 import { verifyInstallAgainstFingerprint } from "../tools/capture-session.mjs";
 
-import { loadSs2Fixtures } from "./ss2-fixture-files.js";
+import { loadSs2Fixtures, loadSs2SpellFixtures } from "./ss2-fixture-files.js";
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
 
 const fixtures = await loadSs2Fixtures();
 const fixturesById = new Map(fixtures.map((fixture) => [fixture.fixtureId, fixture]));
+const spellFixtures = await loadSs2SpellFixtures();
+const spellFixturesById = new Map(spellFixtures.map((fixture) => [fixture.fixtureId, fixture]));
 
 const CALL_SITE = "overlay:862/frame:52/DoAction@0x240c7f";
 const HOOK_FOR_REASON = {
   "physical-damage": "damagecharacter",
+  "magic-damage": "magic-damage-character",
+  "psyche-up": "magic-damage-character",
   "breastplate-stamina": "damagecharacter",
   "stat-clamp": "damagecharacter",
   "weapon-enchantment": "damagecharacter",
@@ -321,6 +326,104 @@ test("derived expected events cover miss, hit, and lethal candidates", () => {
   );
 });
 
+test("the physical event derivation is pinned and untouched by the spell ingress", () => {
+  // Regression pin. deriveExpectedEventsFromSs2Fixture is shared by both
+  // ingresses, so the physical contract is re-stated here independently of the
+  // implementation: a miss dispatches defender_blocked() alone (map line 250),
+  // a hit dispatches defender_hurt(<dispatchedMethod>) (map lines 242-244), and
+  // a defeat adds the death call plus the overlay transition it drives (map
+  // lines 457-466). A future spell change that alters any of this fails here.
+  assert.ok(fixtures.length >= 21);
+  for (const fixture of fixtures) {
+    assert.equal(
+      Number.isSafeInteger(fixture.scenario.attackDirection),
+      true,
+      `${fixture.fixtureId} is a physical fixture and must stage an attack direction`
+    );
+    assert.equal(fixture.scenario.spellId, undefined, `${fixture.fixtureId} must stage no spell id`);
+
+    const { calculation, resultEvent } = fixture.expected;
+    const expected = calculation.hit !== true
+      ? [{ type: "defender-blocked" }]
+      : [
+        { type: "defender-hurt", method: calculation.dispatchedMethod },
+        ...(resultEvent
+          ? [
+            { type: "death", side: resultEvent.loserSide },
+            { type: "overlay-label", label: resultEvent.overlayLabel }
+          ]
+          : [])
+      ];
+    const derived = deriveExpectedEventsFromSs2Fixture(fixture);
+    assert.deepEqual(derived, expected, fixture.fixtureId);
+    assert.equal(
+      derived.some((event) => event.type === "magic-damage"),
+      false,
+      `${fixture.fixtureId} must never derive a spell-ingress event`
+    );
+  }
+});
+
+test("spell fixtures derive and validate the spell-ingress event", () => {
+  // Map lines 366-371: magic_damage_character's complete call inventory has no
+  // defender_hurt and no defender_blocked, so a spell action can be neither a
+  // "hit" nor a "miss"; its damage_method argument is the defender animation
+  // label it plays (map lines 346-350).
+  assert.equal(spellFixtures.length, 8);
+  for (const fixture of spellFixtures) {
+    assert.equal(fixture.scenario.attackDirection, undefined);
+    assert.equal(Number.isSafeInteger(fixture.scenario.spellId), true);
+
+    const derived = deriveExpectedEventsFromSs2Fixture(fixture);
+    assert.deepEqual(derived[0], {
+      type: "magic-damage",
+      method: fixture.expected.calculation.damageMethod
+    });
+    assert.deepEqual(
+      derived.slice(1),
+      fixture.expected.resultEvent
+        ? [
+          { type: "death", side: fixture.expected.resultEvent.loserSide },
+          { type: "overlay-label", label: fixture.expected.resultEvent.overlayLabel }
+        ]
+        : []
+    );
+
+    const record = observationFromFixture(fixture, {
+      observationId: `obs-${fixture.fixtureId}`,
+      sessionId: "session-spell"
+    });
+    assert.equal(validateSs2Observation(record), record);
+    const comparison = matchSs2ObservationToFixture(fixture, record);
+    assert.deepEqual(comparison.differences, []);
+    assert.equal(comparison.match, true);
+  }
+});
+
+test("the magic-damage event accepts an animation label or none, and nothing else", () => {
+  const fixture = spellFixturesById.get("candidate-spell-fireball-armour-absorbed");
+  const withEvent = (event) =>
+    observationFromFixture(fixture, { mutate: (draft) => { draft.events[0] = event; } });
+
+  // "burning" (map line 388) and "lightning" (map line 391) are the two labels
+  // the direct-damage spell table records; null is the honest value where it
+  // records none. The map never enumerates the full animation-label set, so the
+  // shape is checked and the vocabulary is deliberately left open.
+  for (const method of ["burning", "lightning", "psyche_up", null]) {
+    const record = withEvent({ type: "magic-damage", method });
+    assert.equal(validateSs2Observation(record), record);
+  }
+  for (const event of [
+    { type: "magic-damage" },
+    { type: "magic-damage", method: 30 },
+    { type: "magic-damage", method: "" },
+    { type: "magic-damage", method: "not a label" },
+    { type: "magic-damage", method: "burning", spellId: 30 }
+  ]) {
+    assert.throws(() => validateSs2Observation(withEvent(event)), ObservationValidationError);
+  }
+});
+
 const PROJECTION_DEFAULTS = Object.freeze({
   armourclass: 0,
   armourclass_max: 0,
@@ -530,6 +633,78 @@ test("two matching independent observations promote a candidate to golden", () =
   assert.equal(flaggedPromotion.golden.fixtureId, "golden-armour-equality-quirk");
   assert.equal(flaggedPromotion.golden.provenance.candidateFlags, undefined);
   assert.equal(validateSs2OneVsOneFixture(flaggedPromotion.golden), flaggedPromotion.golden);
+});
+
+test("the promotion gate is exactly as strong for the spell family", () => {
+  // Nothing in the spell-ingress work touched promote-1v1-golden.js: the gate
+  // is resolver-agnostic (it runs matchSs2ObservationToFixture and the fixture
+  // validator, not a rules module), so the spell family passes through the same
+  // two-observation, two-session, manifest-attested, digest-checked gate.
+  const fixture = spellFixturesById.get("candidate-spell-lethal-slain");
+  const observations = [
+    observationFromFixture(fixture, { observationId: "obs-spell-a", sessionId: "session-spell-a" }),
+    observationFromFixture(fixture, {
+      observationId: "obs-spell-b",
+      sessionId: "session-spell-b",
+      observedAt: "2026-08-30T19:00:00Z"
+    })
+  ];
+  const manifest = captureManifestFor(observations);
+  const { golden, captureManifestSha256 } = promoteSs2CandidateToGolden(fixture, observations, manifest);
+  assert.equal(golden.fixtureId, "golden-spell-lethal-slain");
+  assert.equal(golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(golden.provenance.kind, GoldenProvenance.LICENSED);
+  assert.equal(golden.provenance.runtimeVerified, true);
+  assert.equal(golden.provenance.repetitions, 2);
+  assert.equal(golden.provenance.candidateFlags, undefined);
+  assert.equal(golden.provenance.captureManifestSha256, captureManifestSha256);
+  assert.equal(validateSs2OneVsOneFixture(golden), golden);
+  assert.equal(golden.scenario.spellId, fixture.scenario.spellId);
+  assert.deepEqual(
+    runSs2OneVsOneGoldenFixture(golden, resolveSs2SpellDamageCandidate).outcome,
+    golden.expected
+  );
+
+  // One session is still not evidence.
+  const single = [observations[0]];
+  assert.throws(
+    () => promoteSs2CandidateToGolden(fixture, single, captureManifestFor(single)),
+    PromotionError
+  );
+
+  // A simulated reference trace is still never evidence.
+  const simulated = ["a", "b"].map((suffix) =>
+    observationFromFixture(fixture, {
+      observationId: `obs-spell-sim-${suffix}`,
+      sessionId: `session-spell-sim-${suffix}`,
+      mutate: (draft) => { draft.capture.method = "synthetic-simulator"; }
+    })
+  );
+  assert.throws(
+    () => promoteSs2CandidateToGolden(fixture, simulated, captureManifestFor(simulated)),
+    /synthetic simulator trace, not runtime evidence/
+  );
+
+  // A divergent spell observation still blocks promotion and keeps its report.
+  const divergent = observationFromFixture(fixture, {
+    observationId: "obs-spell-c",
+    sessionId: "session-spell-c",
+    mutate: (draft) => { draft.resultEvent.howDied = "grievous"; draft.finalState.result.howDied = "grievous"; }
+  });
+  let blocked;
+  try {
+    promoteSs2CandidateToGolden(fixture, [observations[0], divergent], captureManifestFor([observations[0], divergent]), {
+      recordedAt: "2026-08-30T20:00:00Z"
+    });
+    assert.fail("a divergent spell observation must block promotion");
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof PromotionBlockedError);
+  assert.equal(blocked.divergences.length, 1);
+  assert.ok(blocked.divergences[0].differences.some(
+    (difference) => difference.path === "/resultEvent/howDied"
+  ));
 });
 
 test("promotion requires two observations from independent sessions", () => {

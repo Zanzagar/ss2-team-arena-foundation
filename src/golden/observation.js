@@ -85,6 +85,21 @@ const TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const CALL_SITE_PATTERN = /^(?:overlay|root|sprite):/;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const COSMETIC_DEBRIS_PATTERN = /^armour-debris-\d+-(?:x|y|rotation)$/;
+/**
+ * The spell ingress's `damage_method` argument. Byte-verified (battle map lines
+ * 338-350) as register r5, passed straight to
+ * `defenderClip.gotoAndPlay(damage_method)` — "for this ingress the
+ * `damage_method` argument is the defender's animation label". Unlike
+ * `defender_hurt`, whose four methods are a closed byte-verified dispatch
+ * (map lines 242-244), the animation labels of export 1241 are only partially
+ * enumerated by the map (line 514 summarises "condition effects (1911-2004)"
+ * without naming them), and the direct-damage spell table records a label for
+ * fireball ("burning", map line 388) and lightning bolt ("lightning", map line
+ * 391) only. Closing the set here would be a guess, so the shape is checked and
+ * the value is not: a spell whose label the map does not record carries `null`
+ * in its candidate and diverges loudly against a live capture.
+ */
+const SPELL_ANIMATION_LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
 export class ObservationError extends Error {
   constructor(message, options = {}) {
@@ -246,6 +261,25 @@ function assertEventShape(event, index) {
       return;
     case "defender-blocked":
       assertExactKeys(event, ["type"], `events[${index}]`);
+      return;
+    /**
+     * The spell ingress. `magic_damage_character`'s complete byte-verified call
+     * inventory (map lines 366-371) contains neither `defender_hurt` nor
+     * `defender_blocked` — it is "the parallel spell/effect ingress" (map line
+     * 381) that the wrapper must observe in its own right. `method` is its
+     * `damage_method` argument, the defender animation label (map lines
+     * 346-350), and is `null` when the map records no label for that spell.
+     */
+    case "magic-damage":
+      assertExactKeys(event, ["method", "type"], `events[${index}]`);
+      if (
+        event.method !== null &&
+        (typeof event.method !== "string" || !SPELL_ANIMATION_LABEL_PATTERN.test(event.method))
+      ) {
+        throw new ObservationValidationError(
+          `events[${index}].method must be null or a defender animation label.`
+        );
+      }
       return;
     case "death":
       assertExactKeys(event, ["side", "type"], `events[${index}]`);
@@ -491,12 +525,34 @@ export function ss2ObservationsMatch(left, right) {
   return { match: differences.length === 0, differences };
 }
 
-/** Semantic events a fixture's expected outcome implies at runtime. */
+/**
+ * Semantic events a fixture's expected outcome implies at runtime.
+ *
+ * Which ingress ran is a property of the staged action, so it is read from the
+ * scenario, not from the derived calculation: `scenario.spellId` selects the
+ * spell ingress and `scenario.attackDirection` the physical one (the fixture
+ * schema requires exactly one of them).
+ *
+ * The physical branch below is unchanged and is pinned by a regression test:
+ * a miss dispatches `defender_blocked()` alone (map line 250), a hit dispatches
+ * `defender_hurt(<method>)` (map lines 242-244), and a defeat adds the `death`
+ * call and the overlay transition it drives (map lines 457-466).
+ */
 export function deriveExpectedEventsFromSs2Fixture(fixture) {
-  if (fixture?.expected?.calculation?.hit !== true) {
+  const events = [];
+  if (fixture?.scenario?.spellId !== undefined) {
+    // `magic_damage_character` calls neither `defender_hurt` nor
+    // `defender_blocked` (its complete call inventory is byte-verified at map
+    // lines 366-371), and it has no hit roll at all — the caller already rolled
+    // the damage. So there is no hit/miss branch here: the ingress running IS
+    // the event, and its `damage_method` argument is the animation label it
+    // plays on the defender (map lines 346-350).
+    events.push({ type: "magic-damage", method: fixture.expected?.calculation?.damageMethod ?? null });
+  } else if (fixture?.expected?.calculation?.hit !== true) {
     return [{ type: "defender-blocked" }];
+  } else {
+    events.push({ type: "defender-hurt", method: fixture.expected.calculation.dispatchedMethod });
   }
-  const events = [{ type: "defender-hurt", method: fixture.expected.calculation.dispatchedMethod }];
   if (fixture.expected.resultEvent) {
     events.push({ type: "death", side: fixture.expected.resultEvent.loserSide });
     events.push({ type: "overlay-label", label: fixture.expected.resultEvent.overlayLabel });

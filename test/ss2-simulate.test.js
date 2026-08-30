@@ -8,12 +8,20 @@ import {
   matchSs2ObservationToFixture
 } from "../src/golden/observation.js";
 import { promoteSs2CandidateToGolden } from "../src/golden/promote-1v1-golden.js";
-import { SimulationError, simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
+import {
+  HOOK_FOR_STATIC_REASON,
+  SPELL_HOOK_FOR_STATIC_REASON,
+  SimulationError,
+  simulateSs2CaptureTrace
+} from "../src/golden/simulate-capture-trace.js";
 import { extractCaptureTraceFromRuffleLog, wrapperTapeForFixture } from "../tools/capture-session.mjs";
 
-import { loadSs2Fixtures } from "./ss2-fixture-files.js";
+import { loadSs2Fixtures, loadSs2SpellFixtures } from "./ss2-fixture-files.js";
 
 const fixtures = await loadSs2Fixtures();
+const spellFixtures = await loadSs2SpellFixtures();
+
+const parseTrace = (trace) => trace.trim().split("\n").map((line) => JSON.parse(line));
 
 test("simulated traces ingest and match every candidate fixture", () => {
   for (const fixture of fixtures) {
@@ -27,6 +35,92 @@ test("simulated traces ingest and match every candidate fixture", () => {
     const comparison = matchSs2ObservationToFixture(fixture, record);
     assert.deepEqual(comparison.differences, []);
     assert.equal(comparison.match, true);
+  }
+});
+
+test("simulated traces ingest and match every spell candidate fixture", () => {
+  // The spell family's whole point: the same reference-trace pipeline the
+  // physical family uses, with no special casing at the call site.
+  assert.equal(spellFixtures.length, 8);
+  for (const fixture of spellFixtures) {
+    const trace = simulateSs2CaptureTrace(fixture, {
+      observationId: `sim-${fixture.fixtureId}`,
+      sessionId: "sim-spell-session"
+    });
+    const record = ingestSs2CaptureTrace(trace, fixture);
+    assert.equal(record.capture.method, SS2_SIMULATED_CAPTURE_METHOD);
+    const comparison = matchSs2ObservationToFixture(fixture, record);
+    assert.deepEqual(comparison.differences, []);
+    assert.equal(comparison.match, true);
+  }
+});
+
+test("physical traces keep their attack_direction identity, events and hook vocabulary", () => {
+  // Regression pin for the physical family: adding the spell ingress must not
+  // change one byte of what a physical action's reference trace says about
+  // itself. Hooks are the wrapper's function attribution, so no physical set
+  // may be attributed to the spell ingress or left unattributed.
+  const physicalHooks = new Set(Object.values(HOOK_FOR_STATIC_REASON).filter(
+    (hook) => hook !== "magic-damage-character"
+  ));
+  for (const fixture of fixtures) {
+    const lines = parseTrace(simulateSs2CaptureTrace(fixture));
+    const vars = lines.filter((line) => line.t === "var");
+    assert.deepEqual(
+      vars.map((line) => line.name),
+      fixture.scenario.transient === undefined
+        ? ["fight_mode", "attack_direction"]
+        : ["fight_mode", "attack_direction", "criticalhit"],
+      fixture.fixtureId
+    );
+    assert.equal(
+      vars.find((line) => line.name === "attack_direction").value,
+      fixture.scenario.attackDirection
+    );
+
+    const dispatch = lines.find((line) => line.t === "event");
+    assert.ok(
+      dispatch.type === "defender-hurt" || dispatch.type === "defender-blocked",
+      `${fixture.fixtureId} dispatched ${dispatch.type}`
+    );
+    assert.equal(
+      lines.some((line) => line.t === "event" && line.type === "magic-damage"),
+      false,
+      `${fixture.fixtureId} must never emit a spell-ingress event`
+    );
+
+    for (const set of lines.filter((line) => line.t === "set")) {
+      assert.ok(
+        physicalHooks.has(set.hook),
+        `${fixture.fixtureId} attributed ${set.path} to ${set.hook}`
+      );
+    }
+  }
+});
+
+test("the spell hook table only re-homes the reasons the spell ingress owns", () => {
+  // Map lines 351-364: steps 2-6 all run inside magic_damage_character, so a
+  // spell action's armour/hitpoint, psyche_up, breastplate-stamina and
+  // check_stats writes are all its own; death() is genuinely shared (map lines
+  // 320-321, 453-462) and keeps its own hook on both paths.
+  assert.equal(HOOK_FOR_STATIC_REASON["magic-damage"], "magic-damage-character");
+  assert.equal(HOOK_FOR_STATIC_REASON["psyche-up"], "magic-damage-character");
+  assert.deepEqual(
+    Object.keys(SPELL_HOOK_FOR_STATIC_REASON).filter(
+      (reason) => SPELL_HOOK_FOR_STATIC_REASON[reason] !== HOOK_FOR_STATIC_REASON[reason]
+    ),
+    ["breastplate-stamina", "stat-clamp"]
+  );
+  assert.equal(SPELL_HOOK_FOR_STATIC_REASON["death-status-clear"], "death");
+  assert.equal(SPELL_HOOK_FOR_STATIC_REASON["death-taunt-clear"], "death");
+  assert.equal(SPELL_HOOK_FOR_STATIC_REASON["physical-damage"], "damagecharacter");
+
+  // No spell fixture may leave a set unattributed.
+  for (const fixture of spellFixtures) {
+    for (const set of parseTrace(simulateSs2CaptureTrace(fixture)).filter((line) => line.t === "set")) {
+      assert.notEqual(set.hook, "unattributed", `${fixture.fixtureId}: ${set.path}`);
+      assert.notEqual(set.hook, "damagecharacter", `${fixture.fixtureId}: ${set.path}`);
+    }
   }
 });
 
