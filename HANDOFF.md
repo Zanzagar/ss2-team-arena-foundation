@@ -1,8 +1,45 @@
 # Transfer handoff — SS2 Team Arena Foundation
 
-## Capture campaign state (2026-08-30, end of session)
+## Capture campaign state (2026-08-30, latest)
 
-One session away from the first golden. Read this section first.
+**The first runtime-verified golden is promoted, and capture runs are fully
+unattended.** Read this section first.
+
+- **`golden-prisoner-normal-kill-dir6`** is the project's first formula
+  confirmed against the running licensed game, backed by two matching
+  observations from two independent unattended sessions plus a capture
+  manifest digest. `test/ss2-golden-fixtures.test.js` keeps every golden
+  tied to evidence that still validates, hash-matches and comes from
+  distinct sessions. 86 tests passing.
+- **One command runs a whole capture, start to finish, with no cursor, no
+  focus and no human input:**
+  ```
+  powershell -File tools\runtime-capture\run-capture.ps1 `
+    -FixturePath test\fixtures\ss2-1v1\candidate-prisoner-normal-kill.json `
+    -SessionId <unique> -ObservationId <unique>
+  ```
+  It launches the session, the wrapper navigates the menus with the game's
+  own calls, the autopilot fights, the trace closes itself, the window is
+  closed and the delog/ingest/verify pipeline runs. It prints the verdict.
+- **Capturing more evidence is now a loop**: run it, read the divergence
+  (it will differ only in `attackDirection`), then
+  `capture-session.mjs ingest`/`verify` the raw jsonl against the matching
+  `candidate-prisoner-normal-kill-dir{5,6,7,8}` fixture, and once a
+  direction has two observations from two sessions, build a manifest and
+  `promote`. All four normal-band directions already have candidates and at
+  least one observation each.
+- **Never shortcut the game's own frames.** An earlier navigator jumped
+  straight to `arena_intro`, skipping the prologue frames that skin the hero
+  and build the villain; the game showed its own character-corruption /
+  tampering screen. The save was never modified (verified byte-identical to
+  its snapshot by hash), but such a run is not vanilla behaviour and its
+  evidence would be worthless. The navigator now hands control back to
+  `daybreak` and lets the game run itself.
+- **Save safety**: `tools\runtime-capture\save-state.ps1 snapshot|restore|list`
+  (short non-OneDrive root, hash-verified, refuses to run while Ruffle is
+  open). Known-good snapshots: `verified-good-1701`, `post-k-character`.
+
+### Older context (still accurate)
 
 - **Committed evidence**: `test/observations/ss2-1v1/obs-20260830-e1.json`
   formally MATCHES `candidate-duel-firstblood-normal-kill` (observation 1 of
