@@ -46,8 +46,18 @@ param(
     # Isolated SharedObject store for this session. Ruffle shares one save
     # location by default, and a window that loaded older state flushes it
     # back on exit, clobbering a newer session - which is the only reason
-    # sessions must be serialised. Giving each concurrent session its own
-    # seeded copy removes that cause.
+    # sessions must be serialised.
+    #
+    # NOT YET USABLE, and left opt-in and empty by default for that reason.
+    # The protective half works: a session given its own directory provably
+    # cannot touch the real save (checked by hashing the master before and
+    # after a run, and against a snapshot). The seeding half does not: Ruffle
+    # wrote a fresh empty store into the isolated directory rather than
+    # reading the seeded copy placed at the same relative path, so the game
+    # found no saved gladiator and the navigator stalled on the slot screen
+    # with max_gladiators unset. Until that is understood, a session started
+    # this way cannot reach a battle, and parallel capture stays blocked on
+    # it.
     [string] $SaveDirectory = ""
 )
 

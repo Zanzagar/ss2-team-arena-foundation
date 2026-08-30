@@ -37,7 +37,22 @@ export const SS2_FIXTURE_FILES = [
   "candidate-prisoner-quick-kill-dir1.json",
   "candidate-prisoner-quick-kill-dir2.json",
   "candidate-prisoner-quick-kill-dir3.json",
-  "candidate-prisoner-quick-kill-dir4.json"
+  "candidate-prisoner-quick-kill-dir4.json",
+  // Discriminating probe pairs (see test/ss2-probe-fixtures.test.js). Each
+  // pair's two arms are staged identically except for one injected value, and
+  // are designed so the arms differ in a channel a runtime capture genuinely
+  // OBSERVES — the dispatched event, the ordered mutation trace, the final
+  // state, or the number of draws — never merely in an echoed sample value.
+  "candidate-probe-normal-rollneeded-miss.json",
+  "candidate-probe-normal-rollneeded-hit.json",
+  "candidate-probe-power-rollneeded-miss.json",
+  "candidate-probe-power-rollneeded-hit.json",
+  "candidate-probe-quick-rollneeded-miss.json",
+  "candidate-probe-quick-rollneeded-hit.json",
+  "candidate-probe-deflection-threshold-critical.json",
+  "candidate-probe-deflection-threshold-cleared.json",
+  "candidate-probe-armour-removal-gate-below.json",
+  "candidate-probe-armour-removal-gate-above.json"
 ];
 
 /**
