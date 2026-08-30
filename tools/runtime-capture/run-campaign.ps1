@@ -29,7 +29,7 @@ powershell -File tools\runtime-capture\run-campaign.ps1 `
 #>
 [CmdletBinding()]
 param(
-    # Maximum number of sessions to run. A round takes roughly 24 seconds at
+    # Maximum number of sessions to run. A round takes roughly 14 seconds at
     # the default frame rate, of which about 7 is fixed setup (hash
     # verification of the installed build, plus the wrapper compile).
     [int] $Rounds = 4,
@@ -48,9 +48,20 @@ param(
     # Locked player frame rate. The prologue the navigator has to sit through
     # is ~84% of an unattended run, and this is a time dilation rather than a
     # frame shortcut - every frame still executes in order - so it is safe in
-    # a way that jumping the playhead is not. Validated at 120: two sessions
-    # at 4x still matched their candidates exactly, with the same draw count.
-    [int] $FrameRate = 120
+    # a way that jumping the playhead is not.
+    #
+    # Measured, whole round, wall clock: 30fps 66s, 120 23.7s, 240 18s,
+    # 480 18.3s, 960 14.3s. It plateaus because Ruffle becomes CPU-bound on
+    # this content somewhere around 300 effective fps, and because roughly 7s
+    # of every round is fixed setup - hashing the installed build, compiling
+    # the wrapper, and starting the player - which no frame rate touches.
+    # Asking for more than the machine can execute is harmless: frames still
+    # run in order, just slower than requested.
+    #
+    # Behaviour-neutral at every rate tested. Six sessions across 120, 240,
+    # 480 and 960 were ingested against the already-promoted normal band and
+    # all six matched, each reporting an overdraw of zero.
+    [int] $FrameRate = 960
 )
 
 $ErrorActionPreference = 'Stop'

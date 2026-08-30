@@ -68,8 +68,14 @@ if (-not $ruffle) { throw 'Portable Ruffle is not installed. Run tools/install-r
 # One session at a time: a stale window that loaded older save state flushes
 # it back on exit, silently clobbering everything a newer session saved
 # (observed live - last writer wins).
-if (Get-Process ruffle -ErrorAction SilentlyContinue) {
-    throw 'A Ruffle window is already open; close every capture window before launching a session.'
+#
+# That hazard is a consequence of sharing one SharedObject store, and nothing
+# else - so it is lifted exactly when the caller supplies its own. A session
+# given -SaveDirectory reads and writes a private seeded copy, cannot see or
+# overwrite another session's state, and leaves the real save untouched, so
+# concurrent sessions are safe and the guard would only be in the way.
+if (-not $SaveDirectory -and (Get-Process ruffle -ErrorAction SilentlyContinue)) {
+    throw 'A Ruffle window is already open; close every capture window before launching a session, or give this one its own -SaveDirectory.'
 }
 
 Write-Host 'Pre-session install verification...'
@@ -120,7 +126,16 @@ $ruffleArgs = @(
 )
 if ($FrameRate -gt 0) { $ruffleArgs = @('--frame-rate', "$FrameRate") + $ruffleArgs }
 if ($SaveDirectory) {
+    # Seed the private store from the real one, so the session starts from the
+    # same saved gladiator the serialised path uses. Everything the game writes
+    # during the capture lands here and is thrown away with the session
+    # directory, which means a capture can no longer mutate the licensed save
+    # at all - the clobbering class of bug is removed rather than avoided.
     New-Item -ItemType Directory -Path $SaveDirectory -Force | Out-Null
+    $masterSave = Join-Path $env:LOCALAPPDATA 'ruffle\SharedObjects'
+    if (Test-Path $masterSave) {
+        Copy-Item -Path (Join-Path $masterSave '*') -Destination $SaveDirectory -Recurse -Force
+    }
     $ruffleArgs = @('--save-directory', "$SaveDirectory") + $ruffleArgs
 }
 
