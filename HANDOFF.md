@@ -2,91 +2,145 @@
 
 ## Capture campaign state (2026-08-30, latest)
 
-**The first runtime-verified golden is promoted, and capture runs are fully
-unattended.** Read this section first.
+Read this section first. Two full attack bands are runtime-verified, capture
+runs are unattended and take ~14 seconds each, and the campaign has moved from
+*confirming* candidates to *measuring* the build.
 
-- **`golden-prisoner-normal-kill-dir6`** is the project's first formula
-  confirmed against the running licensed game, backed by two matching
-  observations from two independent unattended sessions plus a capture
-  manifest digest. `test/ss2-golden-fixtures.test.js` keeps every golden
-  tied to evidence that still validates, hash-matches and comes from
-  distinct sessions. 86 tests passing.
-- **One command runs a whole capture, start to finish, with no cursor, no
-  focus and no human input:**
-  ```
-  powershell -File tools\runtime-capture\run-capture.ps1 `
-    -FixturePath test\fixtures\ss2-1v1\candidate-prisoner-normal-kill.json `
-    -SessionId <unique> -ObservationId <unique>
-  ```
-  It launches the session, the wrapper navigates the menus with the game's
-  own calls, the autopilot fights, the trace closes itself, the window is
-  closed and the delog/ingest/verify pipeline runs. It prints the verdict.
-- **Capturing more evidence is now a loop**: run it, read the divergence
-  (it will differ only in `attackDirection`), then
-  `capture-session.mjs ingest`/`verify` the raw jsonl against the matching
-  `candidate-prisoner-normal-kill-dir{5,6,7,8}` fixture, and once a
-  direction has two observations from two sessions, build a manifest and
-  `promote`. All four normal-band directions already have candidates and at
-  least one observation each.
-- **Never shortcut the game's own frames.** An earlier navigator jumped
-  straight to `arena_intro`, skipping the prologue frames that skin the hero
-  and build the villain; the game showed its own character-corruption /
-  tampering screen. The save was never modified (verified byte-identical to
-  its snapshot by hash), but such a run is not vanilla behaviour and its
-  evidence would be worthless. The navigator now hands control back to
-  `daybreak` and lets the game run itself.
-- **Save safety**: `tools\runtime-capture\save-state.ps1 snapshot|restore|list`
-  (short non-OneDrive root, hash-verified, refuses to run while Ruffle is
-  open). Known-good snapshots: `verified-good-1701`, `post-k-character`.
+### What is promoted
 
-### Older context (still accurate)
+Eight goldens, all from one staged fight (the tutorial prisoner):
 
-- **Committed evidence**: `test/observations/ss2-1v1/obs-20260830-e1.json`
-  formally MATCHES `candidate-duel-firstblood-normal-kill` (observation 1 of
-  the 2 the promotion gate needs). Eighteen candidate fixtures exist; the
-  full pipeline (`simulate`/`tape`/`delog`/`ingest`/`verify`/`promote`) is
-  tested (78 tests) and gate-verified end to end
-  (`tools/runtime-capture/validate-vehicle.ps1` must PASS after any wrapper
-  edit).
-- **The deterministic target**: the operator's gladiator **John Ringler**
-  (attack 1, defence 1, strength 10, charisma 1, magicka 1, min 21 / max
-  23, 30 hp, 110 stamina, no armour) versus the **tutorial prisoner**
-  (all-zero stats, 10 hp, `fight_mode "misc"` — constant every time). The
-  operator discovered the fight **re-offers if the window is closed before
-  clicking the post-kill checkmark** — the replay loop for observation
-  pairs. One melee hit (21–23 damage vs 10 hp) is always lethal.
-- **Session flow**: regenerate the tape-carrier with
-  `node tools/runtime-capture/gen-provisional-prisoner.mjs`, launch with
-  `powershell -File tools\runtime-capture\launch-capture.ps1 -FixturePath
-  captures\provisional-prisoner-kill.json -SessionId <s> -ObservationId
-  <o>`; operator walks to the prisoner and normal-attacks; the kill
-  auto-closes the trace. Author the real candidate from the capture,
-  re-ingest the same raw jsonl against it (observation A), replay via the
-  checkmark trick (observation B), then `promote`. Saves are snapshotted
-  with `tools/runtime-capture/save-state.ps1` (short non-OneDrive root,
-  hash-verified; snapshot `post-k-character` holds the character).
-- **Capture kit v3 mechanics** (all forced by live evidence, see the git
-  log from `b54aa45` to HEAD): frame 52 re-defines the combat functions and
-  calls them in the same script (slot wraps cannot interpose), each Ruffle
-  level has its own `Math`, and watching function slots VOIDS the game's
-  scope-style definitions. Hence: a tapped `Math` clone is planted as a
-  timeline variable on the game root and overlay (serves/records the tape
-  for every path); recording arms at `attack_chances` **only when
-  `attack_direction` is a number** (the function also renders the UI button
-  percentages with direction null); lethal captures close one tick after
-  the surviving native `gotoAndPlay`; `nextphase` closes non-lethal armed
-  windows; per-frame sweeps re-wrap functions and re-watch swapped stat
-  objects; `dbg` milestone lines in the raw log (stripped by delog) show
-  exactly where a failed session stopped.
-- **Not yet verified live** (the very next session answers both): the
-  direction-gated arming and the Math-shadow interception against the real
-  game (`math-shadowed:*` and `mrand-first` dbg lines, and injected roll
-  lines in the trace, are the confirmation signals).
-- **Known out-of-scope actions**: range taunts (and opcode-rolled paths)
-  make zero `randomBetween` calls — uncapturable by design, documented in
-  the runtime-capture doc. Melee attacks are the capture family.
+- `golden-prisoner-normal-kill`, `-dir5`, `-dir6`, `-dir8` — the normal band
+- `golden-prisoner-power-kill-dir9`, `-dir10`, `-dir11`, `-dir12` — the power band
 
+The power band is the stronger evidence and the reason matters. Its candidates
+were derived from the battle map by an author with no access to any capture,
+and committed before a single power session ran; eight later sessions matched
+them exactly, none diverging. The normal band's candidates were authored *from*
+captures, so each one's first observation confirmed nothing — it is what the
+candidate was fitted to. Prefer the power band as the model for how to do this.
 
+### How to run it
+
+```
+powershell -File tools\runtime-capture\run-capture.ps1 `
+  -FixturePath test\fixtures\ss2-1v1\<candidate>.json `
+  -SessionId <unique> -ObservationId <unique>
+
+powershell -File tools\runtime-capture\run-campaign.ps1 `
+  -Family prisoner-power-kill -Autopilot "walkright*5,power_attack" `
+  -Rounds 12 -StopWhenComplete
+```
+
+`run-campaign.ps1` loops sessions until every attack direction in a family has
+a golden. It exists because the wrapper **observes** `attack_direction` rather
+than forcing it: the game draws it (`randomBetween(5,8)` for normal, `(9,12)`
+power, `(1,4)` quick) before the recording window arms, so which candidate a
+run is evidence for is only known once the trace is read. `campaign.mjs
+ingest-round` therefore ingests each session against every candidate in the
+family and keeps the one that MATCHES.
+
+Speed: a round is ~14s, down from 66s, because the player frame rate is locked
+to 960. That is a time dilation, not a frame shortcut — every frame still
+executes in order — and it was validated by capturing six sessions at 120/240/
+480/960 against already-promoted candidates and confirming all six matched.
+Measured curve: 30fps 66s, 120 23.7s, 240 18s, 480 18.3s, 960 14.3s. It
+plateaus because Ruffle goes CPU-bound near 300 effective fps and ~7s of each
+round is fixed setup.
+
+### What a capture actually proves — read before trusting a golden
+
+An adversarial pass could not break the arithmetic but did break the
+provenance claim. The details are in the runtime-capture doc under "What a
+match actually establishes"; the short version:
+
+- **Genuinely observed:** the ordered mutation trace, the semantic events
+  (including hit-vs-miss and the dispatched method), the final state, the
+  observed attack direction and fight mode, and the *number* of draws.
+- **Echoed, not observed:** every `roll` line's label, bounds, value and call
+  site. The wrapper serves its tape from a tap on `Math.random`, which takes no
+  arguments, so those fields are copied from the candidate under test. The
+  sample comparison can only fail on draw count.
+- **Never compared at all:** `expected.calculation` and `expected.mutation`.
+- Two chain weaknesses: the simulated-evidence rejection is one editable string
+  in the trace meta line (a synthetic trace with it rewritten reproduces a
+  committed observation's digest byte for byte), and session independence is
+  two operator-supplied strings.
+
+Two blind spots were closed in code: the wrapper now reports `overdraw`, the
+count of draws made after the tape ran out — previously invisible, because
+those fall through to the live RNG and are logged only as `dbg` lines that
+`delog` strips — and ingest refuses a nonzero count as the divergence it is.
+It also mints a `launchNonce` the operator does not supply.
+
+### The probes — measurement rather than agreement
+
+Ten fixtures in five pairs (`candidate-probe-*`), each differing in exactly one
+injected value and predicted to differ in a genuinely observed channel. All ten
+captured and matched. What they measured:
+
+- **`rollneeded` bracketed to a single integer per band**: quick misses at 26
+  and hits at 27, normal 43/44, power 62/63. All three match
+  `round(ratio * 100 * K)`. Because 44 hits while 43 misses, the comparison is
+  `diceroll >= rollneeded`, not `>` — previously indistinguishable.
+- **The critical-deflection threshold is exactly 100, inclusive.** Both arms
+  ran at hit-roll 50 direction 5 and differ in one field: deflection roll 99
+  dispatches `critical`, roll 100 dispatches `normal`. Everything else is
+  byte-identical.
+- **The armour-selection draw is consumed before the equipped test**: removal
+  roll 66 gives 7 draws, roll 67 gives 8, the extra being `armour-selection-1`
+  burned on a defender wearing nothing.
+- Two unplanned findings: a miss consumes only the pre-dispatch draws (3 normal,
+  2 power/quick), so damage and the critical sample are derived before the hit
+  test and the runtime does not short-circuit; and the quick band draws no
+  knockback roll while normal and power do, independently confirming the
+  directions 5–12 knockback gate.
+
+### Non-negotiable rules (learned the hard way)
+
+- The licensed SWFs are read-only and hash-verified before and after every
+  capture. Never copy, export or commit game assets, extracted scripts, or
+  original files.
+- **Never shortcut the game's own frames.** Jumping past the prologue once
+  tripped the game's character-tampering screen. The prologue is not a
+  cutscene: it skins the hero and builds the villain via `unleash_hell(0)`.
+  Locking the frame rate is fine — every frame still runs.
+- A candidate becomes golden ONLY via >=2 matching observations from >=2
+  independent sessions. Never hand-write a golden or an observation.
+- Derive candidates from the battle map, never from a capture. Otherwise the
+  later capture confirms a fit rather than a prediction.
+- `tools\runtime-capture\validate-vehicle.ps1` must PASS after ANY wrapper edit.
+- Snapshot before risky work: `tools\runtime-capture\save-state.ps1 snapshot
+  <name>`. Known-good: `verified-good-1701`, `pre-arena-path`. It refuses to
+  run while Ruffle is open.
+
+### Known broken / in flight
+
+- **`-SaveDirectory` is not usable yet.** Its protective half is verified — a
+  session with its own store provably cannot touch the real save — but Ruffle
+  wrote a fresh empty store rather than reading the seeded copy, so the
+  navigator found no gladiator and stalled on the slot screen. Parallel capture
+  is blocked on understanding that.
+- The wrapper emits `spell_id`, and the pipeline projects it, but no spell
+  capture has been attempted.
+
+### The next move, and why
+
+The tutorial-prisoner staging is close to exhausted: it produced the eight
+goldens and the ten probe arms, and **22 of the 47 candidates are unreachable
+from it**. They need armour on a combatant (the deflection threshold is always
+100 here because helmet and greaves are 0), the bow weapon mode (the archer
+controllers, and with them bombard/snipe/bash), a `tournament` fight mode (the
+defeat gate ends any non-tournament fight on the first hit that reaches
+hitpoints), or the spell ingress.
+
+All of those need **a gladiator past level 1 fighting in the ordinary arena**,
+which also removes the prologue entirely, since `daybreak` only routes a
+level-1 hero to the dungeon. That requires following the game's own win →
+reward → level-up → foyer chain, including whatever decision the level-up
+screen demands — an unattended run must answer it identically every time or
+captures stop being reproducible. That route is being mapped from the bytecode
+into `docs/integration/ss2-arena-route.md`.
 
 ## On the PC with Swords & Sandals II installed
 
@@ -109,29 +163,44 @@ generation, combat formulas, result callback, and battle movie clips.
 
 ## Scope already completed
 
-`src/engine.js` is an asset-free deterministic combat core for one-to-three
-gladiators per team. It provides targeting, AI turns, local/hot-seat controller
-identities, replays, wire snapshots, and state hashes. Its formulas are
-intentional placeholders until they can be validated against the licensed game.
+**The combat core is `src/team/`, not `src/engine.js`.** One shared resolver
+serves 1v1, 2v2 and 3v3 — there is no second code path for 1v1 — with team
+elimination, AI fill, controller identity independent of combatant identity,
+and a campaign settlement that fires exactly once, after a whole team is down
+*and* the final animation is acknowledged. `src/engine.js` is now a
+compatibility facade over it, preserving the historical deterministic replay,
+wire snapshots and state hashes; that equivalence was checked across 200
+blueprints against the pre-refactor engine, not assumed.
 
-The fingerprinted Steam build now has a read-only battle map and an isolated
-asset-free 1v1 candidate harness with fifteen strict ordered-RNG fixtures.
-Static candidates are not runtime goldens and do not replace the placeholder
-engine rules. The Stage 3 runtime-capture pipeline is in place: observation
-records with digests, raw-trace ingestion, a two-independent-observation
-promotion gate, preserved divergence reports, a reference-trace simulator
-(never promotable), an unvalidated AS2 wrapper draft, and the
-`tools/capture-session.mjs` CLI, all documented in
-`docs/integration/ss2-runtime-capture.md`. The battle map's damage ingresses
-were re-verified opcode-by-opcode on 2026-08-30 (see the defeat-gate and
-`magic_damage_character` sections), which corrected the breastplate-stamina
-rule in the isolated candidate. The next technical gate is running the first
-controlled licensed 1v1 captures — the capture vehicle (portable Ruffle
-0.5.0 plus the FFDec-compiled wrapper) is installed and validated end to end
-by `tools/runtime-capture/validate-vehicle.ps1`, and
-`tools/runtime-capture/launch-capture.ps1` drives real sessions — followed
-by the SS2 state/UI adapter. The delivery target remains 2v2 and 3v3
-cooperative campaign support; see `docs/roadmap.md`.
+Formulas are injected through the rule-set seam (`src/team/rule-set.js`), and
+the seam is gated: a rule set may only claim `runtime-verified` if it pins the
+build SHA-256 *and* cites a promoted golden. `classicStyleRules` is unchanged,
+byte-identical to its original formulas, and still the only rule set —
+explicitly a placeholder. **Nothing measured has been dropped into the seam
+yet.** Eight goldens satisfy the gate's form, not its substance.
+
+`src/adapter/` is the SS2 seam: it converts vanilla combatant state to
+canonical state and back, dispatches presentation, and produces the result
+acknowledgement — and it decides no combat, which is enforced by shape rather
+than convention (every vanilla write mirrors the resolver's post-action
+projection, never `before - effect`). It reconciles 3v3 with a two-sided
+vanilla surface by treating hero/villain as a *binding* rebound per action
+rather than a roster.
+
+There are two isolated candidate families: the physical attack ingress
+(`src/golden/ss2-attack-candidate.js`) and the spell ingress
+(`src/golden/ss2-spell-candidate.js`, byte-verified from
+`magic_damage_character`), registered separately and asserted disjoint. The
+whole capture pipeline — digested observation records, raw-trace ingestion,
+the two-independent-session promotion gate, preserved divergence reports, a
+never-promotable reference simulator, and the campaign driver — is in place
+and covered by tests. The delivery target remains 2v2 and 3v3 cooperative
+campaign support; see `docs/roadmap.md`.
+
+A separate design track is researching endless progression in
+`docs/design/endless-progression-brief.md`. It is deliberately disjoint from
+this work: design must never flow into candidate authoring, or a capture
+confirms a fit rather than a prediction.
 
 ## Keep the project lawful and reversible
 
