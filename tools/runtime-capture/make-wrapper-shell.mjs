@@ -36,6 +36,8 @@ function tag(code, body) {
   return Buffer.concat([header, body]);
 }
 
+// 640x420 px, matching the licensed SS2 header rect exactly — level 0 (this
+// shell) defines the stage, and a smaller stage crops the game's UI.
 function stageRect() {
   const bits = [];
   const pushBits = (value, count) => {
@@ -43,9 +45,9 @@ function stageRect() {
   };
   pushBits(15, 5);
   pushBits(0, 15);
-  pushBits(11000, 15);
+  pushBits(12800, 15);
   pushBits(0, 15);
-  pushBits(8000, 15);
+  pushBits(8400, 15);
   while (bits.length % 8 !== 0) bits.push(0);
   const bytes = Buffer.alloc(bits.length / 8);
   bits.forEach((bit, index) => {

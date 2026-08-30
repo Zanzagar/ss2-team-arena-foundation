@@ -67,7 +67,7 @@ $observedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $injected = if ($Passive) { 'false' } else { 'true' }
 $env:RUST_LOG = 'avm_trace=info'
 $ruffleArgs = @(
-    '--width', '550', '--height', '400',
+    '--width', '640', '--height', '420',
     '--filesystem-access-mode', 'allow',
     '--player-runtime', 'flash-player',
     "-PgameUrl=$gameUrl",
