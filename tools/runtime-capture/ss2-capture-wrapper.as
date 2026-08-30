@@ -276,6 +276,7 @@ function makeRandomBetweenMaker(siteId) {
 // floor(r * (b - a + 1)) + a yield exactly v.
 var originalMathRandom = Math.random;
 function tappedRandom() {
+    dbg("mrand-first");
     if (!armed) return originalMathRandom();
     var sample = tape[tapeCursor];
     if (config.injected && sample != undefined) {
@@ -415,9 +416,7 @@ function hookBattle() {
         return function () {
             var previous = currentHook;
             currentHook = "getphase";
-            if (!actionCaptured) {
-                emit({ t: "var", name: "phase_action", value: String(arguments[0]) });
-            }
+            emit({ t: "var", name: "phase_action", value: String(arguments[0]) });
             var result = original.apply(this, arguments);
             currentHook = previous;
             return result;
@@ -429,8 +428,15 @@ function hookBattle() {
     // checkattackroll wrap itself.
     registerSlot(function () { return overlayClip(); }, "attack_chances", function (original) {
         return function () {
-            if (!actionCaptured) beginAction();
             dbg("called:attack_chances");
+            // attack_chances also renders the action buttons' percentages;
+            // the resolution path is distinguished by attack_direction being
+            // set just before the roll (observed live: the UI path leaves
+            // it null and arming there captures nothing).
+            var ov = overlayClip();
+            if (!actionCaptured && ov != undefined && typeof ov.attack_direction == "number") {
+                beginAction();
+            }
             return original.apply(this, arguments);
         };
     });
