@@ -204,17 +204,30 @@ function makeWatcher(side) {
 }
 
 /**
- * Install a wrap that SURVIVES vanilla re-definition: wrap the current value
- * if present, then watch the slot so every future assignment of a function
- * gets wrapped at assignment time.
+ * Wraps survive vanilla re-definition via a per-frame SWEEP, not slot
+ * watches: probed live, Ruffle silently DROPS scope-style assignments onto
+ * watched movieclip slots (the game's own frame-52 definitions were being
+ * voided), so watching function slots breaks the game. The sweep re-wraps
+ * any unmarked function every frame; the mapped roll calls fire
+ * mid-animation, many ticks after definition, so the one-frame window never
+ * loses an action.
  */
-function installResilientWrap(owner, name, makeWrapped) {
-    var current = owner[name];
-    if (typeof current == "function") owner[name] = makeWrapped(current);
-    owner.watch(name, function (prop, oldValue, newValue) {
-        if (typeof newValue == "function") return makeWrapped(newValue);
-        return newValue;
-    });
+var hookSlots = [];
+function registerSlot(ownerGetter, name, maker) {
+    hookSlots.push({ ownerGetter: ownerGetter, name: name, maker: maker });
+}
+function sweepWraps() {
+    for (var i = 0; i < hookSlots.length; i++) {
+        var slot = hookSlots[i];
+        var owner = slot.ownerGetter();
+        if (owner == undefined) continue;
+        var current = owner[slot.name];
+        if (typeof current == "function" && current.__ss2w != true) {
+            var wrapped = slot.maker(current);
+            wrapped.__ss2w = true;
+            owner[slot.name] = wrapped;
+        }
+    }
 }
 
 function makeHookMaker(hookLabel, onEnter, onExit) {
@@ -288,22 +301,42 @@ function finishTrace() {
     traceClosed = true;
 }
 
+function makeGotoMaker() {
+    return function (original) {
+        return function (label) {
+            if (actionDepth > 0 && (label == "combatwon" || label == "combatlost")) {
+                emit({ t: "event", type: "overlay-label", label: label });
+            }
+            return original.apply(this, arguments);
+        };
+    };
+}
+
+// Field watches on the persistent stat OBJECTS are safe (the game writes
+// them via member access, which watch handles); they are re-installed
+// whenever the game swaps in fresh objects (new battle, new opponent).
+var watchedHero = null;
+var watchedVillain = null;
+function sweepFieldWatches() {
+    var hero = gameObject("hero");
+    var villain = gameObject("villain");
+    if (hero != undefined && hero != watchedHero) {
+        for (var f = 0; f < watchFields.length; f++) hero.watch(watchFields[f], makeWatcher("hero"));
+        watchedHero = hero;
+    }
+    if (villain != undefined && villain != watchedVillain) {
+        for (var g = 0; g < watchFields.length; g++) villain.watch(watchFields[g], makeWatcher("villain"));
+        watchedVillain = villain;
+    }
+}
+
 function hookBattle() {
     var root = gameRoot();
     if (root == undefined || root.game == undefined) return;
-    if (root.game.hero == undefined || root.game.villain == undefined) return;
-    var overlay = overlayClip();
-    // Hook the moment the overlay clip EXISTS: its combat functions are only
-    // defined when the timeline reaches frame 52, and an action triggered
-    // from the long-range phase executes within the same ticks as those
-    // definitions - polling for the functions loses the race (observed
-    // live). The slot watches below wrap them at assignment time instead.
-    if (overlay == undefined) return;
 
-    installResilientWrap(overlay, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
-    installResilientWrap(root, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));
-
-    installResilientWrap(overlay, "checkattackroll", function (original) {
+    registerSlot(function () { return overlayClip(); }, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
+    registerSlot(function () { return gameRoot(); }, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));
+    registerSlot(function () { return overlayClip(); }, "checkattackroll", function (original) {
         return function () {
             var previous = currentHook;
             currentHook = "check-attack-roll";
@@ -317,44 +350,27 @@ function hookBattle() {
             return result;
         };
     });
-    installResilientWrap(overlay, "damagecharacter", makeHookMaker("damagecharacter"));
-    installResilientWrap(overlay, "magic_damage_character", makeHookMaker("damagecharacter"));
-    installResilientWrap(overlay, "remove_armour", makeHookMaker("remove-armour"));
-    installResilientWrap(overlay, "destroy_armour", makeHookMaker("remove-armour"));
-    installResilientWrap(overlay, "nextphase", makeHookMaker("next-phase"));
-    installResilientWrap(overlay, "check_spells", makeHookMaker("check-spells"));
-    installResilientWrap(overlay, "defender_hurt", makeHookMaker("damagecharacter", function (args) {
+    registerSlot(function () { return overlayClip(); }, "damagecharacter", makeHookMaker("damagecharacter"));
+    registerSlot(function () { return overlayClip(); }, "magic_damage_character", makeHookMaker("damagecharacter"));
+    registerSlot(function () { return overlayClip(); }, "remove_armour", makeHookMaker("remove-armour"));
+    registerSlot(function () { return overlayClip(); }, "destroy_armour", makeHookMaker("remove-armour"));
+    registerSlot(function () { return overlayClip(); }, "nextphase", makeHookMaker("next-phase"));
+    registerSlot(function () { return overlayClip(); }, "check_spells", makeHookMaker("check-spells"));
+    registerSlot(function () { return overlayClip(); }, "defender_hurt", makeHookMaker("damagecharacter", function (args) {
         if (actionDepth > 0) emit({ t: "event", type: "defender-hurt", method: String(args[0]) });
     }));
-    installResilientWrap(overlay, "defender_blocked", makeHookMaker("check-attack-roll", function () {
+    registerSlot(function () { return overlayClip(); }, "defender_blocked", makeHookMaker("check-attack-roll", function () {
         if (actionDepth > 0) emit({ t: "event", type: "defender-blocked" });
     }));
-    installResilientWrap(overlay, "death", makeHookMaker("death", function (args) {
+    registerSlot(function () { return overlayClip(); }, "death", makeHookMaker("death", function (args) {
         if (actionDepth > 0) {
             var clip = args[0];
             var side = clip == gameRoot().arena.gladiators.villain ? "villain" : "hero";
             emit({ t: "event", type: "death", side: side });
         }
     }));
+    registerSlot(function () { return overlayClip(); }, "gotoAndPlay", makeGotoMaker());
 
-    // Overlay result labels surface through gotoAndPlay on the controller;
-    // vanilla never reassigns gotoAndPlay, so a direct wrap suffices.
-    var originalGoto = overlay.gotoAndPlay;
-    overlay.gotoAndPlay = function (label) {
-        if (actionDepth > 0 && (label == "combatwon" || label == "combatlost")) {
-            emit({ t: "event", type: "overlay-label", label: label });
-        }
-        return originalGoto.apply(this, arguments);
-    };
-
-    var sides = ["hero", "villain"];
-    for (var s = 0; s < sides.length; s++) {
-        var side = sides[s];
-        var target = gameObject(side);
-        for (var f = 0; f < watchFields.length; f++) {
-            target.watch(watchFields[f], makeWatcher(side));
-        }
-    }
     battleHooked = true;
 }
 
@@ -366,8 +382,11 @@ var keyListener = {
 };
 Key.addListener(keyListener);
 
-// Driver loop: keep polling so a new battle (fresh game/overlay objects)
-// can be hooked; the armed action closes the trace by itself.
+// Driver loop: register the slots once the game exists, then sweep every
+// frame - re-wrapping any function the timeline (re)defined and re-watching
+// stat objects the game swapped. The armed action closes the trace itself.
 this.onEnterFrame = function () {
-    if (!battleHooked) hookBattle();
+    if (!battleHooked) { hookBattle(); return; }
+    sweepFieldWatches();
+    sweepWraps();
 };
