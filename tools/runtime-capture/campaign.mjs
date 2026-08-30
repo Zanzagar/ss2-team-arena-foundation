@@ -339,8 +339,26 @@ async function commandSettle(options) {
     const observations = [];
     for (const cited of row.observations) observations.push(await readJson(cited.filePath));
     const { manifest } = buildSs2CaptureManifest(observations);
-    const manifestPath = path.join(MANIFEST_DIR, `${manifestPrefix}-dir${row.direction}.json`);
-    await writeJson(manifestPath, manifest);
+    // Named after the candidate, not after its attack direction. Direction is
+    // not unique across a family whose members share one: six probe arms all
+    // stage direction 5, so a direction-named path made them overwrite one
+    // another in a single settle loop and left seven promoted goldens citing a
+    // manifest digest no committed file reproduced. The suite did not catch it
+    // because the coverage test only walked one family's goldens.
+    //
+    // overwrite: false makes the collision loud rather than silent. A manifest
+    // is the session-independence attestation for a golden that already cites
+    // its digest, so overwriting one destroys evidence.
+    const manifestPath = path.join(MANIFEST_DIR, `${row.fixtureId.replace(/^candidate-/, "")}.json`);
+    try {
+      await writeJson(manifestPath, manifest, { overwrite: false });
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      throw new Error(
+        `${manifestPath} already exists; refusing to overwrite a capture manifest. ` +
+        "If a golden already cites its digest, overwriting it destroys that golden's attestation."
+      );
+    }
 
     try {
       const { golden, captureManifestSha256 } = promoteSs2CandidateToGolden(candidate, observations, manifest);

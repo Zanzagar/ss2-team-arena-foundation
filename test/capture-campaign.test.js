@@ -216,12 +216,23 @@ test("the rebuilt dir6 manifest carries the digest golden-prisoner-normal-kill-d
   assert.deepEqual(manifest.sessions.map((session) => session.sessionId), ["session-diag", "session-gold3"]);
 });
 
-test("every promoted direction's golden cites the digest the builder derives for it", () => {
-  assert.equal(familyGoldens.length, 4, "all four directions of the family should be promoted goldens");
-  for (const golden of familyGoldens) {
+test("EVERY promoted golden cites a manifest the repository can reproduce", () => {
+  // Scoped to every golden, not to one family. It used to walk only the four
+  // prisoner-normal-kill goldens, and that is exactly why it stayed green
+  // while seven promoted goldens cited a capture manifest no committed file
+  // reproduced: the campaign driver named manifests by attack direction, six
+  // probe arms all stage direction 5, and they overwrote one another inside a
+  // single settle loop. A manifest is a golden's session-independence
+  // attestation, so a dangling reference means that golden's promotion cannot
+  // be re-derived from the repository at all.
+  assert.ok(goldenEntries.length >= 22, "expected the full promoted set");
+  for (const golden of goldenEntries.map((entry) => entry.value)) {
     const ids = golden.provenance.observationIds;
     const entry = manifestByObservationIds.get(idKey(ids));
-    assert.ok(entry, `no committed manifest attests exactly ${ids.join(", ")}`);
+    assert.ok(
+      entry,
+      `${golden.fixtureId}: no committed manifest attests exactly ${ids.join(", ")}`
+    );
     const { digest } = buildSs2CaptureManifest(recordsFor(ids), { createdAt: entry.value.createdAt });
     assert.equal(
       digest,
@@ -229,6 +240,10 @@ test("every promoted direction's golden cites the digest the builder derives for
       `${golden.fixtureId} cites a manifest digest the builder does not derive`
     );
   }
+});
+
+test("the four prisoner-normal-kill directions are all promoted", () => {
+  assert.equal(familyGoldens.length, 4, "all four directions of the family should be promoted goldens");
 });
 
 test("createdAt is the only field the builder originates", () => {
