@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-taunt-charisma-floor",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
+      "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 20,
+    "result": null,
+    "hero": {
+      "attack": 11,
+      "defence": 11,
+      "strength": 5,
+      "charisma": 5,
+      "min_damage": 12,
+      "max_damage": 20,
+      "hitpoints": 60,
+      "hitpointsmax": 60,
+      "staminaleft": 20,
+      "staminamax": 100,
+      "gladiator_dir": "right"
+    },
+    "villain": {
+      "attack": 11,
+      "defence": 11,
+      "hitpoints": 40,
+      "hitpointsmax": 40,
+      "staminaleft": 20,
+      "staminamax": 100,
+      "gladiator_dir": "left",
+      "charisma": 30
+    }
+  },
+  "samples": [
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 90
+    },
+    {
+      "label": "taunt-floor-damage-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 3,
+      "value": 2
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 42
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 66
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "attackDirection": 20,
+      "chance": 14,
+      "rollNeeded": 86,
+      "diceroll": 90,
+      "hit": true,
+      "selectedDamage": 2,
+      "criticalSample": 21,
+      "inheritedCritical": false,
+      "deflectionRoll": 42,
+      "deflectionThreshold": 100,
+      "criticalCleared": false,
+      "criticalSampleAfterDeflection": 21,
+      "dispatchedMethod": "taunt",
+      "effectiveDamageMethod": "normal"
+    },
+    "mutation": {
+      "armourDamage": 0,
+      "hitpointDamage": 2,
+      "staminaBonus": 0,
+      "armourRemovalRoll": 66,
+      "armourRemovals": [],
+      "knockback": null,
+      "enchantmentRoll": 100,
+      "statusApplied": null
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/hitpoints",
+        "before": 40,
+        "after": 38,
+        "reason": "physical-damage"
+      }
+    ],
+    "resultEvent": null,
+    "state": {
+      "hero": {
+        "hitpoints": 60,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 20,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 38,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 20,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": null
+    }
+  }
+}

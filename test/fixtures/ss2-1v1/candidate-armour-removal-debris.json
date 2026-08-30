@@ -1,0 +1,251 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "candidate-armour-removal-debris",
+  "classification": "candidate",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "synthetic-static-map",
+    "runtimeVerified": false,
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
+      "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter",
+      "overlay:862/frame:52/DoAction@0x23d7fe/remove_armour"
+    ]
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 5,
+    "result": null,
+    "hero": {
+      "attack": 11,
+      "defence": 11,
+      "strength": 5,
+      "charisma": 5,
+      "min_damage": 12,
+      "max_damage": 20,
+      "hitpoints": 60,
+      "hitpointsmax": 60,
+      "staminaleft": 20,
+      "staminamax": 100,
+      "gladiator_dir": "right"
+    },
+    "villain": {
+      "attack": 11,
+      "defence": 11,
+      "hitpoints": 40,
+      "hitpointsmax": 40,
+      "staminaleft": 20,
+      "staminamax": 100,
+      "gladiator_dir": "left",
+      "armourclass": 20,
+      "armourclass_max": 20,
+      "helmet": 1,
+      "helmet_defence": 5
+    }
+  },
+  "samples": [
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 50
+    },
+    {
+      "label": "normal-damage-roll",
+      "source": "randomBetween",
+      "min": 12,
+      "max": 20,
+      "value": 12
+    },
+    {
+      "label": "normal-critical-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 20,
+      "value": 7
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 42
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 67
+    },
+    {
+      "label": "armour-selection-1",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 2,
+      "value": 1
+    },
+    {
+      "label": "armour-debris-1-x",
+      "source": "randomNumber",
+      "min": 0,
+      "max": 29,
+      "value": 10
+    },
+    {
+      "label": "armour-debris-1-y",
+      "source": "randomNumber",
+      "min": 0,
+      "max": 19,
+      "value": 5
+    },
+    {
+      "label": "armour-debris-1-rotation",
+      "source": "randomNumber",
+      "min": 0,
+      "max": 4,
+      "value": 2
+    },
+    {
+      "label": "knockback-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 4,
+      "value": 1
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "attackDirection": 5,
+      "chance": 50,
+      "rollNeeded": 50,
+      "diceroll": 50,
+      "hit": true,
+      "selectedDamage": 12,
+      "criticalSample": 7,
+      "inheritedCritical": false,
+      "deflectionRoll": 42,
+      "deflectionThreshold": 98.5,
+      "criticalCleared": false,
+      "criticalSampleAfterDeflection": 7,
+      "dispatchedMethod": "normal",
+      "effectiveDamageMethod": "normal"
+    },
+    "mutation": {
+      "armourDamage": 12,
+      "hitpointDamage": 0,
+      "staminaBonus": 0,
+      "armourRemovalRoll": 67,
+      "armourRemovals": [
+        {
+          "request": 1,
+          "selected": "helmet",
+          "removed": true,
+          "defenceRemoved": 5,
+          "debrisRolls": {
+            "horizontal": {
+              "source": "randomNumber",
+              "value": 10
+            },
+            "vertical": 5,
+            "rotation": 2
+          }
+        }
+      ],
+      "knockback": {
+        "roll": 1,
+        "force": null,
+        "animation": false
+      },
+      "enchantmentRoll": 100,
+      "statusApplied": null
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/armourclass",
+        "before": 20,
+        "after": 15,
+        "reason": "remove-armour-piece"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/armourclass_max",
+        "before": 20,
+        "after": 15,
+        "reason": "remove-armour-piece"
+      },
+      {
+        "sequence": 3,
+        "path": "/villain/helmet",
+        "before": 1,
+        "after": 0,
+        "reason": "remove-armour-piece"
+      },
+      {
+        "sequence": 4,
+        "path": "/villain/armourclass",
+        "before": 15,
+        "after": 3,
+        "reason": "physical-damage"
+      }
+    ],
+    "resultEvent": null,
+    "state": {
+      "hero": {
+        "hitpoints": 60,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 20,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 40,
+        "armourclass": 3,
+        "armourclass_max": 15,
+        "staminaleft": 20,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": null
+    }
+  }
+}

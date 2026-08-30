@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import assert from "node:assert/strict";
@@ -38,21 +38,11 @@ import {
 import { resolveSs2PhysicalAttackCandidate } from "../src/golden/ss2-attack-candidate.js";
 import { verifyInstallAgainstFingerprint } from "../tools/capture-session.mjs";
 
+import { loadSs2Fixtures } from "./ss2-fixture-files.js";
+
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
 
-async function loadFixture(fileName) {
-  const contents = await readFile(new URL(`fixtures/ss2-1v1/${fileName}`, import.meta.url), "utf8");
-  return JSON.parse(contents);
-}
-
-const FIXTURE_FILES = [
-  "candidate-normal-threshold-hit.json",
-  "candidate-normal-miss-roll-order.json",
-  "candidate-armour-overflow-burning.json",
-  "candidate-armour-equality-quirk.json",
-  "candidate-lethal-result.json"
-];
-const fixtures = await Promise.all(FIXTURE_FILES.map(loadFixture));
+const fixtures = await loadSs2Fixtures();
 const fixturesById = new Map(fixtures.map((fixture) => [fixture.fixtureId, fixture]));
 
 const CALL_SITE = "overlay:862/frame:52/DoAction@0x240c7f";

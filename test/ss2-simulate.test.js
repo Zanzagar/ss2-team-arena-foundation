@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -11,20 +10,9 @@ import {
 import { promoteSs2CandidateToGolden } from "../src/golden/promote-1v1-golden.js";
 import { SimulationError, simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 
-const FIXTURE_FILES = [
-  "candidate-normal-threshold-hit.json",
-  "candidate-normal-miss-roll-order.json",
-  "candidate-armour-overflow-burning.json",
-  "candidate-armour-equality-quirk.json",
-  "candidate-lethal-result.json"
-];
+import { loadSs2Fixtures } from "./ss2-fixture-files.js";
 
-async function loadFixture(fileName) {
-  const contents = await readFile(new URL(`fixtures/ss2-1v1/${fileName}`, import.meta.url), "utf8");
-  return JSON.parse(contents);
-}
-
-const fixtures = await Promise.all(FIXTURE_FILES.map(loadFixture));
+const fixtures = await loadSs2Fixtures();
 
 test("simulated traces ingest and match every candidate fixture", () => {
   for (const fixture of fixtures) {
