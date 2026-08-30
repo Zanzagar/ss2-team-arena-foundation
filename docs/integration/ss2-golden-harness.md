@@ -68,6 +68,12 @@ recorded as integer range 0 through `n - 1`.
 | `candidate-bash-inherited-critical` | bash (23) at its chance threshold inheriting the transient criticalhit register — first fixture exercising `scenario.transient` end to end |
 | `candidate-bombard-threshold` | bombard (21) threshold hit with its critical-before-damage roll order and no knockback roll |
 | `candidate-duel-absorbed-normal-hit` | authored from the first live capture (2026-08-30): the operator's real gladiator's fully armour-absorbed normal attack in a first-blood duel; the resolver reproduces the observed trace exactly |
+| `candidate-duel-firstblood-normal-kill` | authored from the third live capture: a first-blood duel kill (every tape entry injected); backed by the first committed runtime observation (`test/observations/ss2-1v1/obs-20260830-e1.json`), which matches it formally |
+
+Scenarios may carry an optional `fightMode` (`tournament`, `duel`, `misc`;
+absent means tournament), and result events carry the byte-verified
+`reason` (`elimination` or `first-blood`) and `howDied` (`slain`, `yield`,
+`taunt`, `arrow`, `grievous`) fields derived from the mapped defeat gate.
 
 The candidate module also preserves the mapped ranged attacker-shield chance
 adjustment, critical-deflection threshold, native cosmetic debris rolls when a

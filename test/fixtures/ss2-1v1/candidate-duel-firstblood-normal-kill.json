@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "kind": "ss2-1v1-fixture",
-  "fixtureId": "candidate-duel-absorbed-normal-hit",
+  "fixtureId": "candidate-duel-firstblood-normal-kill",
   "classification": "candidate",
   "build": {
     "fingerprintSchemaVersion": 1,
@@ -18,7 +18,8 @@
   },
   "scenario": {
     "attackerSide": "hero",
-    "attackDirection": 5,
+    "attackDirection": 8,
+    "fightMode": "duel",
     "result": null,
     "hero": {
       "attack": 3,
@@ -30,7 +31,7 @@
       "max_damage": 26,
       "hitpoints": 40,
       "hitpointsmax": 40,
-      "staminaleft": 106,
+      "staminaleft": 126,
       "staminamax": 130,
       "armourclass": 20,
       "armourclass_max": 20,
@@ -45,18 +46,15 @@
       "charisma": 1,
       "magicka": 1,
       "min_damage": 8,
-      "max_damage": 16,
+      "max_damage": 20,
       "hitpoints": 40,
       "hitpointsmax": 40,
-      "staminaleft": 109,
+      "staminaleft": 105,
       "staminamax": 110,
-      "armourclass": 44,
-      "armourclass_max": 44,
-      "helmet": 2,
-      "shield": 2,
+      "armourclass": 0,
+      "armourclass_max": 0,
       "gladiator_dir": "left"
-    },
-    "fightMode": "duel"
+    }
   },
   "samples": [
     {
@@ -111,7 +109,7 @@
   ],
   "expected": {
     "calculation": {
-      "attackDirection": 5,
+      "attackDirection": 8,
       "chance": 60,
       "rollNeeded": 40,
       "diceroll": 50,
@@ -120,15 +118,15 @@
       "criticalSample": 7,
       "inheritedCritical": false,
       "deflectionRoll": 42,
-      "deflectionThreshold": 97,
+      "deflectionThreshold": 100,
       "criticalCleared": false,
       "criticalSampleAfterDeflection": 7,
       "dispatchedMethod": "normal",
       "effectiveDamageMethod": "normal"
     },
     "mutation": {
-      "armourDamage": 23,
-      "hitpointDamage": 0,
+      "armourDamage": 0,
+      "hitpointDamage": 23,
       "staminaBonus": 0,
       "armourRemovalRoll": 12,
       "armourRemovals": [],
@@ -143,19 +141,45 @@
     "mutationTrace": [
       {
         "sequence": 1,
-        "path": "/villain/armourclass",
-        "before": 44,
-        "after": 21,
+        "path": "/villain/hitpoints",
+        "before": 40,
+        "after": 17,
         "reason": "physical-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/result",
+        "before": null,
+        "after": {
+          "status": "pending-animation",
+          "completionToken": "ss2-1v1:hero:villain:combat_won",
+          "winnerSide": "hero",
+          "loserSide": "villain",
+          "reason": "first-blood",
+          "howDied": "yield",
+          "overlayLabel": "combatwon",
+          "arenaLabel": "combat_won"
+        },
+        "reason": "battle-result-pending"
       }
     ],
-    "resultEvent": null,
+    "resultEvent": {
+      "type": "battle-result-pending",
+      "status": "pending-animation",
+      "completionToken": "ss2-1v1:hero:villain:combat_won",
+      "winnerSide": "hero",
+      "loserSide": "villain",
+      "reason": "first-blood",
+      "howDied": "yield",
+      "overlayLabel": "combatwon",
+      "arenaLabel": "combat_won"
+    },
     "state": {
       "hero": {
         "hitpoints": 40,
         "armourclass": 20,
         "armourclass_max": 20,
-        "staminaleft": 106,
+        "staminaleft": 126,
         "burning": false,
         "frozen": false,
         "poison": false,
@@ -172,26 +196,35 @@
         "shield": 0
       },
       "villain": {
-        "hitpoints": 40,
-        "armourclass": 21,
-        "armourclass_max": 44,
-        "staminaleft": 109,
+        "hitpoints": 17,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 105,
         "burning": false,
         "frozen": false,
         "poison": false,
         "life_stolen": false,
         "taunted1": false,
         "taunted2": false,
-        "helmet": 2,
+        "helmet": 0,
         "shoulderguard": 0,
         "breastplate": 0,
         "gauntlet": 0,
         "greaves": 0,
         "shinguard": 0,
         "boot": 0,
-        "shield": 2
+        "shield": 0
       },
-      "result": null
+      "result": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "first-blood",
+        "howDied": "yield",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      }
     }
   }
 }

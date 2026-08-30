@@ -325,10 +325,13 @@ Both damage ingresses end with the same gate, decoded opcode-by-opcode from
   the fight ends via `death(clip, "yield")` on the first hitpoint damage,
   and a fully armour-absorbed hit does not trigger it (observed directly:
   44 armour absorbed a 23-damage hit with no defeat). The candidate
-  resolver still models the `hitpoints <= 0` term only; lethal-outcome
-  captures should be staged in non-first-blood fights, and the live
-  `fight_mode` of tournament/campaign battles is still to be observed
-  (every capture now records it for free).
+  resolver now models the full verified gate via the optional
+  `scenario.fightMode` field (absent means tournament, the earlier implicit
+  assumption): first-blood defeats carry `reason: "first-blood"`, duels die
+  by `howDied: "yield"`, and other modes dispatch the death string by
+  direction. A third live capture (a first-blood duel kill) matched the
+  modeled gate formally. The live `fight_mode` of tournament/campaign
+  battles is still to be observed (every capture records it for free).
 
 ### Spell ingress `magic_damage_character` (byte-verified 2026-08-30)
 

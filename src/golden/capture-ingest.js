@@ -251,12 +251,39 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
               `overlay label ${JSON.stringify(event.label)} does not match the observed death of ${loserSide}.`
             );
           }
+          // reason and howDied are derived from the recorded evidence per
+          // the byte-verified defeat gate: elimination vs first blood from
+          // the loser's post-damage hitpoints; duels always yield, other
+          // modes dispatch the death string by attack_direction.
+          const loserHpPath = `/${loserSide}/hitpoints`;
+          const loserHp = chain.has(loserHpPath)
+            ? chain.get(loserHpPath)
+            : staged[loserSide]?.fields?.hitpoints;
+          if (typeof loserHp !== "number") {
+            fail(lineNumber, "cannot determine the loser's hitpoints for result synthesis.");
+          }
+          const fightMode = vars.get("fight_mode");
+          const direction = vars.get("attack_direction");
+          let howDied;
+          if (fightMode === "duel") howDied = "yield";
+          else if (Number.isInteger(direction) && direction <= 12) howDied = "slain";
+          else if (direction === 20) howDied = "taunt";
+          else if (Number.isInteger(direction) && direction >= 21 && direction <= 23) howDied = "arrow";
+          else if (direction === 30) howDied = "grievous";
+          else {
+            fail(
+              lineNumber,
+              `no death dispatch arm for fight_mode ${JSON.stringify(fightMode)} ` +
+              `and attack_direction ${JSON.stringify(direction)}.`
+            );
+          }
           resultObject = {
             status: "pending-animation",
             completionToken: `ss2-1v1:${winnerSide}:${loserSide}:${arenaLabel}`,
             winnerSide,
             loserSide,
-            reason: "elimination",
+            reason: loserHp <= 0 ? "elimination" : "first-blood",
+            howDied,
             overlayLabel,
             arenaLabel
           };
@@ -320,6 +347,12 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
       throw new CaptureTraceError("The target fixture needs the transient criticalhit variable, which was not recorded.");
     }
     scenario.transient = { criticalhit: vars.get("criticalhit") };
+  }
+  if (fixture.scenario.fightMode !== undefined) {
+    if (!vars.has("fight_mode")) {
+      throw new CaptureTraceError("The target fixture stages a fightMode, which was not recorded.");
+    }
+    scenario.fightMode = vars.get("fight_mode");
   }
 
   const finalState = { result: resultObject ?? null };

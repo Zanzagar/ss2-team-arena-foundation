@@ -104,6 +104,7 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
   for (const side of ["hero", "villain"]) {
     lines.push({ t: "state", side, fields: stagedDump(fixture, side) });
   }
+  lines.push({ t: "var", name: "fight_mode", value: fixture.scenario.fightMode ?? "tournament" });
   lines.push({ t: "var", name: "attack_direction", value: fixture.scenario.attackDirection });
   if (fixture.scenario.transient !== undefined) {
     lines.push({ t: "var", name: "criticalhit", value: fixture.scenario.transient.criticalhit });

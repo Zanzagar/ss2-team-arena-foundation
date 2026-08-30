@@ -45,13 +45,55 @@
     }
   },
   "samples": [
-    { "label": "hit-roll", "source": "randomBetween", "min": 1, "max": 100, "value": 50 },
-    { "label": "normal-damage-roll", "source": "randomBetween", "min": 12, "max": 20, "value": 12 },
-    { "label": "normal-critical-roll", "source": "randomBetween", "min": 1, "max": 20, "value": 7 },
-    { "label": "critical-deflection-roll", "source": "randomBetween", "min": 1, "max": 100, "value": 42 },
-    { "label": "armour-removal-roll", "source": "randomBetween", "min": 1, "max": 100, "value": 12 },
-    { "label": "knockback-roll", "source": "randomBetween", "min": 1, "max": 4, "value": 1 },
-    { "label": "enchantment-potency-roll", "source": "randomBetween", "min": 1, "max": 100, "value": 100 }
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 50
+    },
+    {
+      "label": "normal-damage-roll",
+      "source": "randomBetween",
+      "min": 12,
+      "max": 20,
+      "value": 12
+    },
+    {
+      "label": "normal-critical-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 20,
+      "value": 7
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 42
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 12
+    },
+    {
+      "label": "knockback-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 4,
+      "value": 1
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    }
   ],
   "expected": {
     "calculation": {
@@ -76,13 +118,29 @@
       "staminaBonus": 0,
       "armourRemovalRoll": 12,
       "armourRemovals": [],
-      "knockback": { "roll": 1, "force": null, "animation": false },
+      "knockback": {
+        "roll": 1,
+        "force": null,
+        "animation": false
+      },
       "enchantmentRoll": 100,
       "statusApplied": null
     },
     "mutationTrace": [
-      { "sequence": 1, "path": "/villain/hitpoints", "before": 12, "after": 0, "reason": "physical-damage" },
-      { "sequence": 2, "path": "/villain/burning", "before": true, "after": false, "reason": "death-status-clear" },
+      {
+        "sequence": 1,
+        "path": "/villain/hitpoints",
+        "before": 12,
+        "after": 0,
+        "reason": "physical-damage"
+      },
+      {
+        "sequence": 2,
+        "path": "/villain/burning",
+        "before": true,
+        "after": false,
+        "reason": "death-status-clear"
+      },
       {
         "sequence": 3,
         "path": "/result",
@@ -93,6 +151,7 @@
           "winnerSide": "hero",
           "loserSide": "villain",
           "reason": "elimination",
+          "howDied": "slain",
           "overlayLabel": "combatwon",
           "arenaLabel": "combat_won"
         },
@@ -106,6 +165,7 @@
       "winnerSide": "hero",
       "loserSide": "villain",
       "reason": "elimination",
+      "howDied": "slain",
       "overlayLabel": "combatwon",
       "arenaLabel": "combat_won"
     },
@@ -156,6 +216,7 @@
         "winnerSide": "hero",
         "loserSide": "villain",
         "reason": "elimination",
+        "howDied": "slain",
         "overlayLabel": "combatwon",
         "arenaLabel": "combat_won"
       }

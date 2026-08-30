@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-duel-absorbed-normal-hit",
+  "observationId": "obs-20260830-e1",
+  "observationDigest": "903be4a9ba4829afa189cee3cdc4870f00e9b579bcf8f11a81471a8c06ed4f1b",
+  "sessionId": "session-20260830-e",
+  "recordedAt": "2026-08-30T17:32:43.965Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 5,
+      "actual": 8
+    },
+    {
+      "path": "/scenario/hero/staminaleft",
+      "expected": 106,
+      "actual": 126
+    },
+    {
+      "path": "/scenario/villain/armourclass",
+      "expected": 44,
+      "actual": 0
+    },
+    {
+      "path": "/scenario/villain/armourclass_max",
+      "expected": 44,
+      "actual": 0
+    },
+    {
+      "path": "/scenario/villain/helmet",
+      "expected": 2,
+      "actual": 0
+    },
+    {
+      "path": "/scenario/villain/max_damage",
+      "expected": 16,
+      "actual": 20
+    },
+    {
+      "path": "/scenario/villain/shield",
+      "expected": 2,
+      "actual": 0
+    },
+    {
+      "path": "/scenario/villain/staminaleft",
+      "expected": 109,
+      "actual": 105
+    },
+    {
+      "path": "/mutationTrace/length",
+      "expected": 1,
+      "actual": 2
+    },
+    {
+      "path": "/mutationTrace/0/after",
+      "expected": 21,
+      "actual": 17
+    },
+    {
+      "path": "/mutationTrace/0/before",
+      "expected": 44,
+      "actual": 40
+    },
+    {
+      "path": "/mutationTrace/0/path",
+      "expected": "/villain/armourclass",
+      "actual": "/villain/hitpoints"
+    },
+    {
+      "path": "/events/length",
+      "expected": 1,
+      "actual": 3
+    },
+    {
+      "path": "/resultEvent",
+      "expected": null,
+      "actual": {
+        "type": "battle-result-pending",
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "elimination",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      }
+    },
+    {
+      "path": "/finalState/hero/staminaleft",
+      "expected": 106,
+      "actual": 126
+    },
+    {
+      "path": "/finalState/result",
+      "expected": null,
+      "actual": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "elimination",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      }
+    },
+    {
+      "path": "/finalState/villain/armourclass",
+      "expected": 21,
+      "actual": 0
+    },
+    {
+      "path": "/finalState/villain/armourclass_max",
+      "expected": 44,
+      "actual": 0
+    },
+    {
+      "path": "/finalState/villain/helmet",
+      "expected": 2,
+      "actual": 0
+    },
+    {
+      "path": "/finalState/villain/hitpoints",
+      "expected": 40,
+      "actual": 17
+    },
+    {
+      "path": "/finalState/villain/shield",
+      "expected": 2,
+      "actual": 0
+    },
+    {
+      "path": "/finalState/villain/staminaleft",
+      "expected": 109,
+      "actual": 105
+    }
+  ]
+}

@@ -49,6 +49,7 @@ const GOLDEN_PROVENANCE_KEYS = new Set([
 const SCENARIO_KEYS = new Set([
   "attackDirection",
   "attackerSide",
+  "fightMode",
   "hero",
   "result",
   "transient",
@@ -131,6 +132,7 @@ export const SS2_PROJECTED_COMBATANT_KEYS = Object.freeze([
 const RESULT_EVENT_KEYS = Object.freeze([
   "arenaLabel",
   "completionToken",
+  "howDied",
   "loserSide",
   "overlayLabel",
   "reason",
@@ -138,6 +140,8 @@ const RESULT_EVENT_KEYS = Object.freeze([
   "type",
   "winnerSide"
 ]);
+const RESULT_REASONS = new Set(["elimination", "first-blood"]);
+const RESULT_HOW_DIED = new Set(["slain", "yield", "taunt", "arrow", "grievous"]);
 
 export class GoldenFixtureError extends Error {
   constructor(message, options = {}) {
@@ -296,13 +300,15 @@ export function assertSs2ResultEventShape(resultEvent, path = "resultEvent", Err
     if (
       resultEvent.type !== "battle-result-pending" ||
       resultEvent.status !== "pending-animation" ||
-      resultEvent.reason !== "elimination" ||
+      !RESULT_REASONS.has(resultEvent.reason) ||
+      !RESULT_HOW_DIED.has(resultEvent.howDied) ||
       (winnerSide !== "hero" && winnerSide !== "villain") ||
       (loserSide !== "hero" && loserSide !== "villain") ||
       winnerSide === loserSide
     ) {
       throw new GoldenFixtureValidationError(
-        `${path} must be a battle-result-pending event with distinct sides.`
+        `${path} must be a battle-result-pending event with distinct sides, ` +
+        "a mapped reason, and a mapped howDied."
       );
     }
     const expectedOverlay = winnerSide === "hero" ? "combatwon" : "combatlost";
@@ -396,6 +402,16 @@ export function assertSs2ScenarioShape(scenario, path = "scenario", ErrorClass =
     }
     if (!Number.isSafeInteger(scenario.attackDirection)) {
       throw new GoldenFixtureValidationError(`${path}.attackDirection must be an integer.`);
+    }
+    if (
+      scenario.fightMode !== undefined &&
+      scenario.fightMode !== "tournament" &&
+      scenario.fightMode !== "duel" &&
+      scenario.fightMode !== "misc"
+    ) {
+      throw new GoldenFixtureValidationError(
+        `${path}.fightMode must be tournament, duel, or misc (absent means tournament).`
+      );
     }
     if (scenario.result !== null) {
       throw new GoldenFixtureValidationError("A one-action 1v1 fixture must start with result=null.");

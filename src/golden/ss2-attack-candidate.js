@@ -318,17 +318,29 @@ function projectState(scenario) {
   };
 }
 
-function createResult(attackerSide, defenderSide) {
+function createResult(attackerSide, defenderSide, reason, howDied) {
   const arenaLabel = attackerSide === "hero" ? "combat_won" : "combat_lost";
   return {
     status: "pending-animation",
     completionToken: `ss2-1v1:${attackerSide}:${defenderSide}:${arenaLabel}`,
     winnerSide: attackerSide,
     loserSide: defenderSide,
-    reason: "elimination",
+    reason,
+    howDied,
     overlayLabel: attackerSide === "hero" ? "combatwon" : "combatlost",
     arenaLabel
   };
+}
+
+/** Byte-verified non-duel death dispatch by attack_direction. */
+function deathHowDiedFor(direction) {
+  if (direction <= 12) return "slain";
+  if (direction === 20) return "taunt";
+  if (direction >= 21 && direction <= 23) return "arrow";
+  if (direction === 30) return "grievous";
+  throw new Ss2CandidateError(
+    `attack_direction ${direction} reaches the defeat block with no death dispatch arm.`
+  );
 }
 
 /**
@@ -348,6 +360,14 @@ export function resolveSs2PhysicalAttackCandidate(scenario, rolls) {
   const defender = initialiseCombatant(scenario[defenderSide]);
   const direction = Number(scenario.attackDirection);
   if (!Number.isInteger(direction)) throw new Ss2CandidateError("attackDirection must be an integer.");
+  // Byte-verified and observed live: the defeat gate depends on the fight
+  // mode. Absent fightMode means "tournament", the mode whose only defeat
+  // condition is hitpoints <= 0 (the implicit assumption of the earlier
+  // static-only candidates).
+  const fightMode = scenario.fightMode ?? "tournament";
+  if (fightMode !== "tournament" && fightMode !== "duel" && fightMode !== "misc") {
+    throw new Ss2CandidateError("fightMode must be tournament, duel, or misc.");
+  }
 
   const chances = calculateSs2AttackChances(attacker, defender);
   const diceroll = rolls.randomBetween("hit-roll", 1, 100);
@@ -471,11 +491,23 @@ export function resolveSs2PhysicalAttackCandidate(scenario, rolls) {
   }
   clampCombatant(defender, mutationTrace, defenderSide);
 
+  // Byte-verified defeat gate, observed live twice: enter iff hitpoints <= 0
+  // OR (hitpoints < hitpointsmax AND the mode is not tournament) — the
+  // second term is the first-blood rule; duels always die by "yield".
   let resultEvent = null;
-  if (defender.hitpoints <= 0) {
+  const eliminated = defender.hitpoints <= 0;
+  const firstBlood = !eliminated &&
+    defender.hitpoints < defender.hitpointsmax &&
+    fightMode !== "tournament";
+  if (eliminated || firstBlood) {
     clearDeathState(scenario, mutationTrace);
     const resultBefore = scenario.result ?? null;
-    scenario.result = createResult(attackerSide, defenderSide);
+    scenario.result = createResult(
+      attackerSide,
+      defenderSide,
+      eliminated ? "elimination" : "first-blood",
+      fightMode === "duel" ? "yield" : deathHowDiedFor(direction)
+    );
     recordMutation(mutationTrace, "/result", resultBefore, scenario.result, "battle-result-pending");
     resultEvent = { type: "battle-result-pending", ...scenario.result };
   }
