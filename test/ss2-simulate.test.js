@@ -9,6 +9,7 @@ import {
 } from "../src/golden/observation.js";
 import { promoteSs2CandidateToGolden } from "../src/golden/promote-1v1-golden.js";
 import { SimulationError, simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
+import { wrapperTapeForFixture } from "../tools/capture-session.mjs";
 
 import { loadSs2Fixtures } from "./ss2-fixture-files.js";
 
@@ -107,6 +108,19 @@ test("simulated traces omit unobservable opcode debris rolls", () => {
   assert.ok(rollLines.every((line) => line.source === "randomBetween"));
   const record = ingestSs2CaptureTrace(simulateSs2CaptureTrace(debrisFixture), debrisFixture);
   assert.equal(matchSs2ObservationToFixture(debrisFixture, record).match, true);
+});
+
+test("wrapper tape strings carry only injectable randomBetween samples", () => {
+  const debrisFixture = fixtures.find((fixture) => fixture.fixtureId === "candidate-armour-removal-debris");
+  const tape = wrapperTapeForFixture(debrisFixture);
+  assert.ok(!tape.includes("armour-debris"));
+  assert.equal(
+    tape.split(",").length,
+    debrisFixture.samples.filter((sample) => sample.source === "randomBetween").length
+  );
+  for (const entry of tape.split(",")) {
+    assert.match(entry, /^[a-z0-9-]+:-?\d+:-?\d+:-?\d+$/);
+  }
 });
 
 test("the simulator rejects invalid identity metadata", () => {

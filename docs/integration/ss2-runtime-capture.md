@@ -52,6 +52,10 @@ Module responsibilities:
 
 ## Capture session protocol
 
+Per-fixture staging requirements (implied equipment, level/vitality
+derivations, and open staging questions) are catalogued in
+[the capture staging guide](ss2-capture-staging.md).
+
 1. `node tools/capture-session.mjs verify-install` — both installed hashes
    must match the fingerprint or the session must not start.
 2. Stage the exact scenario of one target candidate fixture (stats, armour,

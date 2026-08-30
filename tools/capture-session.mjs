@@ -306,13 +306,28 @@ async function commandManifestDigest(options) {
   return 0;
 }
 
+/** The wrapper's `tape` FlashVars value: injectable randomBetween samples only. */
+export function wrapperTapeForFixture(fixture) {
+  return fixture.samples
+    .filter((sample) => sample.source === "randomBetween")
+    .map((sample) => `${sample.label}:${sample.min}:${sample.max}:${sample.value}`)
+    .join(",");
+}
+
+async function commandTape(options) {
+  const fixture = validateSs2OneVsOneFixture(await readJson(require_(options, "fixture", "--fixture")));
+  console.log(wrapperTapeForFixture(fixture));
+  return 0;
+}
+
 const COMMANDS = new Map([
   ["verify-install", commandVerifyInstall],
   ["simulate", commandSimulate],
   ["ingest", commandIngest],
   ["verify", commandVerify],
   ["promote", commandPromote],
-  ["manifest-digest", commandManifestDigest]
+  ["manifest-digest", commandManifestDigest],
+  ["tape", commandTape]
 ]);
 
 async function main() {
