@@ -322,6 +322,8 @@ export function extractCaptureTraceFromRuffleLog(logText) {
     try {
       const parsed = JSON.parse(payload);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && typeof parsed.t === "string") {
+        // Wrapper diagnostics stay in the raw log only.
+        if (parsed.t === "dbg") continue;
         lines.push(payload);
         // A capture is a single action; anything after the end line is
         // post-session runtime noise, not evidence.

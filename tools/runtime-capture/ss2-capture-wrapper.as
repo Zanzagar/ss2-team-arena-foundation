@@ -83,6 +83,15 @@ function emit(line) {
     trace(jsonString(line)); // Ruffle: RUST_LOG=avm_trace=info captures this
 }
 
+// Diagnostic milestones: kept in the raw log for debugging, stripped by
+// delog before ingest. Each label is emitted once.
+var dbgSeen = {};
+function dbg(label) {
+    if (dbgSeen[label] == true) return;
+    dbgSeen[label] = true;
+    trace("{\"t\":\"dbg\",\"at\":\"" + label + "\"}");
+}
+
 // ---------------------------------------------------------------------------
 // Configuration (read every FlashVar before declaring same-named variables)
 // ---------------------------------------------------------------------------
@@ -226,6 +235,7 @@ function sweepWraps() {
             var wrapped = slot.maker(current);
             wrapped.__ss2w = true;
             owner[slot.name] = wrapped;
+            dbg("wrapped:" + slot.name);
         }
     }
 }
@@ -280,6 +290,7 @@ function makeRandomBetweenMaker(siteId) {
 function beginAction() {
     if (actionCaptured) return;
     actionCaptured = true;
+    dbg("action-armed");
     dumpSide("state", "hero");
     dumpSide("state", "villain");
     emit({ t: "var", name: "fight_mode", value: _global.fight_mode });
@@ -323,16 +334,22 @@ function sweepFieldWatches() {
     if (hero != undefined && hero != watchedHero) {
         for (var f = 0; f < watchFields.length; f++) hero.watch(watchFields[f], makeWatcher("hero"));
         watchedHero = hero;
+        dbg("watching:hero");
     }
     if (villain != undefined && villain != watchedVillain) {
         for (var g = 0; g < watchFields.length; g++) villain.watch(watchFields[g], makeWatcher("villain"));
         watchedVillain = villain;
+        dbg("watching:villain");
     }
+    if (overlayClip() != undefined) dbg("overlay-exists");
 }
 
 function hookBattle() {
     var root = gameRoot();
-    if (root == undefined || root.game == undefined) return;
+    if (root == undefined) return;
+    dbg("level1-exists");
+    if (root.game == undefined) return;
+    dbg("game-exists");
 
     registerSlot(function () { return overlayClip(); }, "randomBetween", makeRandomBetweenMaker(OVERLAY_CALL_SITE));
     registerSlot(function () { return gameRoot(); }, "randomBetween", makeRandomBetweenMaker(ROOT_CALL_SITE));
