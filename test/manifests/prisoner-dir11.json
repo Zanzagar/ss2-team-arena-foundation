@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-capture-manifest",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "captureToolVersion": "ss2-capture/0.1.0",
+  "createdAt": "2026-08-30T22:23:25.362Z",
+  "sessions": [
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-pw5"
+      ],
+      "observedAt": "2026-08-30T22:18:11Z",
+      "sessionId": "session-pw5"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-pw6"
+      ],
+      "observedAt": "2026-08-30T22:19:19Z",
+      "sessionId": "session-pw6"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-pw7"
+      ],
+      "observedAt": "2026-08-30T22:20:27Z",
+      "sessionId": "session-pw7"
+    }
+  ]
+}
