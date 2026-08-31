@@ -235,6 +235,32 @@ test("ruffle logs delog into clean traces, dropping noise and truncating at end"
   assert.equal(extractCaptureTraceFromRuffleLog("no trace lines at all").trace, "");
 });
 
+test("a colourised Ruffle log delogs identically to a plain one", () => {
+  // The trap this closes: raising RUST_LOG's global level turns colour on, and
+  // the escapes land between `avm_trace` and its colon. The vehicle gate hit
+  // this live - 56 avm_trace lines in the log, 0 extracted, and an error
+  // message blaming RUST_LOG for not being set when it was.
+  const e = "\u001b";
+  const colourised = [
+    `${e}[2m2026-08-31T05:51:19.852178Z${e}[0m ${e}[32m INFO${e}[0m ${e}[2mavm_trace${e}[0m${e}[2m:${e}[0m {"t":"meta","schemaVersion":1}`,
+    `${e}[2m2026-08-31T05:51:19.860907Z${e}[0m ${e}[32m INFO${e}[0m ${e}[2mavm_trace${e}[0m${e}[2m:${e}[0m {"t":"dbg","at":"rootframe"}`,
+    `${e}[2m2026-08-31T05:51:20.100000Z${e}[0m ${e}[32m INFO${e}[0m ${e}[2mavm_trace${e}[0m${e}[2m:${e}[0m {"t":"end","reason":"complete"}`
+  ].join("\n");
+  const plain = [
+    '2026-08-31T05:51:19.852178Z  INFO avm_trace: {"t":"meta","schemaVersion":1}',
+    '2026-08-31T05:51:19.860907Z  INFO avm_trace: {"t":"dbg","at":"rootframe"}',
+    '2026-08-31T05:51:20.100000Z  INFO avm_trace: {"t":"end","reason":"complete"}'
+  ].join("\n");
+
+  const fromColour = extractCaptureTraceFromRuffleLog(colourised);
+  const fromPlain = extractCaptureTraceFromRuffleLog(plain);
+
+  // Not just "non-empty": the two must agree exactly, or colour would be
+  // changing the evidence rather than only its presentation.
+  assert.deepEqual(fromColour, fromPlain);
+  assert.equal(fromColour.trace, '{"t":"meta","schemaVersion":1}\n{"t":"end","reason":"complete"}\n');
+});
+
 test("the simulator rejects invalid identity metadata", () => {
   const fixture = fixtures[0];
   assert.throws(

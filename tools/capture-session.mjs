@@ -316,7 +316,19 @@ export function extractCaptureTraceFromRuffleLog(logText) {
   const lines = [];
   let dropped = 0;
   for (const rawLine of logText.split(/\r?\n/)) {
-    const match = /avm_trace:\s(.*)$/.exec(rawLine);
+    // Ruffle's tracing writer emits ANSI colour once the GLOBAL log level is
+    // raised - which launch-capture.ps1 does for an isolated-store session and
+    // validate-vehicle.ps1 does for its stub run. The escapes land BETWEEN
+    // `avm_trace` and its colon, so the literal `avm_trace:` never appears and
+    // every trace line was skipped; delog then reported "No capture-trace lines
+    // found in the log (is RUST_LOG=avm_trace=info set?)", naming the one thing
+    // that WAS set. A whole capture reads as an empty one.
+    //
+    // Strip SGR sequences before matching. Inert on all 239 archived logs -
+    // none contains an escape byte - so this cannot change how any existing
+    // evidence parses.
+    const line = rawLine.replace(/\u001b\[[0-9;]*m/g, "");
+    const match = /avm_trace:\s(.*)$/.exec(line);
     if (!match) continue;
     const payload = match[1];
     try {
