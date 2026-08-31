@@ -5,6 +5,7 @@ import * as engine from "../src/engine.js";
 import {
   acknowledgeResultAnimation,
   advanceAiTurns,
+  AI_FILL_MARKER_KEYS,
   applyAction,
   applyActionWithOutcome,
   BATTLE_RESULT_ACK_TYPE,
@@ -20,6 +21,7 @@ import {
   controllerOf,
   createTeamBattle,
   currentCombatant,
+  DEFAULT_STATS,
   defineTeamRuleSet,
   describeTeamRuleSet,
   EffectKind,
@@ -32,6 +34,7 @@ import {
   reassignController,
   replayTeamBattle,
   RESERVED_RESOURCE_NAMES,
+  resourceNames,
   resourceValue,
   ResultReason,
   RngSequenceError,
@@ -588,6 +591,359 @@ test("AI fill is pure: it never consumes the ordered RNG channel", () => {
     ]
   });
   assert.equal(combatStateHash(twin), combatStateHash(withFill));
+});
+
+/* ------------------------------------------------------------------ */
+/* Per-slot AI fill                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The blueprints that must not move, and the hashes they produced **before**
+ * per-slot fill existed.
+ *
+ * These literals were not hand-written. They were read off a run of the roster
+ * at the commit before this change, over the five shapes a single-template team
+ * can take: implicit empty slots, `null` and `{ fill: "ai" }` markers, the two
+ * string markers, a fully populated team template, and a team that supplies no
+ * fighters at all. Both projections are covered — the combat hash and the
+ * legacy engine one — because `src/engine.js` is a compatibility façade whose
+ * historical replay and state hash the seam may not disturb.
+ */
+const UNCHANGED_FILL_BLUEPRINTS = [
+  {
+    name: "implicit empty slots",
+    combat: "79952a5d",
+    legacy: "ecffd39f",
+    blueprint: {
+      seed: 3,
+      teams: [
+        { id: "red", slots: 3, combatants: [brute("r1", 40)] },
+        { id: "blue", slots: 3, combatants: [brute("b1", 20)] }
+      ]
+    }
+  },
+  {
+    name: "null and object markers",
+    combat: "b629f6a2",
+    legacy: "5a573636",
+    blueprint: {
+      seed: 3,
+      teams: [
+        { id: "red", slots: 3, combatants: [brute("r1", 40), brute("r2", 30)] },
+        { id: "blue", slots: 3, combatants: [brute("b1", 20, { controller: "ai" }), null, { fill: "ai" }] }
+      ]
+    }
+  },
+  {
+    name: "string markers",
+    combat: "fefc60d4",
+    legacy: "b2dfc69d",
+    blueprint: {
+      seed: 5,
+      teams: [
+        { id: "red", slots: 3, combatants: [brute("r1", 40), "ai-fill", "empty"] },
+        { id: "blue", slots: 2, combatants: [brute("b1", 20), { empty: true }] }
+      ]
+    }
+  },
+  {
+    name: "a populated team template",
+    combat: "8d2f19d4",
+    legacy: "1529c5aa",
+    blueprint: {
+      seed: 7,
+      teams: [
+        {
+          id: "red",
+          slots: 3,
+          combatants: [brute("r1", 40)],
+          aiFill: {
+            name: "Reserve",
+            stats: { strength: 3, agility: 11, attack: 7, defense: 1, vitality: 2, stamina: 4, magicka: 0 },
+            loadout: { meleeDamage: 6, rangedDamage: 2, canUseRanged: true },
+            resources: { armourclass: 12, staminaleft: 30 },
+            status: ["burning"],
+            health: 9
+          }
+        },
+        { id: "blue", slots: 3, combatants: [brute("b1", 20)] }
+      ]
+    }
+  },
+  {
+    name: "a template carrying an explicit id",
+    combat: "2007fba4",
+    legacy: "be79738c",
+    blueprint: {
+      seed: 11,
+      teams: [
+        { id: "red", slots: 2, combatants: [brute("r1", 40)], aiFill: { id: "solo-reserve", name: "Solo" } },
+        { id: "blue", slots: 2, combatants: [brute("b1", 20)], aiFill: { resources: { armourclass: 7 } } }
+      ]
+    }
+  },
+  {
+    name: "a team that supplies no fighters at all",
+    combat: "5b5bafa7",
+    legacy: "8e29b02b",
+    blueprint: {
+      seed: 13,
+      teams: [
+        { id: "red", slots: 3, combatants: [], aiFill: { stats: { agility: 9 } } },
+        { id: "blue", slots: 1, combatants: [] }
+      ]
+    }
+  }
+];
+
+test("a single aiFill template still fills exactly as it did: the pinned hashes do not move", () => {
+  for (const { name, blueprint, combat, legacy } of UNCHANGED_FILL_BLUEPRINTS) {
+    assert.equal(combatStateHash(createTeamBattle(blueprint)), combat, `${name}: combat hash`);
+    // The façade's historical projection, which per-slot fill must not disturb.
+    assert.equal(engine.stateHash(engine.createBattle(blueprint)), legacy, `${name}: legacy engine hash`);
+  }
+});
+
+test("an aiFill array addresses one template per slot", () => {
+  const battle = createTeamBattle({
+    seed: 3,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [brute("r1", 40)],
+        aiFill: [null, { name: "Vanguard", resources: { armourclass: 44 } }, { name: "Skirmisher", resources: { armourclass: 12 } }]
+      },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  const [, second, third] = battle.teams[0].combatants;
+  assert.equal(second.name, "Vanguard");
+  assert.equal(third.name, "Skirmisher");
+  // The bag the adapter could not deliver before: one per slot, both distinct.
+  assert.equal(resourceValue(second, "armourclass"), 44);
+  assert.equal(resourceValue(third, "armourclass"), 12);
+  // Still the ordinary combatant path: same ids, same seats, same AI seat.
+  assert.deepEqual(battle.teams[0].combatants.map((combatant) => combatant.id), ["r1", "red-fill-2", "red-fill-3"]);
+  assert.equal(controllerOf(battle, second.id).kind, ControllerKind.AI);
+});
+
+test("an empty-slot marker's own fields are the slot's fill source", () => {
+  const battle = createTeamBattle({
+    seed: 3,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [
+          brute("r1", 40),
+          { fill: "ai", id: "red-guard", name: "Guard", resources: { armourclass: 44 } },
+          { empty: true, id: "red-scout", name: "Scout", resources: { armourclass: 12 } }
+        ]
+      },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  const [, guard, scout] = battle.teams[0].combatants;
+  assert.deepEqual([guard.id, scout.id], ["red-guard", "red-scout"]);
+  assert.deepEqual([guard.name, scout.name], ["Guard", "Scout"]);
+  assert.deepEqual([guard.aiFilled, scout.aiFilled], [true, true]);
+  assert.equal(resourceValue(guard, "armourclass"), 44);
+  assert.equal(resourceValue(scout, "armourclass"), 12);
+  // `fill` and `empty` select the fill; they are never combatant fields.
+  assert.equal(guard.fill, undefined);
+  assert.equal(scout.empty, undefined);
+  assert.deepEqual([...AI_FILL_MARKER_KEYS], ["empty", "fill"]);
+});
+
+test("the nearest declaration wins, and the merge is shallow", () => {
+  const battle = createTeamBattle({
+    seed: 3,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [
+          brute("r1", 40),
+          null,
+          { fill: "ai", name: "Champion", stats: { agility: 21 } }
+        ],
+        aiFill: { name: "Reserve", stats: { agility: 3, strength: 9 }, resources: { armourclass: 5 } }
+      },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  const [, plain, champion] = battle.teams[0].combatants;
+  assert.equal(plain.name, "Reserve");
+  assert.equal(plain.stats.agility, 3);
+
+  // The marker overrode `name` and `stats`, and inherited `resources`.
+  assert.equal(champion.name, "Champion");
+  assert.equal(champion.stats.agility, 21);
+  assert.equal(resourceValue(champion, "armourclass"), 5);
+  // Shallow, exactly as the single-template spread always was: the marker's
+  // `stats` REPLACED the template's, so `strength` fell back to the default
+  // rather than merging through.
+  assert.equal(plain.stats.strength, 9);
+  assert.equal(champion.stats.strength, DEFAULT_STATS.strength);
+});
+
+/**
+ * THE DEFECT THIS CLOSES.
+ *
+ * Two AI-filled slots on one team, each mirroring a different gladiator, each
+ * needing its own armour pool. With one template per team there was nowhere to
+ * put the second bag, so `src/adapter/battle-host.js` declared **none** on
+ * either slot and reported `diagnostics.aiFillResourceGaps` — correctly,
+ * because guessing which template won would have put an invented number inside
+ * `combatStateHash`. The consequence it named is exercised here: a rule set's
+ * write to a resource on such a slot was refused by the resolver.
+ */
+test("two AI-filled slots that disagree about their resources each get their own bag", () => {
+  const battle = createTeamBattle({
+    seed: 4,
+    rules: armourFirstRules({ hit: 25 }),
+    teams: [
+      { id: "red", combatants: [warden("red-1", 30, { armour: { value: 0, max: 44 } }, { maxHealth: 200 })] },
+      {
+        id: "blue",
+        slots: 2,
+        combatants: [
+          { fill: "ai", id: "blue-guard", resources: { armour: { value: 44, max: 44 } }, maxHealth: 30 },
+          { fill: "ai", id: "blue-scout", resources: { armour: { value: 3, max: 44 } }, maxHealth: 30 }
+        ]
+      }
+    ]
+  });
+  assert.deepEqual(battle.teams[1].combatants.map((combatant) => combatant.aiFilled), [true, true]);
+  assert.equal(resourceValue(combatantById(battle, "blue-guard"), "armour"), 44);
+  assert.equal(resourceValue(combatantById(battle, "blue-scout"), "armour"), 3);
+  // Both bags are inside the hash, so two peers cannot disagree about either.
+  const projected = toTeamWireState(battle).teams[1].combatants;
+  assert.deepEqual(projected.map((combatant) => combatant.resources.armour.value), [44, 3]);
+
+  // And a rule set's write to each of them is now applied rather than refused.
+  applyAction(battle, strike("red-1", "blue-guard"));
+  advanceAiTurns(battle, 10);
+  applyAction(battle, strike("red-1", "blue-scout"));
+
+  const guard = combatantById(battle, "blue-guard");
+  const scout = combatantById(battle, "blue-scout");
+  assert.equal(resourceValue(guard, "armour"), 19, "44 armour absorbed the whole hit");
+  assert.equal(guard.health, 30);
+  assert.equal(resourceValue(scout, "armour"), 0, "3 armour was spent");
+  assert.equal(scout.health, 8, "and 22 spilled past it");
+  assert.equal(combatantById(battle, "red-1").health, 150, "both AI allies took their own turn");
+});
+
+test("the three fill declarations are the same data, so identical slots still hash identically", () => {
+  const template = {
+    stats: { strength: 3, agility: 11, attack: 7, defense: 1, vitality: 2, stamina: 4, magicka: 0 },
+    loadout: { meleeDamage: 6, rangedDamage: 2, canUseRanged: true },
+    resources: { armourclass: 12, staminaleft: 30 }
+  };
+  const blue = { id: "blue", slots: 3, combatants: [brute("b1", 20)] };
+  const viaTeamTemplate = createTeamBattle({
+    seed: 7,
+    teams: [{ id: "red", slots: 3, combatants: [brute("r1", 40)], aiFill: template }, blue]
+  });
+  const viaArray = createTeamBattle({
+    seed: 7,
+    teams: [{ id: "red", slots: 3, combatants: [brute("r1", 40)], aiFill: [null, template, template] }, blue]
+  });
+  const viaMarkers = createTeamBattle({
+    seed: 7,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [brute("r1", 40), { fill: "ai", ...template }, { empty: true, ...template }]
+      },
+      blue
+    ]
+  });
+  assert.equal(combatStateHash(viaArray), combatStateHash(viaTeamTemplate));
+  assert.equal(combatStateHash(viaMarkers), combatStateHash(viaTeamTemplate));
+  assert.equal(engine.stateHash(engine.createBattle({
+    seed: 7,
+    teams: [{ id: "red", slots: 3, combatants: [brute("r1", 40)], aiFill: [null, template, template] }, blue]
+  })), engine.stateHash(engine.createBattle({
+    seed: 7,
+    teams: [{ id: "red", slots: 3, combatants: [brute("r1", 40)], aiFill: template }, blue]
+  })));
+});
+
+test("per-slot fill stays pure, serialisable and deterministic", () => {
+  const blueprint = {
+    seed: 9,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [brute("r1", 40), { fill: "ai", name: "Guard", resources: { armourclass: 44 } }],
+        aiFill: [null, null, { name: "Scout", resources: { armourclass: 12 } }]
+      },
+      { id: "blue", slots: 2, combatants: [brute("b1", 20)] }
+    ]
+  };
+  const battle = createTeamBattle(blueprint);
+  assert.equal(battle.rngCursor, 0, "the fill draws nothing");
+  assert.equal(combatStateHash(createTeamBattle(blueprint)), combatStateHash(battle));
+
+  // Why a function is refused: every accepted form survives the round trip a
+  // replay, a wire transfer or a saved battle puts a blueprint through, so the
+  // roster rebuilt from JSON is the roster that was hashed.
+  const roundTripped = JSON.parse(JSON.stringify(blueprint));
+  assert.equal(combatStateHash(createTeamBattle(roundTripped)), combatStateHash(battle));
+  assert.equal(combatStateHash(replayTeamBattle(roundTripped, [])), combatStateHash(battle));
+});
+
+test("a fill declaration that could never be honoured is refused, not dropped", () => {
+  const withAiFill = (aiFill, combatants = [brute("r1", 40)]) => () => createTeamBattle({
+    seed: 2,
+    teams: [
+      { id: "red", slots: 2, combatants, aiFill },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+
+  // A function cannot survive a blueprint's JSON round trip, so a replay would
+  // silently build a different roster. Worse, it is not even inert today: the
+  // roster read the function's own `name` and called the fighter "aiFill".
+  assert.throws(withAiFill((index) => ({ name: `Reserve ${index}` })), BattleError);
+  assert.throws(withAiFill(() => ({})), /aiFill may not be a function/);
+  assert.throws(withAiFill(42), /Received number/);
+  assert.throws(withAiFill("reserve"), /Received string/);
+  assert.throws(withAiFill([{}, {}, {}]), /2 slots but supplies 3 per-slot aiFill templates/);
+
+  // `controller` is the one key read for a supplied combatant and ignored for a
+  // filled one, so it is refused on every fill route rather than dropped.
+  assert.throws(withAiFill({ controller: "remote:peer" }), /A team's aiFill declares a controller/);
+  assert.throws(withAiFill([null, { controller: "remote:peer" }]), /aiFill\[1\] declares a controller/);
+  assert.throws(
+    withAiFill(undefined, [brute("r1", 40), { fill: "ai", controller: "remote:peer" }]),
+    /An empty-slot marker declares a controller/
+  );
+});
+
+test("a per-slot template addressed to an occupied slot is allowed and simply unused", () => {
+  // "What each seat would be if it were empty" is a legitimate declaration, and
+  // is a different thing from a template addressed to a slot that cannot exist.
+  const battle = createTeamBattle({
+    seed: 2,
+    teams: [
+      {
+        id: "red",
+        slots: 2,
+        combatants: [brute("r1", 40)],
+        aiFill: [{ name: "Unused", resources: { armourclass: 99 } }, { name: "Used" }]
+      },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  assert.deepEqual(battle.teams[0].combatants.map((combatant) => combatant.name), ["r1", "Used"]);
+  assert.deepEqual(resourceNames(battle.teams[0].combatants[0]), []);
+  assert.deepEqual(resourceNames(battle.teams[0].combatants[1]), []);
 });
 
 /* ------------------------------------------------------------------ */
