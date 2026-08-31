@@ -5,9 +5,17 @@ Launch one controlled licensed capture session.
 Verifies the installed hashes, rebuilds the wrapper from source, injects the
 target fixture's tape, and opens the licensed game (read in place via a
 file: URL — never copied) inside the instrumented wrapper under portable
-Ruffle. Play the staged action, then close the Ruffle window; the script
-then extracts the trace and runs ingest (with the live post-session hash
-check) and verify automatically.
+Ruffle.
+
+With -Autopilot and -Navigate set (which every automated caller does), the
+session needs no human input at all: the wrapper navigates the menus with the
+game own calls, the autopilot performs the action through the same entry point
+the on-screen buttons call, and the trace closes itself. No cursor, no window
+focus, no clicking. Leave -Autopilot empty only if you deliberately want to
+play the fight by hand.
+
+The script then extracts the trace and runs ingest (with the live post-session
+hash check) and verify automatically.
 
 .EXAMPLE
 powershell -File tools\runtime-capture\launch-capture.ps1 `
@@ -156,9 +164,15 @@ if ($SaveDirectory) {
     $ruffleArgs = @('--save-directory', "$SaveDirectory") + $ruffleArgs
 }
 
-Write-Host 'Launching the instrumented session. Stage the scenario, perform'
-Write-Host 'the one controlled action (press END after a non-lethal action),'
-Write-Host 'then CLOSE the Ruffle window to finish.'
+if ($Autopilot) {
+    Write-Host "Launching the instrumented session. The wrapper navigates and"
+    Write-Host "fights on its own - no input, no focus, no clicking required."
+} else {
+    # Hand-played fallback. Nothing automated uses this path.
+    Write-Host 'Launching the instrumented session with NO autopilot. Stage the'
+    Write-Host 'scenario yourself, perform the one controlled action (press END'
+    Write-Host 'after a non-lethal action), then CLOSE the Ruffle window.'
+}
 $proc = Start-Process -FilePath $ruffle.FullName -ArgumentList $ruffleArgs `
     -RedirectStandardOutput (Join-Path $projectRoot $log) -PassThru -NoNewWindow
 $proc.WaitForExit()
