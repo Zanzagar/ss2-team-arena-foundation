@@ -1,0 +1,81 @@
+# AGENTS.md — Swords & Sandals II multiplayer foundation
+
+Rules every agent working in this repository must follow, whichever tool it is
+running under. **Claude Code loads this through the one-line `CLAUDE.md`; Codex
+loads it directly.** Keep it SELF-CONTAINED: Codex has no `@import` mechanism, so
+a reference here is a pointer a human follows, never an include.
+
+**Keep this file short.** It is loaded into every session of every agent, so
+every line is paid for on every turn. Anything that only some sessions need
+belongs behind a pointer, not in here.
+
+## What this project is
+
+It reverse-engineers a licensed Flash game to build **runtime-verified** test
+fixtures. The entire value of the corpus is that its numbers were measured, not
+asserted. Almost every rule below exists to stop an agent quietly converting
+measured evidence into self-confirming data.
+
+## Start here
+
+**Read the newest file in `docs/handoffs/` before doing anything else**, then
+`HANDOFF.md` for accumulated state. `HANDOFF.md` is long and is deliberately NOT
+imported here — open it, do not expect it in context.
+
+## Non-negotiable
+
+- **Never hand-write a golden, an observation or a manifest.** A candidate
+  becomes golden ONLY via >=2 matching observations from >=2 independent capture
+  sessions, through the pipeline.
+- **Derive candidates from the battle map, never from a capture.** When a fixture
+  disagrees with the runtime, re-derive it from the map. Do NOT edit the fixture
+  to the observed value. This is the single most tempting wrong move here.
+- **Licensed SWFs are read-only** and hash-verified before and after every
+  capture. Never copy, export or commit game assets or extracted scripts.
+- **Never shortcut the game's own frames.** Skipping the prologue tripped the
+  game's own character-tampering screen.
+- `validate-vehicle.ps1` must PASS after ANY wrapper edit — but read what it does
+  not prove. It caught 0 of the 6 defects found live on this route.
+- **Snapshot before every save-mutating run.** `run-arena.ps1` does it for you.
+- **Do not push to `main`.** Work happens on feature branches. Ask before pushing
+  anything.
+
+## If you are a subagent
+
+Claude Code loads this file into subagents too (all except the built-in Explore
+and Plan agents), so these rules bind you as well:
+
+- **No agent launches Ruffle**, touches the installation, the save or the
+  snapshots, or runs a state-mutating git command. Those are the main session's,
+  serial and supervised.
+- **Adversarial verifiers write nothing at all.** They have been the
+  highest-value agents on this project; run more of them than feels necessary.
+- **Treat every fact in your brief as a hypothesis** — tables, counts and quoted
+  file contents included. Re-derive anything you rely on. A premise that turns
+  out to be wrong is a finding that outranks the task, and must be reported
+  prominently rather than worked around.
+- **Never relay a number, table or quotation you have not re-derived yourself.**
+  Hand over the source (file, offsets, command), not the conclusion.
+
+## Running the tests
+
+`npm` is NOT on PATH. From the repo root:
+
+```
+& 'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --test --test-concurrency=1
+```
+
+**A skipped test is a real finding, not noise.** Expect the exact count the
+newest handoff states; if you measure a different number, say so rather than
+carrying the old one forward.
+
+## Conventions
+
+- Use `git commit -F <file>` for any message containing quotes — PowerShell
+  mangles them otherwise.
+- `gh` is NOT installed. Check PR state with
+  `git ls-remote github "refs/pull/*/head"`.
+- **Flag your own mistakes prominently in the repo's own record** rather than
+  quietly fixing them. Commit messages here name which errors were whose.
+- End a working session by writing a date-stamped brief to `docs/handoffs/`
+  carrying its `sessionId`, so the next session starts from one sentence.
