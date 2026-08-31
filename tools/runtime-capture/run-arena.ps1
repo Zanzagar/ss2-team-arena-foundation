@@ -187,6 +187,42 @@ function Show-ArenaTrail {
 if (Get-Process ruffle -ErrorAction SilentlyContinue) {
     throw 'A Ruffle window is already open; close it before an arena run.'
 }
+# THIS session's Ruffle window, by pid.
+#
+# launch-capture.ps1 writes the pid to captures\<SessionId>\ruffle.pid precisely
+# so a caller can close its OWN window, and run-capture.ps1 has read it since it
+# was added, with the comment "Never `Get-Process ruffle | Stop-Process`: with
+# concurrent isolated sessions that kills every other run in flight". This
+# script did exactly that, by image name, on every attempt including the
+# successful one.
+#
+# Two harms, both demonstrated. It destroys any concurrent isolated
+# -SaveDirectory session - and launch-capture.ps1 deliberately allows one to
+# start while an arena route is in flight, because it skips the already-open
+# refusal when -SaveDirectory is set. And the kill lands immediately after the
+# poll below sees a closed trace, which is when frame 150 flushes the
+# SharedObject on town-square entry; a forced kill in that window can leave a
+# .sol shorter than its own header says, which is precisely the damaged save
+# save-state.ps1's wipe check could not recognise until Test-SaveIntact.
+#
+# The name-keying corrupted this script's own logic too: the wait below accepted
+# ANY ruffle, and WINDOW-GONE fired only when NO ruffle existed, so a foreign
+# process both satisfied the wait and masked this window's death.
+$pidPath = Join-Path $projectRoot "captures\$SessionId\ruffle.pid"
+
+function Get-SessionRuffle {
+    if (-not (Test-Path -LiteralPath $pidPath)) { return $null }
+    $raw = (Get-Content -LiteralPath $pidPath -Raw -ErrorAction SilentlyContinue)
+    if (-not $raw) { return $null }
+    $raw = $raw.Trim()
+    # Not [int] $raw directly: a partially written pid file would throw under
+    # Set-StrictMode rather than simply not matching yet.
+    if ($raw -notmatch '^[0-9]+$') { return $null }
+    $proc = Get-Process -Id ([int] $raw) -ErrorAction SilentlyContinue
+    # A recycled pid could name something else entirely.
+    if ($proc -and $proc.ProcessName -ne 'ruffle') { return $null }
+    return $proc
+}
 
 # The snapshot is taken FIRST and by this script, not left to the operator.
 # Every previous save-mutating hazard on this project was a step someone
@@ -263,13 +299,17 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         if ($attemptArgs[$i] -eq '-ObservationId') { $attemptArgs[$i + 1] = "`"$ObservationId-a$attempt`"" }
     }
 
+    # A stale pid from the previous attempt would satisfy the wait below and
+    # then be the process this attempt closes.
+    Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
     Write-Host "Launching the arena route (target '$ArenaTarget', capture '$ArenaCapture')..."
     $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
         -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" `
         -ArgumentList $attemptArgs
 
     $deadline = (Get-Date).AddSeconds($LaunchTimeoutSec)
-    while (-not (Get-Process ruffle -ErrorAction SilentlyContinue)) {
+    # Wait for THIS session's window, not for any ruffle.
+    while (-not (Get-SessionRuffle)) {
         if ((Get-Date) -gt $deadline) { throw 'The Ruffle window never appeared.' }
         Start-Sleep -Milliseconds 500
     }
@@ -308,12 +348,29 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
                 $outcome = 'REACHED'; break
             }
         }
-        if (-not (Get-Process ruffle -ErrorAction SilentlyContinue)) { $outcome = 'WINDOW-GONE'; break }
+        if (-not (Get-SessionRuffle)) { $outcome = 'WINDOW-GONE'; break }
         Start-Sleep -Milliseconds 700
     }
 
     Write-Host 'Closing the window...'
-    Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+    $mine = Get-SessionRuffle
+    if ($mine) {
+        # Ask before forcing, and give a flush in progress time to land. The
+        # poll above breaks the instant the trace closes, which is the likeliest
+        # moment in the whole route to catch the SharedObject mid-write.
+        $mine.CloseMainWindow() | Out-Null
+        if (-not $mine.WaitForExit(5000)) {
+            Stop-Process -Id $mine.Id -Force -Confirm:$false -ErrorAction SilentlyContinue
+        }
+    } else {
+        # No pid file. run-arena always uses the SHARED store (it must: the route
+        # accumulates level and gold across bouts), and it refused to start with
+        # another window open, so the blanket kill is the same fallback
+        # run-capture.ps1 takes on its own shared-store path. It stays a
+        # fallback, not the default.
+        Write-Host 'WARNING: no pid file for this session; falling back to closing every Ruffle window.'
+        Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+    }
     $launch.WaitForExit()
 
     Write-Host ''
