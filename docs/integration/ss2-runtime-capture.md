@@ -96,7 +96,8 @@ derivations, and open staging questions) are catalogued in
 Promotion enforces, in code, everything the fixture validator already
 requires of goldens: `licensed-observation` provenance, `runtimeVerified:
 true`, at least two unique observation IDs and digests, distinct capture
-sessions, no two observations sharing a `capture.launchNonce`,
+sessions, no two observations sharing a `capture.launchNonce`, agreement between
+every observation about whether the wrapper staged the scenario,
 per-observation manifest attestation, and the capture-manifest SHA-256.
 `candidateFlags` do not carry over; a promoted quirk (for example the
 armour-equality behavior) is thereby confirmed as build behavior.
@@ -217,6 +218,10 @@ them:
 - `howDied`, which `capture-ingest.js` synthesizes with the same static rule
   the candidate uses;
 - `attackerSide`, which is a launcher FlashVar;
+- whether the scenario is one the game's own progression can *reach*. A capture
+  observes what the build does with the state in front of it, never how that
+  state could have arisen — which is why a wrapper-staged scenario has to be
+  declared rather than inferred (see *What a STAGED capture proves* below);
 - `expected.calculation` and `expected.mutation` in their entirety — matching
   never compares them, so `chance`, `rollNeeded`, `deflectionThreshold`,
   `armourRemovalRoll`, `knockback` and `enchantmentRoll` are candidate
@@ -322,14 +327,23 @@ Their capture method is
 rejects unconditionally — a simulated trace can never become runtime
 evidence, and simulated records do not belong in `test/observations/`.
 
-A reference trace's `end` line carries `overdraw: 0` and **no** `launchNonce`.
-The mandatory-overdraw rule does not reach `synthetic-simulator`, so the count
-is not required of it; it is emitted anyway because the claim is true (the
-simulator serves exactly the fixture's tape, with no live RNG behind it) and
-because these traces are the wrapper's executable specification of that same
-end line. The nonce is the opposite case: it exists to carry one identity
-minted inside a real player launch, so a simulator-invented value would be a
-fabricated independence token. Absent is the honest value.
+A reference trace's `end` line carries `overdraw: 0` and **no** `launchNonce`
+and **no** `staged`. The mandatory-overdraw rule does not reach
+`synthetic-simulator`, so the count is not required of it; it is emitted anyway
+because the claim is true (the simulator serves exactly the fixture's tape, with
+no live RNG behind it) and because these traces are the wrapper's executable
+specification of that same end line. The nonce is the opposite case: it exists
+to carry one identity minted inside a real player launch, so a
+simulator-invented value would be a fabricated independence token. Absent is the
+honest value.
+
+`staged` is absent for a reason that is easy to get backwards. Every value in a
+reference trace's `state` lines comes from the fixture, so the whole trace looks
+like one long staging. It is not: `staged` declares what the wrapper wrote into
+a **running game**, and this generator runs no game. There is no construction
+for a write to survive and therefore no stuck value to report, so emitting a
+declaration would invent the one fact the field exists to establish. A wrapper
+that stages emits its own, from its own read-back.
 
 ## Raw trace grammar (JSON lines, version 1)
 
@@ -513,15 +527,18 @@ observations always digest uniquely — exactly what golden provenance requires.
 
 The `capture` block's required members are `sessionId`, `captureToolVersion`,
 `method`, `observedAt`, `installHashVerifiedBefore`, `installHashVerifiedAfter`
-and `mutationGranularity`. It also admits exactly two optional members,
-`overdraw` and `launchNonce`, carried from the trace's `end` line and described
-under [the capture attestations](#the-three-capture-attestations-on-the-end-line);
-`overdraw` may only be `0`, `launchNonce` must be a token, and no other key is
-accepted. **9 of the 67 committed records carry both** — `obs-cachecold`,
-`obs-cachewarm`, `obs-iso2`, `obs-par1`–`obs-par3` and `obs-pq1`–`obs-pq3`, all
-of them isolated-store or concurrent sessions. The other 58 predate the fields,
-which is why the fields are optional and why no committed record was rewritten
-to add them.
+and `mutationGranularity`. It also admits exactly three optional members,
+`overdraw`, `launchNonce` and `staged`, carried from the trace's `end` line and
+described under
+[the capture attestations](#the-three-capture-attestations-on-the-end-line);
+`overdraw` may only be `0`, `launchNonce` must be a token, `staged` must satisfy
+the declaration grammar, and no other key is accepted. **9 of the 67 committed
+records carry the first two** — `obs-cachecold`, `obs-cachewarm`, `obs-iso2`,
+`obs-par1`–`obs-par3` and `obs-pq1`–`obs-pq3`, all of them isolated-store or
+concurrent sessions. The other 58 predate the fields, which is why the fields
+are optional and why no committed record was rewritten to add them. **No
+committed record carries `staged`**: nothing has been wrapper-staged yet, so
+every record in the repository is evidence the game produced unaided.
 
 ## Matching rules
 
@@ -546,6 +563,13 @@ An observation matches a fixture when all of the following are exactly equal:
 `expected.calculation` and `expected.mutation` stay candidate-derived
 summaries: they are not directly observable and are exercised by replaying
 the candidate resolver, which promotion re-runs on every golden.
+
+Matching compares scenario **values**, never their authorship — the whole
+`capture` block is excluded — so a wrapper-staged observation matches a fixture
+exactly as an unaided one does, which is correct: the game resolved both. What
+authorship changes is what the resulting golden may claim, and that is enforced
+at promotion, not here. See
+[staging in the promotion gate](#staging-in-the-promotion-gate).
 
 ## Divergence handling
 

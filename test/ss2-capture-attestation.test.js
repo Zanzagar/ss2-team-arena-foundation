@@ -681,6 +681,24 @@ test("end.staged must report the value that stuck, not the value the wrapper att
       new RegExp(`read back ${baseFixture.scenario.hero.strength}`).test(error.message)
   );
 
+  // The live hazard, pinned deliberately. `staged` must be read back at the
+  // moment the staging finished — which is the moment the `state` dump is
+  // taken, since staging stops before the action arms. Reading it again at the
+  // END of the action reports what the ACTION left behind, not what staging
+  // left behind, and for exactly the fields the armoured and tournament
+  // families stage (`helmet` under `remove_armour`, `hitpoints`, `staminaleft`)
+  // those differ. Here the villain is staged at 40 hitpoints and the action
+  // leaves 28; a declaration of 28 is a post-action reading and is refused.
+  assert.equal(baseFixture.expected.state.villain.hitpoints, 28);
+  assert.throws(
+    () => stagedRecord({
+      observationId: "obs-post-action",
+      sessionId: "session-post-action",
+      staged: "villain.hitpoints=28"
+    }),
+    /end\.staged claims villain\.hitpoints=28 stuck, but the staged villain dump read back 40/
+  );
+
   // A field the dump does not watch cannot be cross-checked and is taken on the
   // wrapper's word. This is not laxity: the armoured captures stage per-piece
   // `*_defence` ratings that the default watch list omits, and refusing to let
