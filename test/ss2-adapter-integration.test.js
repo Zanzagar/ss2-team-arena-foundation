@@ -225,6 +225,40 @@ const armourFirstRules = defineTeamRuleSet({
   chooseAiAction: (view, actorId, options) => options[0]
 });
 
+/**
+ * What the animation surface saw, read out of the presentation commands the
+ * host already emitted: which fighters were given a death animation, which
+ * arena label the timeline was told to play, and the completion token that
+ * command carried.
+ *
+ * Every test that settles goes through this, and nothing in it reads the
+ * bridge. That is the point: `acknowledgeResultAnimations` used to invent the
+ * death reports and then read the expected arena label back off the bridge, so
+ * both settlement gates were satisfied by the adapter talking to itself and
+ * neither the surface's agreement with resolved state nor the completion token
+ * was ever really tested.
+ */
+function animationSurface(host) {
+  const commands = host.steps.flatMap((step) => step.commands);
+  const deaths = commands
+    .filter((command) => command.kind === CommandKind.CLIP_GOTO && command.role === "defeated")
+    .map((command) => command.combatantId);
+  const arena = commands.find((command) => command.kind === CommandKind.ARENA_GOTO) ?? null;
+  const drawn = commands.find(
+    (command) => command.kind === CommandKind.UNMAPPED && command.detail?.completionToken !== undefined
+  ) ?? null;
+  return {
+    deaths,
+    arenaLabel: arena ? arena.label : null,
+    completionToken: arena ? arena.completionToken : (drawn ? drawn.detail.completionToken : undefined)
+  };
+}
+
+/** Submits that surface report to the host, with optional overrides. */
+function reportAnimationSurface(host, overrides = {}) {
+  return host.acknowledgeResultAnimations({ ...animationSurface(host), ...overrides });
+}
+
 /** Red's living fighters strike down blue's, one action each, in order. */
 function fightToSettlement(host) {
   const blueIds = host.battle.teams.find((team) => team.id === "blue").combatants.map((c) => c.id);
@@ -294,7 +328,7 @@ test("a whole 1v1 runs from vanilla state in to one campaign settlement out", ()
   );
 
   // The animation surface reports back; the campaign settles exactly once.
-  const outcomes = host.acknowledgeResultAnimations();
+  const outcomes = reportAnimationSurface(host);
   assert.deepEqual(outcomes.map((outcome) => outcome.kind), ["death", "arena-label"]);
   assert.deepEqual(outcomes.map((outcome) => outcome.settled), [false, true]);
   assert.equal(settlements.length, 1);
@@ -306,7 +340,7 @@ test("1v1 through the adapter leaves the resolver bit-identical to running it ba
   const host = makeHost(1);
   host.constructArena();
   host.submit({ actorId: "red-1", type: "melee", targetId: "blue-1" });
-  host.acknowledgeResultAnimations();
+  reportAnimationSurface(host);
 
   // The same blueprint the host built, resolved with no adapter in sight.
   const bare = createTeamBattle({
@@ -362,7 +396,7 @@ for (const size of [1, 2, 3]) {
     }
     assert.deepEqual(steps.slice(0, -1).map((step) => step.result), Array(size - 1).fill(null));
 
-    host.acknowledgeResultAnimations();
+    reportAnimationSurface(host);
     assert.equal(settlements.length, 1);
     assert.deepEqual(settlements[0].loserTeamIds, ["blue"]);
   });
@@ -517,15 +551,28 @@ test("there is no second code path: one resolver, one adapter pipeline, four glo
     assert.deepEqual(host.battle.rulesDescriptor, describeTeamRuleSet(placeholderTeamRules));
     assert.equal(host.battle.result, null);
     assert.deepEqual(host.steps[0].writes, [], "a miss changes no canonical state, so it writes nothing");
+    const size = host.combatantIds().length;
     assert.deepEqual(host.steps[0].commands.map((command) => command.kind), [
       CommandKind.BIND_GLOBALS,
       CommandKind.CLIP_GOTO,
       CommandKind.CLIP_GOTO,
-      CommandKind.PANEL_REFRESH
+      // Presentation is total: every panel is refreshed, not only the pair the
+      // event names, because an action can move a combatant the event does not
+      // name and every one of those changes produces a vanilla write.
+      ...Array(size).fill(CommandKind.PANEL_REFRESH)
     ]);
+    assert.deepEqual(
+      host.steps[0].commands.filter((command) => command.kind === CommandKind.PANEL_REFRESH)
+        .map((command) => command.combatantId)
+        .sort(),
+      [...host.combatantIds()].sort(),
+      "no combatant's bar is left showing a number the resolver has replaced"
+    );
     // One ordered (attacker, defender) pair per action, whatever the roster size.
     const globals = host.steps[0].commands[0].globals;
-    assert.equal(Object.keys(globals).filter((key) => !key.endsWith("CombatantId")).length, 4);
+    const bound = ["attacker", "defender", "game_attacker", "game_defender"];
+    assert.deepEqual(Object.keys(globals).filter((key) => bound.includes(key)).sort(), [...bound].sort());
+    assert.equal(new Set(bound.map((key) => globals[key])).size, 4);
     assert.deepEqual(
       bindingPlanFor(host.layout, { actorId: "red-1", targetId: "blue-1" }),
       globals
@@ -564,8 +611,14 @@ test("an individual knockout produces a death animation and a defeated event, an
     "a knockout must never reach the vanilla win/loss timeline"
   );
   // And the bridge cannot be talked into settling.
-  assert.throws(() => host.bridge.reportDeathAnimation("blue-1"), AcknowledgementError);
-  assert.throws(() => host.acknowledgeResultAnimations(), AcknowledgementError);
+  assert.throws(
+    () => host.bridge.reportDeathAnimation("blue-1"),
+    (error) => error instanceof AcknowledgementError && /no battle result is armed/.test(error.message)
+  );
+  assert.throws(
+    () => host.acknowledgeResultAnimations({ deaths: ["blue-1"], arenaLabel: "combat_won", completionToken: "x" }),
+    (error) => error instanceof AcknowledgementError && /no battle result is armed/.test(error.message)
+  );
 });
 
 test("only the last member of a team falling arms settlement", () => {
@@ -596,14 +649,17 @@ test("settlement fires once through the bridge and a replayed acknowledgement do
   const host = makeHost(2, { settlements });
   fightToSettlement(host);
 
-  const first = host.acknowledgeResultAnimations();
+  const first = reportAnimationSurface(host);
   assert.equal(first.filter((outcome) => outcome.settled === true).length, 1);
   assert.equal(settlements.length, 1);
 
+  // The whole surface report replayed verbatim — every death and the arena
+  // label again — pays nothing a second time.
   for (let repeat = 0; repeat < 3; repeat += 1) {
-    const again = host.acknowledgeResultAnimations();
-    assert.deepEqual(again.map((outcome) => outcome.settled), [false]);
-    assert.equal(again[0].alreadySettled, true);
+    const again = reportAnimationSurface(host);
+    assert.deepEqual(again.map((outcome) => outcome.kind), ["death", "death", "arena-label"]);
+    assert.deepEqual(again.map((outcome) => outcome.settled), [false, false, false]);
+    assert.ok(again.every((outcome) => outcome.alreadySettled === true));
     for (const combatantId of ["blue-1", "blue-fill-2"]) {
       assert.equal(host.bridge.reportDeathAnimation(combatantId).settled, false);
     }
@@ -619,7 +675,10 @@ test("a mismatched completion token is refused and a pre-elimination acknowledge
   host.submit({ actorId: "red-1", type: "melee", targetId: "blue-1" });
   assert.equal(host.bridge.pendingToken, null);
   assert.equal(host.bridge.acknowledgement(), null);
-  assert.throws(() => host.bridge.reportArenaLabel("combat_won"), AcknowledgementError);
+  assert.throws(
+    () => host.bridge.reportArenaLabel("combat_won"),
+    (error) => error instanceof AcknowledgementError && /no battle result is armed/.test(error.message)
+  );
   assert.throws(
     () => acknowledgeResultAnimation(host.battle, { type: BATTLE_RESULT_ACK_TYPE, completionToken: "anything" }),
     /No battle result is armed/
@@ -630,7 +689,7 @@ test("a mismatched completion token is refused and a pre-elimination acknowledge
 
   // Mismatched token: refused, never settled.
   assert.throws(
-    () => host.acknowledgeResultAnimations({ completionToken: "team-arena:blue:red:elimination" }),
+    () => reportAnimationSurface(host, { completionToken: "team-arena:blue:red:elimination" }),
     (error) => error instanceof AcknowledgementError && /does not match the armed result/.test(error.message)
   );
   // A surface that disagrees with the resolved winner is refused too.
@@ -641,7 +700,7 @@ test("a mismatched completion token is refused and a pre-elimination acknowledge
   assert.deepEqual(settlements, []);
 
   // The right token still settles, once.
-  host.acknowledgeResultAnimations({ completionToken: host.bridge.pendingToken });
+  reportAnimationSurface(host);
   assert.equal(settlements.length, 1);
 });
 
@@ -658,7 +717,7 @@ test("the bridge settles through the resolver's own gate, so a direct acknowledg
     }),
     true
   );
-  const outcomes = host.acknowledgeResultAnimations();
+  const outcomes = reportAnimationSurface(host);
   assert.deepEqual(outcomes.map((outcome) => outcome.settled), [false, false]);
   assert.equal(settlements.length, 1);
 });
@@ -673,7 +732,7 @@ test("the same vanilla input and the same ordered action stream produce identica
     const host = makeHost(3, { settlements });
     const arena = host.constructArena();
     const steps = fightToSettlement(host);
-    const acknowledgements = host.acknowledgeResultAnimations();
+    const acknowledgements = reportAnimationSurface(host);
     return {
       hash: host.hash(),
       vanilla: host.vanillaState(),
@@ -741,7 +800,7 @@ test("a whole battle leaves every field the adapter does not own untouched", () 
   const before = JSON.parse(JSON.stringify(inputs));
   host.constructArena();
   fightToSettlement(host);
-  host.acknowledgeResultAnimations();
+  reportAnimationSurface(host);
 
   const after = host.vanillaState();
   for (const [combatantId, fields] of Object.entries(before)) {
@@ -836,8 +895,10 @@ test("no clip handle reaches the state hash, even with live handles registered a
   const serialised = JSON.stringify(host.wire());
   assert.equal(serialised.includes("gotoAndPlay"), false);
   assert.equal(serialised.includes("_parent"), false);
-  assert.throws(() => JSON.stringify(host.clips), ClipRegistryError);
-  assert.throws(() => JSON.stringify({ wire: host.wire(), clips: host.clips }), ClipRegistryError);
+  const refusesSerialisation = (error) =>
+    error instanceof ClipRegistryError && /must never enter a state projection/.test(error.message);
+  assert.throws(() => JSON.stringify(host.clips), refusesSerialisation);
+  assert.throws(() => JSON.stringify({ wire: host.wire(), clips: host.clips }), refusesSerialisation);
   assert.deepEqual(host.clips.describe().map((entry) => entry.instanceName).sort(), [
     "hero",
     "hero_ally_2",
@@ -898,40 +959,125 @@ test("GAP: the adapter refuses to invent a vanilla combat object for an AI-fille
         { id: "blue", members: [{ id: "blue-1", vanilla: vanillaGladiator() }] }
       ]
     }),
-    BattleHostError
+    (error) => error instanceof BattleHostError && /needs a vanilla combat object/.test(error.message)
   );
 });
 
-test("GAP: an AI-filled slot's maximum health comes from the rule set, so the mirror must be pulled to canonical", () => {
+test("an AI-filled slot's mirror describes the fighter the roster invented, not the template's gladiator", () => {
   const host = makeHost(2);
   const fill = host.combatant("blue-fill-2");
-  // The template staged 30/30. `normaliseCombatant` had no `maxHealth` to
-  // preserve, so the placeholder rule set derived 50 + vitality * 10 = 100.
+  const mirror = host.mirrorFor("blue-fill-2");
+
+  // The roster invents the combatant from `team.aiFill`, so this fighter has
+  // DEFAULT_STATS and a rule-set maximum health of 50 + vitality * 10 = 100.
+  // The template was supplied only for the equipment, armour and inventory
+  // nothing else invents — and its gladiator has different stats entirely.
   assert.equal(fill.maxHealth, 100);
-  assert.deepEqual(host.diagnostics.canonicalSyncs.map((entry) => entry.combatantId), ["blue-fill-2"]);
-  assert.deepEqual(host.diagnostics.canonicalSyncs[0].differences, [
-    "hitpoints 30 != health 100",
-    "hitpointsmax 30 != maxHealth 100"
-  ]);
-  assert.equal(host.mirrorFor("blue-fill-2").fields.hitpointsmax, 100);
-  // Reported, never corrected: `hitpointsmax` is a vanilla `battlevalues` formula.
+  assert.deepEqual(fill.stats, {
+    strength: 5, agility: 5, attack: 5, defense: 5, vitality: 5, stamina: 5, magicka: 0
+  });
+
+  // The mirror used to be stored as the template, unchanged: canonical
+  // `strength 5 / attack 5` against a mirror saying `strength 10 / attack 8`,
+  // with `mirrorDifferences` reporting `[]` because it compared only health.
+  // `game_attacker` therefore pointed at a description of a different
+  // gladiator from the one on the field.
+  const rewrite = host.diagnostics.aiFillMirrorRewrites.find((entry) => entry.combatantId === "blue-fill-2");
+  assert.ok(rewrite, "the filled slot's mirror had to be rewritten");
+  assert.ok(rewrite.differences.includes("strength 10 != strength 5"));
+  assert.ok(rewrite.differences.includes("attack 8 != attack 5"));
+  assert.ok(rewrite.differences.includes("speed 3 != agility 5"));
+  assert.ok(rewrite.differences.includes("hitpointsmax 30 != maxHealth 100"));
+
+  assert.equal(mirror.fields.strength, 5);
+  assert.equal(mirror.fields.attack, 5);
+  assert.equal(mirror.fields.speed, 5);
+  assert.equal(mirror.fields.hitpointsmax, 100);
+  assert.deepEqual(mirrorDifferences(mirror, fill, { includeStats: true }), []);
+
+  // What no write can reconcile is reported instead of papered over: vanilla
+  // carries a min/max damage pair and the canonical loadout carries one
+  // number, so `min_damage 21` against `meleeDamage 4` has no answer here.
+  const gap = host.diagnostics.aiFillLoadoutGaps.find((entry) => entry.combatantId === "blue-fill-2");
+  assert.ok(gap, "the template's weapon fields still describe someone else, and that is reported");
+  assert.deepEqual(gap.differences, ["min_damage 21 != loadout.meleeDamage 4"]);
+  assert.match(gap.reason, /cannot write one back without inventing the other half/);
+  assert.equal(mirror.fields.min_damage, 21, "the adapter did not invent a min/max damage pair");
+
+  // Reported against what vanilla actually staged, never against the value the
+  // adapter went on to write.
   const report = host.diagnostics.maximumHealthReports.find((entry) => entry.combatantId === "blue-fill-2");
   assert.deepEqual({ derived: report.ruleSetDerived, vanilla: report.vanillaHitpointsMax, agrees: report.agrees }, {
     derived: 100,
-    vanilla: 100,
-    agrees: true
-  });
-  // For a supplied gladiator the rule set derives 80 while vanilla staged 30,
-  // and the adapter reports the disagreement rather than resolving it.
-  const supplied = host.diagnostics.maximumHealthReports.find((entry) => entry.combatantId === "blue-1");
-  assert.deepEqual({ derived: supplied.ruleSetDerived, vanilla: supplied.vanillaHitpointsMax, agrees: supplied.agrees }, {
-    derived: 80,
     vanilla: 30,
     agrees: false
   });
+  // A supplied gladiator's own record is never rewritten this way.
+  assert.deepEqual(host.diagnostics.aiFillMirrorRewrites.map((entry) => entry.combatantId), ["blue-fill-2"]);
+  assert.equal(host.mirrorFor("blue-1").fields.strength, 10);
 });
 
-test("GAP: a gladiator who enters already burning loses that condition at construction", () => {
+test("a supplied gladiator's hitpointsmax is refused, never corrected, when the rule set disagrees", () => {
+  // `compareMaximumHealth` and the contract both say `hitpointsmax` is only
+  // ever *reported*: it comes from vanilla's `battlevalues`, so deriving it is
+  // rule-set work. The host used to call `toVanillaCombatant` on disagreement,
+  // which wrote the rule set's answer straight into the licensed record — the
+  // one place the contract says the adapter never corrects it.
+  const vitalityRules = defineTeamRuleSet({
+    id: "test-derived-maximum-health",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented; derives maximum health. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    // Ignores the staged `maxHealth` entirely, as a verified rule set reading
+    // `herolevel * 10 + vitality * 20` would.
+    maximumHealth: (combatant) => combatant.stats.vitality * 20,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [{ kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 1 }],
+      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+
+  assert.throws(
+    () => makeHost(1, { rules: vitalityRules }),
+    (error) =>
+      error instanceof BattleHostError &&
+      /derives maximum health 60 for red-1, but the vanilla combat object stages hitpointsmax 30/.test(error.message) &&
+      /would put a formula the adapter does not own into a licensed gladiator's record/.test(error.message)
+  );
+
+  // Staged to agree, the same rule set builds without complaint and the
+  // vanilla record is left exactly as it came in.
+  const host = createVanillaBattleHost({
+    teams: [
+      {
+        id: "red",
+        members: [{
+          id: "red-1",
+          controller: "local",
+          vanilla: vanillaGladiator({ speed: 30, vitality: 3, hitpoints: 60, hitpointsmax: 60 })
+        }]
+      },
+      {
+        id: "blue",
+        members: [{
+          id: "blue-1",
+          controller: "peer-7",
+          vanilla: vanillaGladiator({ speed: 4, vitality: 3, hitpoints: 60, hitpointsmax: 60 })
+        }]
+      }
+    ],
+    rules: vitalityRules,
+    rngTape: hitTape(8)
+  });
+  assert.deepEqual(host.diagnostics.canonicalSyncs, []);
+  assert.equal(host.mirrorFor("red-1").fields.hitpointsmax, 60);
+  const report = host.diagnostics.maximumHealthReports.find((entry) => entry.combatantId === "red-1");
+  assert.equal(report.agrees, true);
+});
+
+test("CLOSED: a gladiator who enters already burning keeps that condition through construction", () => {
   const host = createVanillaBattleHost({
     teams: [
       {
@@ -960,6 +1106,280 @@ test("GAP: a gladiator who enters already burning loses that condition at constr
     false,
     "the canonical sync must no longer erase a runtime-observed condition"
   );
+  // The diagnostic that describes those starting conditions says they are
+  // already applied. It used to be called `unappliedInitialStatusEffects`,
+  // which invited a caller to set a status the fighter already had.
+  assert.deepEqual(host.diagnostics.startingStatusEffects, [
+    { kind: "status", targetId: "blue-1", status: "burning", active: true }
+  ]);
+  assert.equal("unappliedInitialStatusEffects" in host.diagnostics, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* 7. Every action kind and every effect kind, through the host        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The whole placeholder vocabulary, driven through `createVanillaBattleHost`.
+ *
+ * Until this test the *only* action any host test ever submitted was `melee`,
+ * and the only effect kind any of them produced was `damage`. That was the
+ * hole an adversarial audit walked through: five separate combat-deciding
+ * edits to `state-bridge.js` — including a `staminaleft` write computed as
+ * `before - ceil(amount * 1.5)`, the exact shape the contract forbids — left
+ * the whole suite green, because nothing drove a heal, a rest, a ranged
+ * attack, a spell, a `STATUS` effect or a `RESOURCE` effect through the host
+ * at all.
+ */
+function skirmishHost({ settlements = null } = {}) {
+  const caster = (name, speed, overrides = {}) => vanillaGladiator({
+    character_name: name,
+    speed,
+    magicka: 2,
+    stamina: 4,
+    strength: 10,
+    secondary_min_damage: 7,
+    maximum_ammo: 12,
+    using_bow: true,
+    ...overrides
+  });
+  return createVanillaBattleHost({
+    teams: [
+      {
+        id: "red",
+        name: "Red",
+        members: [
+          { id: "red-1", controller: "local", vanilla: caster("red-1", 30), clip: { gladiator_dir: "right" } },
+          {
+            id: "red-2",
+            controller: "local",
+            vanilla: caster("red-2", 29, { hitpoints: 5 }),
+            clip: { gladiator_dir: "right" }
+          }
+        ]
+      },
+      {
+        id: "blue",
+        name: "Blue",
+        members: [
+          { id: "blue-1", controller: "peer-7", vanilla: caster("blue-1", 4), clip: { gladiator_dir: "left" } },
+          { id: "blue-2", controller: "peer-7", vanilla: caster("blue-2", 3), clip: { gladiator_dir: "left" } }
+        ]
+      }
+    ],
+    rngTape: hitTape(40),
+    onCampaignSettled: settlements ? (record) => settlements.push(record) : null
+  });
+}
+
+test("heal, rest, ranged and spell all run through the host, and every write is the resolver's", () => {
+  const host = skirmishHost();
+  host.constructArena();
+
+  // The roster's own default made these legal: 2 magicka and an empty
+  // inventory is a caster, and the adapter no longer overrides that.
+  assert.equal(host.combatant("red-1").loadout.canUseSpell, true);
+  assert.equal(host.combatant("red-1").loadout.canUseRanged, true);
+  assert.equal(host.combatant("red-1").loadout.rangedDamage, 7, "from secondary_min_damage, not from min_damage");
+  assert.deepEqual(
+    [...new Set(host.legalActions("red-1").map((action) => action.type))].sort(),
+    ["melee", "ranged", "rest", "spell"]
+  );
+
+  // 1. A heal on an ally: `spellHealing` = 6 + magicka * 2 = 10 into 5/30.
+  const heal = host.submit({ actorId: "red-1", type: "spell", targetId: "red-2", spellKind: "heal" });
+  assert.deepEqual(heal.effects, [{ kind: "heal", targetId: "red-2", amount: 10 }]);
+  assert.deepEqual(
+    heal.writes.map((write) => [write.combatantId, write.field, write.source, write.from, write.to, write.reason]),
+    [["red-2", "hitpoints", "canonical-health", 5, 15, "heal-effect"]],
+    "a heal produces exactly one health write, attributed to the heal effect, in effect order"
+  );
+  assert.equal(host.vanillaState()["red-2"].combatObject.hitpoints, 15);
+  // A heal must not move any pool the rule set did not touch.
+  assert.equal(host.vanillaState()["red-2"].combatObject.staminaleft, 105);
+  assert.equal(host.vanillaState()["red-2"].combatObject.armourclass, 44);
+
+  // 2. Rest, which is self-targeted: `restRecovery` = 4 + stamina * 1.5 = 10.
+  const rest = host.submit({ actorId: "red-2", type: "rest", targetId: "red-2" });
+  assert.deepEqual(rest.effects, [{ kind: "heal", targetId: "red-2", amount: 10 }]);
+  assert.deepEqual(
+    rest.writes.map((write) => [write.combatantId, write.field, write.source, write.from, write.to]),
+    [["red-2", "hitpoints", "canonical-health", 15, 25]]
+  );
+  // The self-target does not alias the four binding globals onto one unit.
+  const restBind = rest.commands.find((command) => command.kind === CommandKind.BIND_GLOBALS);
+  assert.equal(restBind.globals.selfTargeted, true);
+  assert.equal(restBind.globals.defender, null);
+  assert.equal(restBind.globals.game_defender, null);
+  assert.deepEqual(
+    rest.commands.filter((command) => command.kind === CommandKind.CLIP_GOTO).map((command) => [command.role, command.label]),
+    [["actor", "rest"]]
+  );
+
+  // 3. Blue rests too, at full health: a zero-amount heal writes nothing.
+  const idle = host.submit({ actorId: "blue-1", type: "rest", targetId: "blue-1" });
+  assert.deepEqual(idle.effects, [{ kind: "heal", targetId: "blue-1", amount: 0 }]);
+  assert.deepEqual(idle.writes, [], "no canonical value changed, so no vanilla field is written");
+  host.submit({ actorId: "blue-2", type: "rest", targetId: "blue-2" });
+
+  // 4. A ranged attack: `rangedDamage` 7 + strength * 2 = 27.
+  const ranged = host.submit({ actorId: "red-1", type: "ranged", targetId: "blue-1" });
+  assert.equal(ranged.effects[0].amount, 27);
+  assert.deepEqual(
+    ranged.writes.map((write) => [write.combatantId, write.field, write.source, write.to, write.reason]),
+    [["blue-1", "hitpoints", "canonical-health", 3, "damage-effect"]]
+  );
+  assert.equal(
+    ranged.commands.find((command) => command.kind === CommandKind.CLIP_GOTO && command.role === "actor").label,
+    "snipe"
+  );
+
+  // 5. A damage spell: `spellDamage` = 8 + magicka * 2.5 = 13, clamped to 0.
+  const spell = host.submit({ actorId: "red-2", type: "spell", targetId: "blue-1", spellKind: "damage" });
+  assert.equal(spell.effects[0].amount, 13);
+  assert.deepEqual(
+    spell.writes.map((write) => [write.combatantId, write.field, write.source, write.to]),
+    [["blue-1", "hitpoints", "canonical-health", 0]],
+    "the resolver clamped 3 - 13 to 0, and the write is that 0"
+  );
+  assert.notEqual(spell.writes[0].to, 3 - 13);
+  assert.equal(
+    spell.commands.some((command) => command.kind === CommandKind.CLIP_GOTO && command.role === "defeated"),
+    true
+  );
+
+  // Across every one of those actions: only ever `hitpoints`, only ever from
+  // canonical health, and never a value the projection does not hold.
+  const everyWrite = host.steps.flatMap((step) => step.writes);
+  assert.deepEqual([...new Set(everyWrite.map((write) => write.field))], ["hitpoints"]);
+  assert.deepEqual([...new Set(everyWrite.map((write) => write.source))], ["canonical-health"]);
+  const after = host.wire().teams.flatMap((team) => team.combatants);
+  const byId = new Map(after.map((combatant) => [combatant.id, combatant]));
+  assert.equal(host.mirrorFor("blue-1").fields.staminaleft, 105, "no action ever spent stamina");
+  for (const combatant of after) {
+    assert.deepEqual(mirrorDifferences(host.mirrorFor(combatant.id), byId.get(combatant.id)), []);
+  }
+});
+
+test("STATUS and RESOURCE effects reach vanilla through the host, in the order the rule set declared them", () => {
+  /**
+   * DEMONSTRATION ONLY — invented, never measured. It declares all four effect
+   * kinds in one action, in one order, so the host has to carry each of them
+   * to the right vanilla field without deciding any of them.
+   */
+  const scorch = defineTeamRuleSet({
+    id: "test-scorch",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented; exercises all four effect kinds. Not SS2 behaviour." },
+    actionTypes: ["scorch", "douse"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => [
+      ...view.foes.map((foe) => ({ type: "scorch", targetId: foe.id })),
+      ...view.foes.map((foe) => ({ type: "douse", targetId: foe.id }))
+    ],
+    resolveAction(request) {
+      if (request.type === "douse") {
+        return {
+          effects: [{ kind: EffectKind.STATUS, targetId: request.targetId, status: "burning", active: false }],
+          events: [{ type: "spell", actorId: request.actorId, targetId: request.targetId, hit: true, damage: 0 }]
+        };
+      }
+      const armour = resourceValue(request.target, "armourclass");
+      const stamina = resourceValue(request.actor, "staminaleft");
+      return {
+        effects: [
+          // Armour first, then the overflow, then the condition, then the
+          // actor's own stamina. All four decided here and none of them here.
+          { kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "armourclass", to: Math.max(0, armour - 50) },
+          { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: Math.max(0, 50 - armour) },
+          { kind: EffectKind.STATUS, targetId: request.targetId, status: "burning", active: true },
+          { kind: EffectKind.RESOURCE, targetId: request.actorId, resource: "staminaleft", to: stamina - 9 }
+        ],
+        events: [{ type: "spell", actorId: request.actorId, targetId: request.targetId, hit: true, damage: 6 }]
+      };
+    },
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+
+  const host = createVanillaBattleHost({
+    teams: [
+      {
+        id: "red",
+        name: "Red",
+        members: [{
+          id: "red-1",
+          controller: "local",
+          vanilla: vanillaGladiator({ speed: 30 }),
+          clip: { gladiator_dir: "right" }
+        }]
+      },
+      {
+        id: "blue",
+        name: "Blue",
+        members: [{
+          id: "blue-1",
+          controller: "peer-7",
+          vanilla: vanillaGladiator({ speed: 4 }),
+          clip: { gladiator_dir: "left" }
+        }]
+      }
+    ],
+    rules: scorch,
+    rngTape: hitTape(8)
+  });
+  host.constructArena();
+
+  const step = host.submit({ actorId: "red-1", type: "scorch", targetId: "blue-1" });
+  assert.deepEqual(step.effects.map((effect) => effect.kind), ["resource", "damage", "status", "resource"]);
+  assert.deepEqual(
+    step.writes.map((write) => [write.combatantId, write.field, write.source, write.from, write.to, write.reason]),
+    [
+      ["blue-1", "armourclass", "declared-resource", 44, 0, "resource-effect"],
+      ["blue-1", "hitpoints", "canonical-health", 30, 24, "damage-effect"],
+      ["blue-1", "burning", "canonical-status", undefined, true, "status-effect"],
+      ["red-1", "staminaleft", "declared-resource", 105, 96, "resource-effect"]
+    ],
+    "one write per effect, in effect order, each from the source that owns that field"
+  );
+  // The first write to an undefined-until-set flag *creates* it.
+  assert.equal(step.writes[2].materialises, true);
+  assert.deepEqual(step.unmapped, []);
+
+  // Every value is one the post-action projection actually holds.
+  const after = new Map(host.wire().teams.flatMap((team) => team.combatants).map((c) => [c.id, c]));
+  assert.equal(step.writes[0].to, after.get("blue-1").resources.armourclass.value);
+  assert.equal(step.writes[1].to, after.get("blue-1").health);
+  assert.equal(step.writes[3].to, after.get("red-1").resources.staminaleft.value);
+  // ...and none of them is the subtraction the rule set performed.
+  assert.notEqual(step.writes[1].to, 30 - 6 - 1);
+
+  const blue = host.vanillaState()["blue-1"].combatObject;
+  assert.deepEqual(
+    { hitpoints: blue.hitpoints, armourclass: blue.armourclass, burning: blue.burning, armourclass_max: blue.armourclass_max },
+    { hitpoints: 24, armourclass: 0, burning: true, armourclass_max: 44 },
+    "the pool moved, the overflow landed, the flag was created, the bound was left alone"
+  );
+  assert.equal(host.vanillaState()["red-1"].combatObject.staminaleft, 96);
+
+  // Clearing the condition writes the flag back, and reports its real previous
+  // value rather than materialising it a second time.
+  // A status effect the rule set declared is always mirrored, even when it
+  // changed nothing: the value written is still `after.status.includes(flag)`,
+  // so it is the resolver's answer, and on a flag nothing had written yet the
+  // write is what *creates* the vanilla field.
+  const doused = host.submit({ actorId: "blue-1", type: "douse", targetId: "red-1" });
+  assert.deepEqual(
+    doused.writes.map((write) => [write.combatantId, write.field, write.source, write.to, write.materialises]),
+    [["red-1", "burning", "canonical-status", false, true]]
+  );
+  assert.equal(host.combatant("red-1").status.includes("burning"), false);
+  const cleared = host.submit({ actorId: "red-1", type: "douse", targetId: "blue-1" });
+  assert.deepEqual(
+    cleared.writes.map((write) => [write.combatantId, write.field, write.source, write.from, write.to]),
+    [["blue-1", "burning", "canonical-status", true, false]]
+  );
+  assert.equal(cleared.writes[0].materialises, false);
+  assert.equal(host.vanillaState()["blue-1"].combatObject.burning, false);
 });
 
 test("a placeholder rule set that declares no armour effect still writes only hitpoints", () => {
@@ -1229,7 +1649,7 @@ test("a drawn 2v2 settles through the host's own animation drain, with no arena 
   host.submit({ actorId: "red-2", type: "strike", targetId: "blue-2" });
   assert.equal(host.battle.result.reason, "draw");
 
-  const outcomes = host.acknowledgeResultAnimations();
+  const outcomes = reportAnimationSurface(host);
   assert.deepEqual(
     outcomes.map((outcome) => outcome.kind),
     ["death", "death", "death", "death"],
@@ -1243,12 +1663,12 @@ test("a drawn 2v2 settles through the host's own animation drain, with no arena 
   assert.equal(settlements[0].winnerTeamId, null);
 
   // Draining again has nothing left to report and pays nothing again.
-  assert.deepEqual(host.acknowledgeResultAnimations(), []);
+  assert.deepEqual(host.acknowledgeResultAnimations({ ...animationSurface(host), deaths: [] }), []);
   assert.equal(settlements.length, 1);
 
   // An explicit arena label is still offered to the bridge, and still refused.
   assert.throws(
-    () => host.acknowledgeResultAnimations({ arenaLabel: "combat_won" }),
+    () => reportAnimationSurface(host, { arenaLabel: "combat_won" }),
     (error) => error instanceof AcknowledgementError && /a draw/.test(error.message)
   );
   // A mismatched completion token is refused before the deaths are reported,
@@ -1257,7 +1677,7 @@ test("a drawn 2v2 settles through the host's own animation drain, with no arena 
   fresh.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
   fresh.submit({ actorId: "red-2", type: "strike", targetId: "blue-2" });
   assert.throws(
-    () => fresh.acknowledgeResultAnimations({ completionToken: "team-arena:red:blue:elimination" }),
+    () => reportAnimationSurface(fresh, { completionToken: "team-arena:red:blue:elimination" }),
     (error) => error instanceof AcknowledgementError && /does not match the armed result/.test(error.message)
   );
   assert.equal(fresh.bridge.isSettled, false);
@@ -1266,7 +1686,7 @@ test("a drawn 2v2 settles through the host's own animation drain, with no arena 
   ]);
   // The right token settles it.
   assert.equal(
-    fresh.acknowledgeResultAnimations({ completionToken: fresh.bridge.pendingToken }).at(-1).settled,
+    reportAnimationSurface(fresh).at(-1).settled,
     true
   );
 });
@@ -1281,7 +1701,7 @@ test("GAP: the adapter presents the resolver's initiative and never translates a
   ]);
   host.constructArena();
   fightToSettlement(host);
-  host.acknowledgeResultAnimations();
+  reportAnimationSurface(host);
 
   // Nothing the adapter emits carries a turn, a phase, or a `nextphase` call:
   // the whole vanilla turn-gating surface is simply absent from the seam.

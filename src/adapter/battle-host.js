@@ -61,6 +61,7 @@ import {
   denormaliseVanillaCombatant,
   facingWrite,
   initialStatusEffects,
+  loadoutMirrorDifferences,
   mirrorDifferences,
   normaliseVanillaCombatant,
   toCanonicalCombatantSource,
@@ -255,15 +256,76 @@ class VanillaBattleHost {
     /* 4. mirrors, brought into step with the canonical state the roster built. */
     const canonicalSyncs = [];
     const maximumHealthReports = [];
+    const aiFillMirrorRewrites = [];
+    const aiFillLoadoutGaps = [];
     for (const team of this.#battle.teams) {
       for (const combatant of team.combatants) {
         const key = `${team.id}#${combatant.slotIndex}`;
         let record = templates.get(key);
         if (!record) throw new BattleHostError(`No vanilla record for combatant ${combatant.id}.`);
-        // `normaliseCombatant` runs the rule set's `maximumHealth`, so canonical
-        // state can differ from the vanilla record before a single action —
-        // always for an AI-filled slot, whose canonical health comes from the
-        // rule set and not from the template. Sync only when it actually
+        maximumHealthReports.push(compareMaximumHealth(this.#battle.rules, combatant, record));
+
+        if (combatant.aiFilled) {
+          // **An AI-filled slot's mirror must describe the fighter that is
+          // actually fighting.** `src/team/roster.js` invents the combatant
+          // from `team.aiFill`, so its stats and maximum health come from the
+          // roster and the rule set, not from the caller's template — and the
+          // template was only ever supplied for the equipment, armour and
+          // inventory nothing else invents. Storing it unchanged left the
+          // mirror describing a gladiator with different stats, different
+          // maximum health and a different weapon from the one on the field,
+          // and `mirrorDifferences` could not see it because it compared only
+          // health and status.
+          //
+          // There is no licensed record being overwritten here — that is what
+          // makes writing `hitpointsmax` and the seven base stats legitimate
+          // for this slot and for no other.
+          const differences = mirrorDifferences(record, combatant, { includeStats: true });
+          if (differences.length > 0) {
+            record = toVanillaCombatant(combatant, record, { maxHealth: true, stats: true });
+            aiFillMirrorRewrites.push(Object.freeze({
+              combatantId: combatant.id,
+              differences: Object.freeze(differences)
+            }));
+          }
+          assertMirrorAgrees(record, combatant, { includeStats: true });
+          // What is left: vanilla's damage is a min/max pair and the canonical
+          // loadout is one number, so there is no write that reconciles them
+          // without inventing the other half. Reported, never guessed at.
+          const loadoutGaps = loadoutMirrorDifferences(record, combatant);
+          if (loadoutGaps.length > 0) {
+            aiFillLoadoutGaps.push(Object.freeze({
+              combatantId: combatant.id,
+              differences: Object.freeze(loadoutGaps),
+              reason:
+                "The AI-fill template's weapon fields still describe the gladiator they were copied from. " +
+                "Vanilla carries a min/max damage pair and the canonical loadout carries one number, so the " +
+                "adapter cannot write one back without inventing the other half. Supply a real gladiator, or " +
+                "an `aiFill.loadout` the template agrees with."
+            }));
+          }
+          this.#mirrors.set(combatant.id, record);
+          continue;
+        }
+
+        // A supplied gladiator's `hitpointsmax` is licensed evidence, and
+        // `compareMaximumHealth` says in as many words that it is only ever
+        // reported: `battlevalues` is a vanilla formula, so deriving it is
+        // rule-set work. The adapter used to write the rule set's answer over
+        // it here, silently. It now refuses instead — a placeholder formula
+        // quietly rewriting a real gladiator's maximum health is the exact
+        // failure `compareMaximumHealth` exists to make visible.
+        if (Number(record.fields.hitpointsmax ?? 0) !== combatant.maxHealth) {
+          throw new BattleHostError(
+            `Rule set ${this.#battle.rules.id} derives maximum health ${combatant.maxHealth} for ${combatant.id}, ` +
+            `but the vanilla combat object stages hitpointsmax ${String(record.fields.hitpointsmax)}. ` +
+            "The adapter reports that disagreement (diagnostics.maximumHealthReports) and will not correct either " +
+            "side: hitpointsmax comes from vanilla's battlevalues, so writing a rule set's answer over it would " +
+            "put a formula the adapter does not own into a licensed gladiator's record."
+          );
+        }
+        // Canonical health can still differ before a single action — the
+        // roster clamps it — so sync when it does. Sync only when it actually
         // differs: an unnecessary sync would erase `materialisedFlags`.
         const differences = mirrorDifferences(record, combatant);
         if (differences.length > 0) {
@@ -272,7 +334,6 @@ class VanillaBattleHost {
         }
         assertMirrorAgrees(record, combatant);
         this.#mirrors.set(combatant.id, record);
-        maximumHealthReports.push(compareMaximumHealth(this.#battle.rules, combatant, record));
       }
     }
 
@@ -285,16 +346,31 @@ class VanillaBattleHost {
        * disagreed. Empty in every other case.
        */
       aiFillResourceGaps: Object.freeze(aiFillResourceGaps),
+      /**
+       * Where an AI-filled slot's template had to be rewritten to describe the
+       * fighter the roster actually invented — stats and maximum health, which
+       * the template's gladiator does not share.
+       */
+      aiFillMirrorRewrites: Object.freeze(aiFillMirrorRewrites),
+      /**
+       * What is left over after that rewrite: the template's weapon fields,
+       * which have no single-number canonical counterpart to be pulled to.
+       */
+      aiFillLoadoutGaps: Object.freeze(aiFillLoadoutGaps),
       /** Where the mirror had to be pulled to canonical state before turn one. */
       canonicalSyncs: Object.freeze(canonicalSyncs),
       /** Reported, never corrected: `hitpointsmax` is a vanilla formula. */
       maximumHealthReports: Object.freeze(maximumHealthReports),
       /**
-       * The statuses a gladiator entered the battle with. `normaliseCombatant`
-       * hard-codes `status: []` and the resolver exposes no way to apply an
-       * effect outside `applyAction`, so these are reported and *not* applied.
+       * The statuses the gladiators entered the battle with, as the effects
+       * that would produce them — **already applied**, by
+       * `roster.normaliseStatus`. This used to be called
+       * `unappliedInitialStatusEffects`, from when `normaliseCombatant`
+       * hard-coded `status: []` and a caller had to reapply them by hand. The
+       * roster carries them through now, so the old name was an invitation to
+       * set a status a fighter already had.
        */
-      unappliedInitialStatusEffects: Object.freeze(initialStatusEffects(sources))
+      startingStatusEffects: Object.freeze(initialStatusEffects(sources))
     });
   }
 
@@ -464,41 +540,89 @@ class VanillaBattleHost {
   }
 
   /**
-   * The whole animation surface reporting in: one death animation per fighter
-   * on every eliminated team, then the arena timeline label. Returns the
-   * bridge outcomes in order; exactly one of them can carry `settled: true`.
+   * Submits what the animation surface reported: which fighters' death
+   * animations finished, which arena label the timeline reached, and the
+   * completion token the presentation commands carried. Returns the bridge
+   * outcomes in order; exactly one of them can carry `settled: true`.
+   *
+   * **Everything is the caller's to supply, and nothing is defaulted.** This
+   * method used to fabricate a death report for every awaiting fighter and
+   * then hand the bridge `arenaLabel ?? this.#bridge.expectedArenaLabel` — the
+   * label the bridge itself was waiting for. Both documented settlement gates
+   * were therefore satisfied by the adapter talking to itself: a lethal action
+   * followed by `acknowledgeResultAnimations()` settled the campaign with zero
+   * input from any animation surface, and the bridge's desync check
+   * ("`combat_won` reported for a battle the resolver decided the other way is
+   * refused") had nothing independent to compare against. A convenience that
+   * supplies the evidence it is supposed to be checking is not a convenience.
+   *
+   * So: `deaths` names the fighters that reported, `arenaLabel` is the label
+   * the surface actually reached, and `completionToken` is the token the
+   * `arena-goto` / `overlay-goto` command carried (a draw's `unmapped` command
+   * carries it too). A host with a real animation surface can still call
+   * `bridge.reportDeathAnimation` / `bridge.reportArenaLabel` directly; this is
+   * the batch form of exactly those calls and grants no extra authority.
    *
    * **A draw stops after the deaths.** Vanilla's `death()` dispatches only
    * `combatwon`/`combatlost`, so a drawn battle has no arena transition to
    * report and the completed death animations are the entire acknowledgement.
-   * Passing an explicit `arenaLabel` for one is still reported — and still
-   * refused — because a surface that reached a result label for a draw
-   * disagrees with resolved state.
+   * Passing an `arenaLabel` for one is still reported — and still refused —
+   * because a surface that reached a result label for a draw disagrees with
+   * resolved state.
+   *
+   * @param {string[]} params.deaths combatant ids whose death animation finished
+   * @param {string|null} [params.arenaLabel] the label the arena timeline reached
+   * @param {string} params.completionToken the token the presentation carried
    */
-  acknowledgeResultAnimations({ arenaLabel = null, completionToken = undefined } = {}) {
+  acknowledgeResultAnimations({ deaths, arenaLabel = null, completionToken } = {}) {
+    if (!Array.isArray(deaths) || deaths.some((id) => typeof id !== "string" || id.length === 0)) {
+      throw new BattleHostError(
+        "acknowledgeResultAnimations needs `deaths`: the combatant ids whose death animation the surface " +
+        "reported. The host does not know which animations finished, and inventing them would mean the " +
+        "adapter supplying the settlement gate it is supposed to be waiting on."
+      );
+    }
+    if (typeof completionToken !== "string" || completionToken.length === 0) {
+      throw new BattleHostError(
+        "acknowledgeResultAnimations needs the `completionToken` the presentation commands carried. It is the " +
+        "host/client comparison mechanism; reading it back off the bridge would compare the bridge with itself."
+      );
+    }
     this.#bridge.sync();
-    // Armed and no arena transition means a draw. An unarmed battle falls
-    // through to `reportArenaLabel`, which refuses it — the bridge cannot
-    // acknowledge a battle the resolver has not decided.
-    const drawn =
-      this.#bridge.pendingToken !== null && arenaLabel === null && !this.#bridge.expectsArenaLabel;
-    if (drawn && completionToken !== undefined) {
-      // Checked *before* the deaths, because in a draw the last death is what
-      // settles: a token verified afterwards would be verified too late.
-      this.#bridge.verifyAcknowledgement({ type: BATTLE_RESULT_ACK_TYPE, completionToken });
+    // Checked *before* the deaths: in a draw the last death is what settles, so
+    // a token verified afterwards would be verified too late.
+    this.#bridge.verifyAcknowledgement({ type: BATTLE_RESULT_ACK_TYPE, completionToken });
+    // Armed and no arena transition means a draw.
+    const drawn = arenaLabel === null && !this.#bridge.expectsArenaLabel;
+    if (!drawn && (typeof arenaLabel !== "string" || arenaLabel.length === 0)) {
+      throw new BattleHostError(
+        `This result has a vanilla arena transition (${String(this.#bridge.expectedArenaLabel)}), so ` +
+        "acknowledgeResultAnimations needs the `arenaLabel` the timeline actually reached. Supplying the " +
+        "expected one on the caller's behalf is what made the bridge's desync check unable to fail."
+      );
     }
     const outcomes = [];
-    for (const combatantId of [...this.#bridge.awaitingDeathAnimations]) {
+    for (const combatantId of deaths) {
       outcomes.push(Object.freeze({ kind: "death", combatantId, ...this.#bridge.reportDeathAnimation(combatantId) }));
     }
     if (drawn) return Object.freeze(outcomes);
-    const label = arenaLabel ?? this.#bridge.expectedArenaLabel;
     outcomes.push(Object.freeze({
       kind: "arena-label",
-      label,
-      ...this.#bridge.reportArenaLabel(label, completionToken === undefined ? {} : { completionToken })
+      label: arenaLabel,
+      ...this.#bridge.reportArenaLabel(arenaLabel, { completionToken })
     }));
     return Object.freeze(outcomes);
+  }
+
+  /**
+   * The fighters the bridge is still waiting on, for a caller assembling the
+   * `deaths` list from a real animation surface. Reading it is not reporting
+   * them: every id still has to come back through
+   * `acknowledgeResultAnimations` or `bridge.reportDeathAnimation`.
+   */
+  awaitingDeathAnimations() {
+    this.#bridge.sync();
+    return [...this.#bridge.awaitingDeathAnimations];
   }
 
   /** Combatant ids, in roster order. Diagnostics and test convenience. */

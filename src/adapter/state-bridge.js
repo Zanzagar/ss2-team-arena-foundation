@@ -9,6 +9,22 @@
  * can only copy. If a future edit here starts computing an outcome, it belongs
  * in a rule set (`src/team/rule-set.js`), not in this file.
  *
+ * **That sentence used to be a description; it is now a check.** Two of them,
+ * in fact, and they are what make the claim inspectable rather than a promise:
+ *
+ * - every write declares a `source` from a closed four-value set (`WriteSource`),
+ *   and the source fixes which vanilla fields the write may target
+ *   (`ALLOWED_WRITE_FIELDS`) — a set defined here, not per scenario;
+ * - `assertWriteProvenance` then requires each write's `to` to be `===` the
+ *   value the post-action projection actually holds at the canonical location
+ *   its source names. A computed value has no such location to be identical
+ *   to, so `to: before - amount` cannot be expressed at all.
+ *
+ * The read side has the same discipline: `toCanonicalCombatantSource` refuses
+ * a vanilla record missing a base stat rather than defaulting it, and emits
+ * only the `loadout` keys a named vanilla field answers, so an assumption the
+ * record cannot support does not silently override the roster's own default.
+ *
  * Totality: `normaliseVanillaCombatant` preserves every own key of its input,
  * including keys the battle map does not name (the unnamed timed `spell_*`
  * fields, and anything a future build adds). Only three things are treated
@@ -37,14 +53,34 @@ import {
 } from "./vanilla-fields.js";
 
 /**
- * True for a canonical resource name the vanilla build actually has a field
- * for. The adapter mirrors exactly those and reports the rest as unmapped —
- * the same discipline `emitStatus` applies to a status with no vanilla flag.
- * A rule set is free to invent a resource; the adapter will not invent a
- * vanilla field to hold it.
+ * True for a canonical resource name the vanilla build actually has a
+ * resource-backed field for: one of the names this module declares in
+ * `CANONICAL_RESOURCE_SOURCES`, or one of the timed `spell_*` pools the map
+ * declines to enumerate.
+ *
+ * Everything else is reported as unmapped — the same discipline `emitStatus`
+ * applies to a status with no vanilla flag. A rule set is free to invent a
+ * resource; the adapter will not invent a vanilla field to hold it, and it
+ * will not repurpose a vanilla field it has not declared resource-backed.
+ * `hitpoints`, `hitpointsmax`, the six status flags and the clip-resident
+ * facing are owned by canonical health, canonical status and the clip record
+ * respectively, so a resource that names one of them is refused rather than
+ * allowed to forge a health or status write through the resource branch.
  */
 function mirrorsToVanillaField(name) {
-  return isKnownVanillaField(name) || isTimedSpellField(name);
+  return CANONICAL_RESOURCE_SOURCES.includes(name) || isTimedSpellField(name);
+}
+
+/**
+ * Why a resource cannot reach vanilla, as a fixed reason string. Split from
+ * "no vanilla field at all" because a resource colliding with a field another
+ * source already owns is a different mistake from inventing one.
+ */
+function unmappedResourceReason(name) {
+  if (RESOURCE_RESERVED_FIELDS.has(name)) {
+    return "this vanilla field is owned by canonical health, canonical status or the clip record, not by a resource";
+  }
+  return "no vanilla field carries this resource";
 }
 
 export class AdapterStateError extends Error {
@@ -163,6 +199,79 @@ export const CANONICAL_HEALTH_SOURCES = Object.freeze({
  * opaque string anyway (`src/team/resolver.js`, `applyEffects`).
  */
 export const CANONICAL_STATUS_TOKENS = STATUS_FLAG_FIELDS;
+
+/**
+ * Vanilla fields another canonical source already owns. A declared resource
+ * may never name one: allowing it would let the resource branch write
+ * `hitpoints` with a number canonical health never produced, which is the one
+ * thing the write shape exists to make impossible.
+ */
+export const RESOURCE_RESERVED_FIELDS = Object.freeze(new Set([
+  CANONICAL_HEALTH_SOURCES.health,
+  CANONICAL_HEALTH_SOURCES.maxHealth,
+  ...STATUS_FLAG_FIELDS,
+  "gladiator_dir"
+]));
+
+/* ------------------------------------------------------------------ */
+/* The closed set of write sources                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * **Where a vanilla field write is allowed to get its value from.**
+ *
+ * This is the structural half of "the adapter decides no combat". The prose
+ * version — *every vanilla write mirrors the resolver's post-action
+ * projection, never `before - effect`* — was a convention: nothing stopped a
+ * write carrying a number the adapter had computed, because nothing checked
+ * where the number came from.
+ *
+ * Now every write must name one of exactly four sources, each of which fixes
+ * two things: **which vanilla fields the write may target** (see
+ * `ALLOWED_WRITE_FIELDS`) and **which canonical value it must carry** (see
+ * `assertWriteProvenance`, which requires `write.to` to be `===` the value the
+ * post-action projection actually holds there). A computed value has no
+ * canonical location to be identical to, so it cannot be expressed.
+ */
+export const WriteSource = Object.freeze({
+  /** `hitpoints`, and only ever the post-action `health` the resolver clamped. */
+  CANONICAL_HEALTH: "canonical-health",
+  /** One of the six vanilla flags, and only ever `after.status.includes(flag)`. */
+  CANONICAL_STATUS: "canonical-status",
+  /** One resource-backed field, and only ever `after.resources[field].value`. */
+  DECLARED_RESOURCE: "declared-resource",
+  /** `gladiator_dir` on the fighter clip, and only ever a `FACING_VALUES` member. */
+  CLIP_FACING: "clip-facing"
+});
+
+const WRITE_SOURCES = Object.freeze(Object.values(WriteSource));
+
+/**
+ * The vanilla fields each source may write, independent of any scenario.
+ *
+ * `DECLARED_RESOURCE` additionally admits the timed `spell_*` pools, which the
+ * map declines to enumerate by name — `isResourceBackedVanillaField` is the
+ * authoritative predicate and this table is its enumerable core.
+ */
+export const ALLOWED_WRITE_FIELDS = Object.freeze({
+  [WriteSource.CANONICAL_HEALTH]: Object.freeze([CANONICAL_HEALTH_SOURCES.health]),
+  [WriteSource.CANONICAL_STATUS]: STATUS_FLAG_FIELDS,
+  [WriteSource.DECLARED_RESOURCE]: CANONICAL_RESOURCE_SOURCES,
+  [WriteSource.CLIP_FACING]: Object.freeze(["gladiator_dir"])
+});
+
+/** Which of the two vanilla objects each source is allowed to aim at. */
+const WRITE_SOURCE_TARGETS = Object.freeze({
+  [WriteSource.CANONICAL_HEALTH]: "combat-object",
+  [WriteSource.CANONICAL_STATUS]: "combat-object",
+  [WriteSource.DECLARED_RESOURCE]: "combat-object",
+  [WriteSource.CLIP_FACING]: "fighter-clip"
+});
+
+/** True for a vanilla field a declared resource is allowed to reach. */
+export function isResourceBackedVanillaField(name) {
+  return mirrorsToVanillaField(name);
+}
 
 /* ------------------------------------------------------------------ */
 /* Vanilla -> normalised vanilla record                                */
@@ -298,6 +407,50 @@ export function placeholderLoadoutFrom(fields) {
   };
 }
 
+/**
+ * The loadout keys the *vanilla record itself* backs, and nothing else.
+ *
+ * `placeholderLoadoutFrom` above answers all five keys unconditionally, which
+ * meant the adapter's answer always won over `roster.normaliseCombatant`'s own
+ * default — including in the two places where the two disagree in opposite
+ * directions. `canUseSpell`/`canHeal` default to `stats.magicka > 0` in the
+ * roster, so a gladiator with 20 magicka and an empty inventory came out
+ * unable to cast, and one with 0 magicka holding a scroll came out able to.
+ * That is the adapter deciding combat on the read side, which the write-shape
+ * argument never covered.
+ *
+ * So the conversion emits a key only where a named vanilla field carries the
+ * answer, and stays silent otherwise:
+ *
+ * | key | vanilla evidence | absent ⇒ |
+ * | --- | --- | --- |
+ * | `meleeDamage` | `min_damage` | omitted; the roster's default stands |
+ * | `rangedDamage` | `secondary_min_damage` **only** — falling back to `min_damage` silently equated ranged with melee for every gladiator without a second weapon | omitted |
+ * | `canUseRanged` | `using_bow` or `maximum_ammo` | omitted |
+ * | `canUseSpell` | none: the inventory id sets are the adapter's own decision labels, not a vanilla field | **always** omitted |
+ * | `canHeal` | none, likewise | **always** omitted |
+ *
+ * The `min_damage`-as-melee-base reading is still an assumption of the
+ * placeholder vocabulary; what changes is that an assumption the vanilla
+ * record cannot support is no longer stated at all. A caller that wants the
+ * whole placeholder bridge passes it explicitly as `options.loadout`.
+ */
+function vanillaBackedLoadout(fields) {
+  const loadout = {};
+  const omitted = [];
+  if (Number.isFinite(Number(fields.min_damage))) loadout.meleeDamage = Number(fields.min_damage);
+  else omitted.push("meleeDamage");
+  if (Number.isFinite(Number(fields.secondary_min_damage))) loadout.rangedDamage = Number(fields.secondary_min_damage);
+  else omitted.push("rangedDamage");
+  if (typeof fields.using_bow === "boolean" || Number.isFinite(Number(fields.maximum_ammo))) {
+    loadout.canUseRanged = fields.using_bow === true || Number(fields.maximum_ammo ?? 0) > 0;
+  } else {
+    omitted.push("canUseRanged");
+  }
+  omitted.push("canUseSpell", "canHeal");
+  return { loadout, omitted: Object.freeze(omitted) };
+}
+
 /** Every vanilla status flag currently true, in the byte-verified death order. */
 export function canonicalStatusesFrom(fields) {
   return DEATH_STATUS_CLEAR_ORDER.filter((flag) => fields[flag] === true);
@@ -361,7 +514,8 @@ export function toCanonicalCombatantSource(source, {
   name,
   teamId = null,
   controller,
-  clip = null
+  clip = null,
+  loadout = null
 } = {}) {
   const record = normaliseVanillaCombatant(source, { clip });
   const { fields } = record;
@@ -370,22 +524,39 @@ export function toCanonicalCombatantSource(source, {
   }
   const stats = {};
   for (const [canonical, vanilla] of Object.entries(CANONICAL_STAT_SOURCES)) {
-    stats[canonical] = Number(fields[vanilla] ?? 0);
+    const raw = Number(fields[vanilla]);
+    if (!Number.isFinite(raw)) {
+      // The adapter converts vanilla state; it does not invent it. Reading an
+      // absent `defence` as 0 (or as 5, or as anything) is the adapter picking
+      // a combat input, and the choice is invisible afterwards — canonical
+      // state carries no record that the number was made up. A combat object
+      // the map's "Base stats" row describes always carries all seven.
+      throw new AdapterStateError(
+        `The vanilla combat object for ${id} carries no ${vanilla}, so canonical ${canonical} cannot be read. ` +
+        "The adapter converts base stats, it does not default them: supply the field, or build the combatant " +
+        "from a blueprint rather than from a vanilla record."
+      );
+    }
+    stats[canonical] = raw;
   }
+  const backed = vanillaBackedLoadout(fields);
   const combatant = {
     id,
     name: name ?? (typeof fields.character_name === "string" ? fields.character_name : id),
     stats,
-    loadout: placeholderLoadoutFrom(fields),
+    // Only the keys a named vanilla field answers. See `vanillaBackedLoadout`:
+    // everything else is left to `roster.normaliseCombatant`'s own defaults
+    // rather than overridden by an assumption the record cannot support. A
+    // caller that wants the full placeholder bridge passes it in.
+    loadout: loadout === null ? backed.loadout : { ...loadout },
     // The one open, hashed, resolver-clamped numeric bag. Declared on every
     // combatant so either side of the per-action binding can be written.
     resources: canonicalResourcesFrom(fields),
     maxHealth: Number(fields.hitpointsmax ?? 0),
     health: Number(fields.hitpoints ?? 0),
-    // `roster.normaliseCombatant` currently hard-codes `status: []` and drops
-    // this. It is emitted anyway because it is the true starting state, and
-    // `initialStatusEffects` below turns it into the effects a future roster
-    // would need. See the reported canonical-shape gaps.
+    // The gladiator's true starting conditions. `roster.normaliseCombatant`
+    // used to hard-code `status: []` and drop this; `normaliseStatus` now
+    // carries it through, so a fighter who enters already burning still is.
     status: canonicalStatusesFrom(fields)
   };
   if (teamId !== null) combatant.teamId = teamId;
@@ -394,14 +565,25 @@ export function toCanonicalCombatantSource(source, {
     combatant: Object.freeze(combatant),
     vanilla: record,
     /** Resource-backed fields this combat object never carried; read as 0. */
-    defaultedResources: Object.freeze(absentResourceSources(fields))
+    defaultedResources: Object.freeze(absentResourceSources(fields)),
+    /**
+     * Loadout keys the vanilla record could not answer, so the roster's own
+     * default decides them. Empty only when the caller supplied a `loadout`.
+     */
+    omittedLoadoutKeys: loadout === null ? backed.omitted : Object.freeze([])
   });
 }
 
 /**
- * The status effects a caller would have to apply to reproduce the vanilla
- * starting statuses, because `roster.normaliseCombatant` drops `source.status`.
- * Declarative and ordered; applying them is the resolver's job, not ours.
+ * The vanilla starting statuses as declarative effects, ordered.
+ *
+ * **Do not apply these to a battle built from these same sources.** They exist
+ * from when `roster.normaliseCombatant` hard-coded `status: []` and dropped
+ * `source.status`, so a caller had to reapply them by hand. `normaliseStatus`
+ * carries them through now, so the roster has already applied them: this is a
+ * description of the starting state, useful for diagnostics and for a caller
+ * building a battle some other way, and applying it on top of a roster-built
+ * battle would set a status the fighter already has.
  */
 export function initialStatusEffects(sources) {
   return sources.flatMap(({ combatant }) =>
@@ -446,11 +628,31 @@ export function compareMaximumHealth(rules, canonicalSource, vanillaRecord) {
  * not flushed has thrown away the undefined-until-set provenance. Prefer
  * `mirrorDifferences` first and skip the sync when the mirror already agrees.
  */
-export function toVanillaCombatant(canonical, record) {
+export function toVanillaCombatant(canonical, record, { maxHealth = false, stats = false } = {}) {
   assertVanillaRecord(record);
   const fields = { ...record.fields };
   fields[CANONICAL_HEALTH_SOURCES.health] = canonical.health;
-  fields[CANONICAL_HEALTH_SOURCES.maxHealth] = canonical.maxHealth;
+  // `hitpointsmax` is NOT written by default, and the default is the whole
+  // point: `compareMaximumHealth` says it only ever reports, because
+  // `hitpointsmax` comes from vanilla's `battlevalues` and deriving it is a
+  // formula. Writing canonical `maxHealth` over it would put the *rule set's*
+  // formula into a licensed gladiator's record.
+  //
+  // `maxHealth: true` is for the one record where that reasoning does not
+  // apply: an AI-filled slot's mirror, where there is no licensed gladiator to
+  // overwrite — the roster invented the fighter and its maximum health, and
+  // the mirror's job is to describe *that* fighter. `battle-host.js` passes it
+  // there and refuses the disagreement everywhere else.
+  if (maxHealth) fields[CANONICAL_HEALTH_SOURCES.maxHealth] = canonical.maxHealth;
+  // Base stats, likewise: mirrored only for a combatant the roster invented,
+  // where the template's numbers describe a different gladiator from the one
+  // that is actually fighting.
+  if (stats && canonical.stats) {
+    for (const [canonicalName, vanillaName] of Object.entries(CANONICAL_STAT_SOURCES)) {
+      if (canonical.stats[canonicalName] === undefined) continue;
+      fields[vanillaName] = canonical.stats[canonicalName];
+    }
+  }
   const active = new Set(canonical.status ?? []);
   for (const flag of STATUS_FLAG_FIELDS) fields[flag] = active.has(flag);
   // Resources, unlike the status flags, are written only where they actually
@@ -487,7 +689,7 @@ export function toVanillaCombatant(canonical, record) {
  * rule set may invent a resource, and the adapter will not invent a vanilla
  * field to hold it (the same rule `emitStatus` applies to statuses).
  */
-export function mirrorDifferences(record, canonical) {
+export function mirrorDifferences(record, canonical, { includeStats = false } = {}) {
   assertVanillaRecord(record);
   const problems = [];
   if (record.fields.hitpoints !== canonical.health) {
@@ -495,6 +697,15 @@ export function mirrorDifferences(record, canonical) {
   }
   if (record.fields.hitpointsmax !== canonical.maxHealth) {
     problems.push(`hitpointsmax ${String(record.fields.hitpointsmax)} != maxHealth ${String(canonical.maxHealth)}`);
+  }
+  if (includeStats && canonical.stats) {
+    for (const [canonicalName, vanillaName] of Object.entries(CANONICAL_STAT_SOURCES)) {
+      if (canonical.stats[canonicalName] === undefined) continue;
+      if (Number(record.fields[vanillaName]) === Number(canonical.stats[canonicalName])) continue;
+      problems.push(
+        `${vanillaName} ${String(record.fields[vanillaName])} != ${canonicalName} ${String(canonical.stats[canonicalName])}`
+      );
+    }
   }
   const active = new Set(canonical.status ?? []);
   for (const flag of STATUS_FLAG_FIELDS) {
@@ -514,12 +725,51 @@ export function mirrorDifferences(record, canonical) {
 }
 
 /**
+ * The vanilla fields the placeholder loadout bridge reads, and where a record
+ * disagrees with the canonical loadout the roster actually built.
+ *
+ * `mirrorDifferences` cannot cover these: a rule set's `meleeDamage` is one
+ * number and vanilla's is a `min_damage`/`max_damage` pair, so there is no
+ * write that would reconcile them without inventing the other half. They are
+ * *reported* instead — which is the whole point for an AI-filled slot, whose
+ * mirror is a template describing some other gladiator's weapon.
+ */
+export const LOADOUT_SOURCE_FIELDS = Object.freeze([
+  "min_damage",
+  "secondary_min_damage",
+  "using_bow",
+  "maximum_ammo",
+  ...INVENTORY_SLOTS
+]);
+
+export function loadoutMirrorDifferences(record, canonical) {
+  assertVanillaRecord(record);
+  const problems = [];
+  const loadout = canonical.loadout ?? {};
+  const compare = (field, key) => {
+    if (loadout[key] === undefined) return;
+    if (record.fields[field] === undefined) return;
+    if (Number(record.fields[field]) === Number(loadout[key])) return;
+    problems.push(`${field} ${String(record.fields[field])} != loadout.${key} ${String(loadout[key])}`);
+  };
+  compare("min_damage", "meleeDamage");
+  compare("secondary_min_damage", "rangedDamage");
+  if (loadout.canUseRanged !== undefined) {
+    const mirrored = record.fields.using_bow === true || Number(record.fields.maximum_ammo ?? 0) > 0;
+    if (mirrored !== loadout.canUseRanged) {
+      problems.push(`using_bow/maximum_ammo imply canUseRanged ${mirrored} != loadout.canUseRanged ${loadout.canUseRanged}`);
+    }
+  }
+  return problems;
+}
+
+/**
  * Fails loudly when a vanilla record has drifted away from resolved canonical
  * state. Drift is a bug in whoever applied the writes, and silently correcting
  * it would hide a desync between the mirror and the authoritative resolver.
  */
-export function assertMirrorAgrees(record, canonical) {
-  const problems = mirrorDifferences(record, canonical);
+export function assertMirrorAgrees(record, canonical, options = {}) {
+  const problems = mirrorDifferences(record, canonical, options);
   if (problems.length > 0) {
     throw new AdapterStateError(
       `The vanilla mirror for ${canonical.id} has drifted from resolved state: ${problems.join("; ")}.`
@@ -542,9 +792,40 @@ function indexById(combatants) {
   return new Map(combatants.map((combatant) => [combatant.id, combatant]));
 }
 
-function fieldWrite({ combatantId, placement, field, from, to, reason, target = WriteTarget.COMBAT_OBJECT }) {
+/**
+ * Builds one vanilla field write, refusing any that the closed source
+ * vocabulary cannot account for.
+ *
+ * `source` is mandatory. It is not documentation: it is what
+ * `assertWriteProvenance` uses to decide which canonical value this write is
+ * required to be identical to, and what pins the field to a set fixed
+ * independently of any scenario.
+ */
+function fieldWrite({ combatantId, placement, field, from, to, reason, source, target = WriteTarget.COMBAT_OBJECT }) {
+  if (!WRITE_SOURCES.includes(source)) {
+    throw new AdapterStateError(
+      `A vanilla field write must declare one of the ${WRITE_SOURCES.length} write sources ` +
+      `(${WRITE_SOURCES.join(", ")}); the write to ${String(field)} declared ${JSON.stringify(source)}. ` +
+      "A write with no declared source is a write with no evidence that the resolver produced its value."
+    );
+  }
+  const allowed = source === WriteSource.DECLARED_RESOURCE
+    ? isResourceBackedVanillaField(field)
+    : ALLOWED_WRITE_FIELDS[source].includes(field);
+  if (!allowed) {
+    throw new AdapterStateError(
+      `The write source ${source} may not write the vanilla field ${String(field)}. ` +
+      `Allowed: ${ALLOWED_WRITE_FIELDS[source].join(", ")}${source === WriteSource.DECLARED_RESOURCE ? ", or a timed spell_* pool" : ""}.`
+    );
+  }
+  if (target !== WRITE_SOURCE_TARGETS[source]) {
+    throw new AdapterStateError(
+      `The write source ${source} writes the ${WRITE_SOURCE_TARGETS[source]}, not the ${String(target)}.`
+    );
+  }
   return Object.freeze({
     target,
+    source,
     combatantId,
     side: placement?.side ?? null,
     slotIndex: placement?.slotIndex ?? null,
@@ -560,6 +841,74 @@ function fieldWrite({ combatantId, placement, field, from, to, reason, target = 
     materialises: from === undefined,
     reason
   });
+}
+
+/**
+ * **The structural check behind "the adapter decides no combat."**
+ *
+ * For every write, the source names exactly one place in the post-action
+ * projection the value has to have come from, and the value has to be `===`
+ * what is there. Not "close to", not "derivable from" — identical to a value
+ * the resolver produced and clamped.
+ *
+ * That is what a prose rule could never give. `to: before - effect.amount`
+ * reads plausibly and passes review; a value computed anywhere in this module
+ * has no canonical location to be identical to, so it fails here by
+ * construction. The same check catches a write pushed straight onto the list
+ * without going through `fieldWrite`, because it walks the writes rather than
+ * trusting how they were built.
+ *
+ * `clip-facing` is the one source with no canonical counterpart — the facing
+ * is presentation, not combat state — so it is checked against the closed
+ * `FACING_VALUES` vocabulary instead.
+ *
+ * @param {object[]} writes
+ * @param {object[]|Map} after the post-action combatant projections
+ */
+export function assertWriteProvenance(writes, after) {
+  const afterById = after instanceof Map ? after : indexById(after);
+  for (const write of writes) {
+    const projection = afterById.get(write.combatantId);
+    const where = `${String(write.combatantId)}.${String(write.field)}`;
+    if (write.source === WriteSource.CLIP_FACING) {
+      if (!FACING_VALUES.includes(write.to)) {
+        throw new AdapterStateError(
+          `The clip-facing write for ${where} carries ${JSON.stringify(write.to)}, which is not a facing.`
+        );
+      }
+      continue;
+    }
+    if (!projection) {
+      throw new AdapterStateError(
+        `The write to ${where} names combatant ${String(write.combatantId)}, who has no resolved projection. ` +
+        "Every write must mirror a value the resolver produced."
+      );
+    }
+    let expected;
+    if (write.source === WriteSource.CANONICAL_HEALTH) {
+      expected = projection.health;
+    } else if (write.source === WriteSource.CANONICAL_STATUS) {
+      expected = (projection.status ?? []).includes(write.field);
+    } else if (write.source === WriteSource.DECLARED_RESOURCE) {
+      const entry = projection.resources?.[write.field];
+      if (entry === undefined) {
+        throw new AdapterStateError(
+          `The declared-resource write to ${where} names a resource the resolved projection does not declare.`
+        );
+      }
+      expected = entry.value;
+    } else {
+      throw new AdapterStateError(`The write to ${where} declares no known write source.`);
+    }
+    if (write.to !== expected) {
+      throw new AdapterStateError(
+        `The ${write.source} write to ${where} carries ${JSON.stringify(write.to)}, but the resolved projection ` +
+        `holds ${JSON.stringify(expected)}. A vanilla write must be identical to a value the resolver produced; ` +
+        "a computed one is a second place combat is being decided."
+      );
+    }
+  }
+  return true;
 }
 
 /**
@@ -616,9 +965,11 @@ export function vanillaWritesForResolvedAction({
       field: "hitpoints",
       from: mirror ? mirror.fields.hitpoints : previous?.health,
       // The value the resolver produced and clamped. Never `previous.health -
-      // effect.amount`: the adapter mirrors, it does not compute.
+      // effect.amount`: the adapter mirrors, it does not compute, and
+      // `assertWriteProvenance` refuses anything that is not `after.health`.
       to: current.health,
-      reason
+      reason,
+      source: WriteSource.CANONICAL_HEALTH
     }));
   };
 
@@ -659,12 +1010,14 @@ export function vanillaWritesForResolvedAction({
     if (previous !== undefined && previous.value === entry.value) return;
     if (!mirrorsToVanillaField(resource)) {
       // The adapter will not invent a vanilla field for a resource the build
-      // does not have, exactly as it will not for an unmapped status.
+      // does not have, exactly as it will not for an unmapped status — nor
+      // will it let a resource borrow a field canonical health, canonical
+      // status or the clip record already owns.
       emitted.add(key);
       unmapped.push(Object.freeze({
         combatantId: id,
         resource,
-        reason: "no vanilla field carries this resource"
+        reason: unmappedResourceReason(resource)
       }));
       return;
     }
@@ -678,7 +1031,8 @@ export function vanillaWritesForResolvedAction({
       // as a status flag can, so the first write to one *materialises* it.
       from: mirror ? mirror.fields[resource] : previous?.value,
       to: entry.value,
-      reason
+      reason,
+      source: WriteSource.DECLARED_RESOURCE
     }));
   };
 
@@ -706,7 +1060,8 @@ export function vanillaWritesForResolvedAction({
       field: status,
       from,
       to: active,
-      reason
+      reason,
+      source: WriteSource.CANONICAL_STATUS
     }));
   };
 
@@ -750,6 +1105,12 @@ export function vanillaWritesForResolvedAction({
       emitStatus(id, status, now.has(status), "resolved-state-diff");
     }
   }
+
+  // 3. The shape check. Every write must be identical to a value the resolved
+  //    projection actually holds, at the canonical location its source names.
+  //    This runs on the produced list, not on the code that produced it, so it
+  //    catches a write that never went through `fieldWrite` too.
+  assertWriteProvenance(writes, afterById);
 
   return Object.freeze({ writes: Object.freeze(writes), unmapped: Object.freeze(unmapped) });
 }
@@ -799,6 +1160,7 @@ export function facingWrite(combatantId, placement, record, facing) {
     from: record.clip.gladiator_dir,
     to: facing,
     reason: "clip-resident-facing",
+    source: WriteSource.CLIP_FACING,
     target: WriteTarget.FIGHTER_CLIP
   });
 }

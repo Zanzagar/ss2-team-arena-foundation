@@ -19,8 +19,10 @@ import {
   absentResourceSources,
   AcknowledgementError,
   AdapterStateError,
+  ALLOWED_WRITE_FIELDS,
   applyVanillaWrites,
   assertMirrorAgrees,
+  assertWriteProvenance,
   ARENA_Y,
   buildArenaLayout,
   bindingPlanFor,
@@ -40,10 +42,13 @@ import {
   facingWrite,
   HERO_SIDE,
   initialStatusEffects,
+  isResourceBackedVanillaField,
   LabelProvenance,
+  loadoutMirrorDifferences,
   MAP_SILENCE,
   mirrorDifferences,
   normaliseVanillaCombatant,
+  placeholderLoadoutFrom,
   PLACEHOLDER_ANIMATION_BINDINGS,
   presentArenaConstruction,
   presentResolvedEvents,
@@ -61,6 +66,7 @@ import {
   VANILLA_SHADOW_DEPTHS,
   vanillaWritesForResolvedAction,
   VILLAIN_SIDE,
+  WriteSource,
   WriteTarget
 } from "../src/adapter/index.js";
 
@@ -297,20 +303,146 @@ test("the canonical stat mapping reconciles names without transforming any value
   assert.equal(vanilla.fields.armourclass, 44);
 });
 
-test("canonical state mirrors back onto the vanilla record exactly", () => {
-  const record = normaliseVanillaCombatant(freshVanillaGladiator());
+test("canonical state mirrors back onto the vanilla record and changes nothing else", () => {
+  // The expectation is built from the *source object*, not from anything
+  // `toVanillaCombatant` returns. The previous version of this test asserted
+  // the mirrored record against `mirrorDifferences`, which compares exactly
+  // the fields `toVanillaCombatant` writes — so it could only ever pass, for
+  // any pair of functions that agreed with each other about anything.
+  const source = freshVanillaGladiator();
+  const record = normaliseVanillaCombatant(source);
   const canonical = { id: "red-1", health: 12, maxHealth: 30, status: ["burning"], alive: true };
   const mirrored = toVanillaCombatant(canonical, record);
-  assert.equal(mirrored.fields.hitpoints, 12);
-  assert.equal(mirrored.fields.hitpointsmax, 30);
-  assert.equal(mirrored.fields.burning, true);
-  assert.equal(mirrored.fields.frozen, false);
-  // Everything the canonical shape has no room for is untouched.
-  assert.equal(mirrored.fields.armourclass, 44);
-  assert.equal(mirrored.fields.staminaleft, 105);
-  assert.equal(mirrored.fields.charisma, 2);
+
+  const expected = {
+    ...source,
+    hitpoints: 12,
+    burning: true,
+    frozen: false,
+    poison: false,
+    life_stolen: false,
+    taunted1: false,
+    taunted2: false
+  };
+  assert.deepEqual(mirrored.fields, expected, "exactly hitpoints and the six flags move; every other key is untouched");
+  assert.deepEqual(Object.keys(mirrored.fields).sort(), Object.keys(expected).sort());
   assert.equal(mirrored.clip.gladiator_dir, record.clip.gladiator_dir);
-  assertMirrorAgrees(mirrored, canonical);
+
+  // `hitpointsmax` is deliberately NOT among them: it is vanilla's
+  // `battlevalues` output, so writing canonical `maxHealth` over it would put
+  // the rule set's formula into a licensed gladiator's record. The staged 30
+  // survives even though this canonical state was handed a different one.
+  const disagreeing = { ...canonical, maxHealth: 80 };
+  assert.equal(toVanillaCombatant(disagreeing, record).fields.hitpointsmax, 30);
+  assert.equal(source.hitpointsmax, 30, "and the source object itself is never mutated");
+  // Only the one record with no licensed gladiator behind it opts in.
+  assert.equal(toVanillaCombatant(disagreeing, record, { maxHealth: true }).fields.hitpointsmax, 80);
+});
+
+/* ------------------------------------------------------------------ */
+/* State bridge: the READ side decides nothing either                  */
+/* ------------------------------------------------------------------ */
+
+test("the conversion emits only the loadout keys a named vanilla field answers", () => {
+  const { combatant, omittedLoadoutKeys } = toCanonicalCombatantSource(freshVanillaGladiator(), { id: "red-1" });
+
+  // `min_damage` is there, `secondary_min_damage` is not, and `using_bow`
+  // answers `canUseRanged`. Nothing else is stated.
+  assert.deepEqual(combatant.loadout, { meleeDamage: 21, canUseRanged: false });
+  assert.deepEqual([...omittedLoadoutKeys].sort(), ["canHeal", "canUseSpell", "rangedDamage"]);
+
+  // `rangedDamage` used to fall back to `min_damage`, which silently said
+  // "this gladiator's bow hits exactly as hard as its sword" for every
+  // gladiator without a second weapon.
+  assert.equal("rangedDamage" in combatant.loadout, false);
+  const armed = toCanonicalCombatantSource(freshVanillaGladiator({ secondary_min_damage: 7 }), { id: "red-1" });
+  assert.equal(armed.combatant.loadout.rangedDamage, 7);
+  assert.equal(armed.omittedLoadoutKeys.includes("rangedDamage"), false);
+
+  // `canUseRanged` is a real reading of two real fields, in both directions.
+  const quiver = toCanonicalCombatantSource(freshVanillaGladiator({ maximum_ammo: 12 }), { id: "red-1" });
+  assert.equal(quiver.combatant.loadout.canUseRanged, true);
+  const bow = toCanonicalCombatantSource(freshVanillaGladiator({ using_bow: true }), { id: "red-1" });
+  assert.equal(bow.combatant.loadout.canUseRanged, true);
+  // An empty quiver is not a bow: `maximum_ammo: 0` means no ranged attack.
+  assert.equal(
+    toCanonicalCombatantSource(freshVanillaGladiator({ maximum_ammo: 0, using_bow: false }), { id: "red-1" })
+      .combatant.loadout.canUseRanged,
+    false
+  );
+
+  // A caller that wants the whole placeholder bridge asks for it by name.
+  const explicit = toCanonicalCombatantSource(freshVanillaGladiator(), {
+    id: "red-1",
+    loadout: placeholderLoadoutFrom(freshVanillaGladiator())
+  });
+  assert.deepEqual(explicit.combatant.loadout, {
+    meleeDamage: 21,
+    rangedDamage: 21,
+    canUseRanged: false,
+    canUseSpell: true,
+    canHeal: true
+  });
+  assert.deepEqual(explicit.omittedLoadoutKeys, []);
+});
+
+test("the adapter never answers canUseSpell or canHeal, because inverting the roster's default in both directions is deciding combat", () => {
+  // The inventory id sets are the adapter's own decision labels, not a vanilla
+  // field, and stating them always beat `roster.normaliseCombatant`'s own
+  // `stats.magicka > 0` — in both directions.
+  const caster = freshVanillaGladiator({
+    magicka: 20,
+    inventory1: 0, inventory2: 0, inventory3: 0, inventory4: 0, inventory5: 0, inventory6: 0
+  });
+  const converted = toCanonicalCombatantSource(caster, { id: "red-1" });
+  assert.equal("canUseSpell" in converted.combatant.loadout, false);
+  assert.equal("canHeal" in converted.combatant.loadout, false);
+  // The adapter's old answer for exactly this gladiator.
+  assert.equal(placeholderLoadoutFrom(caster).canUseSpell, false);
+
+  // Through the roster, the resolver's own default now survives: 20 magicka
+  // and an empty inventory is a caster, and 0 magicka is not.
+  const battle = createTeamBattle({
+    teams: [
+      { id: "red", name: "Red", slots: 1, combatants: [{ ...converted.combatant, teamId: "red" }] },
+      {
+        id: "blue",
+        name: "Blue",
+        slots: 1,
+        combatants: [
+          { ...toCanonicalCombatantSource(freshVanillaGladiator({ magicka: 0 }), { id: "blue-1" }).combatant, teamId: "blue" }
+        ]
+      }
+    ],
+    rngTape: hitTape(4)
+  });
+  assert.equal(battle.teams[0].combatants[0].loadout.canUseSpell, true, "20 magicka: the roster's default stands");
+  assert.equal(battle.teams[0].combatants[0].loadout.canHeal, true);
+  assert.equal(battle.teams[1].combatants[0].loadout.canUseSpell, false, "0 magicka: likewise");
+});
+
+test("a vanilla record missing a base stat is refused, never defaulted", () => {
+  // Reading an absent `defence` as 0 — or as 5, or as anything — is the
+  // adapter choosing a combat input, and canonical state carries no record
+  // that the number was invented.
+  const { defence, ...noDefence } = freshVanillaGladiator();
+  assert.equal(defence, 1);
+  assert.throws(
+    () => toCanonicalCombatantSource(noDefence, { id: "red-1" }),
+    (error) =>
+      error instanceof AdapterStateError &&
+      /carries no defence, so canonical defense cannot be read/.test(error.message) &&
+      /converts base stats, it does not default them/.test(error.message)
+  );
+  for (const field of Object.values(CANONICAL_STAT_SOURCES)) {
+    const stripped = { ...freshVanillaGladiator() };
+    delete stripped[field];
+    assert.throws(
+      () => toCanonicalCombatantSource(stripped, { id: "red-1" }),
+      (error) => error instanceof AdapterStateError && new RegExp(`carries no ${field}`).test(error.message),
+      `a missing ${field} must be refused, not read as some number`
+    );
+  }
 });
 
 test("mirror drift is refused rather than silently corrected", () => {
@@ -421,7 +553,10 @@ test("a mirror that is wrong about armour is drift now, where it used to be sile
 
   const spent = { ...canonical, resources: { ...canonical.resources, armourclass: { value: 22, min: null, max: null } } };
   assert.deepEqual(mirrorDifferences(record, spent), ["armourclass 44 != resource 22"]);
-  assert.throws(() => assertMirrorAgrees(record, spent), AdapterStateError);
+  assert.throws(
+    () => assertMirrorAgrees(record, spent),
+    (error) => error instanceof AdapterStateError && /drifted from resolved state: armourclass 44 != resource 22/.test(error.message)
+  );
 
   // A resource the build has no field for is skipped, not reported: a rule set
   // may invent a resource, and the adapter will not invent a field for it.
@@ -665,18 +800,192 @@ test("an unattributed resource change is still written, and an unchanged one is 
 });
 
 test("writes follow effect order and stay total for unattributed differences", () => {
-  const battle = makeBattle(1, 1);
+  // `after` comes from the resolver, not from mapping over `before`. The
+  // previous version built both sides itself, so it constrained the ordering
+  // and nothing else: the "values come from the resolver" half was supplied by
+  // the test. Here a rule set splashes the actor as well as the target, and
+  // only the target's damage is attributed to an effect.
+  const splash = defineTeamRuleSet({
+    id: "test-splash",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented; hits the actor too. Not SS2 behaviour." },
+    actionTypes: ["splash"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 40,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "splash", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [
+        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 7 },
+        { kind: EffectKind.DAMAGE, targetId: request.actorId, amount: 3 }
+      ],
+      events: [{ type: "melee", actorId: request.actorId, targetId: request.targetId, hit: true, damage: 7 }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+  const battle = makeBattle(1, 1, { rules: splash });
   const layout = buildArenaLayout(toTeamWireState(battle));
   const before = projections(battle);
-  const after = before.map((combatant) => ({ ...combatant, health: combatant.health - 1 }));
+  applyAction(battle, { actorId: "red-1", type: "splash", targetId: "blue-1" });
+  const after = projections(battle);
+
+  // Only the target's damage is declared as an effect the writer sees.
   const { writes } = vanillaWritesForResolvedAction({
     before,
     after,
-    effects: [{ kind: "damage", targetId: "blue-1", amount: 1 }],
+    effects: [{ kind: "damage", targetId: "blue-1", amount: 7 }],
     placements: layout.byCombatantId
   });
   assert.deepEqual(writes.map((write) => write.combatantId), ["blue-1", "red-1"]);
   assert.deepEqual(writes.map((write) => write.reason), ["damage-effect", "resolved-state-diff"]);
+  // Both values are the resolver's, including the one no effect explained.
+  const byId = new Map(after.map((combatant) => [combatant.id, combatant]));
+  for (const write of writes) assert.equal(write.to, byId.get(write.combatantId).health);
+  assert.equal(writes[1].to, 37, "the actor's own 3 points, mirrored because the state changed");
+});
+
+/* ------------------------------------------------------------------ */
+/* State bridge: the write shape, checked rather than described        */
+/* ------------------------------------------------------------------ */
+
+test("every vanilla write declares one of four sources, and the field set is fixed independently of any scenario", () => {
+  assert.deepEqual(Object.keys(ALLOWED_WRITE_FIELDS).sort(), [...Object.values(WriteSource)].sort());
+  assert.deepEqual(ALLOWED_WRITE_FIELDS[WriteSource.CANONICAL_HEALTH], ["hitpoints"]);
+  assert.deepEqual([...ALLOWED_WRITE_FIELDS[WriteSource.CANONICAL_STATUS]], [...STATUS_FLAG_FIELDS]);
+  assert.deepEqual([...ALLOWED_WRITE_FIELDS[WriteSource.DECLARED_RESOURCE]], [...CANONICAL_RESOURCE_SOURCES]);
+  assert.deepEqual(ALLOWED_WRITE_FIELDS[WriteSource.CLIP_FACING], ["gladiator_dir"]);
+
+  // The whole set, named once, in one place, with no battle in sight.
+  const allowed = new Set(Object.values(ALLOWED_WRITE_FIELDS).flatMap((fields) => [...fields]));
+  assert.equal(allowed.size, 1 + STATUS_FLAG_FIELDS.length + CANONICAL_RESOURCE_SOURCES.length + 1);
+  // Nothing a rule set can name reaches a field another source owns.
+  for (const reserved of ["hitpointsmax", "hitpoints", "gladiator_dir", ...STATUS_FLAG_FIELDS]) {
+    assert.equal(isResourceBackedVanillaField(reserved), false, `${reserved} is not a resource's to write`);
+  }
+  assert.equal(isResourceBackedVanillaField("armourclass"), true);
+  assert.equal(isResourceBackedVanillaField("spell_regenerate"), true, "the timed pools the map declines to name");
+  assert.equal(isResourceBackedVanillaField("psyche_up"), false, "a vanilla field is not a resource by being a field");
+
+  // And no scenario produces a write outside it. Four vocabularies, four team
+  // sizes, damage / heal / status / resource / facing.
+  const observed = new Set();
+  for (const [redSize, blueSize] of [[1, 1], [2, 2], [3, 3], [1, 3]]) {
+    const battle = makeBattle(redSize, blueSize);
+    const layout = buildArenaLayout(toTeamWireState(battle));
+    const resources = canonicalResourcesFrom(freshVanillaGladiator());
+    const before = projections(battle).map((combatant) => ({ ...combatant, resources }));
+    const after = before.map((combatant) => ({
+      ...combatant,
+      health: Math.max(0, combatant.health - 3),
+      status: [...combatant.status, "burning", "invented-status"],
+      resources: { ...resources, armourclass: { value: 1, min: null, max: null }, momentum: { value: 4, min: null, max: null } }
+    }));
+    const { writes } = vanillaWritesForResolvedAction({
+      before,
+      after,
+      effects: [
+        { kind: "resource", targetId: "blue-1", resource: "armourclass", to: 1 },
+        { kind: "damage", targetId: "blue-1", amount: 3 },
+        { kind: "status", targetId: "blue-1", status: "burning", active: true },
+        { kind: "status", targetId: "blue-1", status: "invented-status", active: true },
+        { kind: "resource", targetId: "blue-1", resource: "momentum", to: 4 }
+      ],
+      placements: layout.byCombatantId
+    });
+    const all = [
+      ...writes,
+      ...layout.placements.map((placement) =>
+        facingWrite(placement.combatantId, placement, normaliseVanillaCombatant(freshVanillaGladiator()), "left"))
+    ];
+    for (const write of all) {
+      assert.ok(Object.values(WriteSource).includes(write.source), `${write.field} declared no known source`);
+      assert.ok(allowed.has(write.field), `${write.field} is outside the allowed field set`);
+      observed.add(`${write.source}:${write.field}`);
+    }
+  }
+  // The scenarios really did exercise all four sources.
+  assert.deepEqual(
+    [...new Set([...observed].map((entry) => entry.split(":")[0]))].sort(),
+    [...Object.values(WriteSource)].sort()
+  );
+});
+
+test("a write carrying a value the resolver never produced is refused, however it was built", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const resources = canonicalResourcesFrom(freshVanillaGladiator());
+  const before = projections(battle).map((combatant) => ({ ...combatant, resources }));
+  applyAction(battle, melee(battle, "blue-1"));
+  const after = projections(battle).map((combatant) => ({ ...combatant, resources }));
+
+  // Every emitted write is identical to a value the projection actually holds.
+  const { writes } = vanillaWritesForResolvedAction({
+    before,
+    after,
+    effects: [{ kind: "damage", targetId: "blue-1", amount: 60 }],
+    placements: layout.byCombatantId
+  });
+  assert.equal(assertWriteProvenance(writes, after), true);
+
+  // The forbidden shape, in the words the contract uses for it. `staminaleft`
+  // is a real resource-backed field, the write is well formed, the source is
+  // declared — and 105 - ceil(60 * 1.5) is a number that exists nowhere in the
+  // post-action projection, so it cannot be a value the resolver decided.
+  const computed = [{
+    ...writes[0],
+    field: "staminaleft",
+    source: WriteSource.DECLARED_RESOURCE,
+    from: 105,
+    to: 105 - Math.ceil(60 * 1.5)
+  }];
+  assert.throws(
+    () => assertWriteProvenance(computed, after),
+    (error) =>
+      error instanceof AdapterStateError &&
+      /but the resolved projection holds/.test(error.message) &&
+      /a computed one is a second place combat is being decided/.test(error.message)
+  );
+
+  // Same for a health write that is `before - amount` rather than `after`.
+  assert.throws(
+    () => assertWriteProvenance([{ ...writes[0], to: 50 - 60 }], after),
+    (error) => error instanceof AdapterStateError && /canonical-health write/.test(error.message)
+  );
+  // And for a status write that disagrees with the projection's status list.
+  assert.throws(
+    () => assertWriteProvenance(
+      [{ ...writes[0], field: "burning", source: WriteSource.CANONICAL_STATUS, to: true }],
+      after
+    ),
+    (error) => error instanceof AdapterStateError && /canonical-status write/.test(error.message)
+  );
+  // A write naming nobody is refused rather than skipped.
+  assert.throws(
+    () => assertWriteProvenance([{ ...writes[0], combatantId: "ghost" }], after),
+    (error) => error instanceof AdapterStateError && /has no resolved projection/.test(error.message)
+  );
+});
+
+test("a resource may not borrow a field canonical health or status already owns", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  for (const field of ["hitpoints", "hitpointsmax", "burning"]) {
+    const before = projections(battle).map((combatant) => ({
+      ...combatant,
+      resources: { [field]: { value: 0, min: null, max: null } }
+    }));
+    const after = before.map((combatant) =>
+      combatant.id === "blue-1"
+        ? { ...combatant, resources: { [field]: { value: 7, min: null, max: null } } }
+        : combatant
+    );
+    const result = vanillaWritesForResolvedAction({
+      before,
+      after,
+      effects: [{ kind: "resource", targetId: "blue-1", resource: field, to: 7 }],
+      placements: layout.byCombatantId
+    });
+    assert.deepEqual(result.writes, [], `a resource named ${field} must not produce a write`);
+    assert.match(result.unmapped[0].reason, /owned by canonical health, canonical status or the clip record/);
+  }
 });
 
 /* ------------------------------------------------------------------ */
@@ -760,7 +1069,10 @@ test("the hero side is a choice, and both teams can occupy it", () => {
   assert.equal(flipped.sides[HERO_SIDE], "blue");
   assert.equal(flipped.placementFor("blue-1").instanceName, "hero");
   assert.equal(flipped.placementFor("red-1").instanceName, "villain");
-  assert.throws(() => buildArenaLayout(wire, { heroTeamId: "green" }), SlotLayoutError);
+  assert.throws(
+    () => buildArenaLayout(wire, { heroTeamId: "green" }),
+    (error) => error instanceof SlotLayoutError && /No team with id green is in this battle/.test(error.message)
+  );
 });
 
 test("a 3v3 binds exactly one attacker/defender pair per action, from resolved state", () => {
@@ -772,10 +1084,61 @@ test("a 3v3 binds exactly one attacker/defender pair per action, from resolved s
     game_attacker: "_root.arena.team_arena.state.hero_3",
     game_defender: "_root.arena.team_arena.state.villain_2",
     attackerCombatantId: "red-3",
-    defenderCombatantId: "blue-2"
+    defenderCombatantId: "blue-2",
+    selfTargeted: false,
+    unmapped: null
   });
   // Four globals, whatever the team size: the surface is a binding, not a roster.
-  assert.equal(Object.keys(plan).filter((key) => !key.endsWith("CombatantId")).length, 4);
+  const globals = ["attacker", "defender", "game_attacker", "game_defender"];
+  assert.deepEqual(Object.keys(plan).filter((key) => globals.includes(key)).sort(), [...globals].sort());
+  assert.equal(new Set(globals.map((key) => plan[key])).size, 4, "four distinct bindings, never one unit twice");
+});
+
+test("a self-targeted action binds no defender, because one unit is not a pair", () => {
+  const layout = buildArenaLayout(toTeamWireState(makeBattle(3, 3)));
+  const plan = bindingPlanFor(layout, { actorId: "red-1", targetId: "red-1" });
+
+  // The whole two-sided argument rests on the four globals being four distinct
+  // things: `damagecharacter(defender, attacker, game_defender, game_attacker)`
+  // reads and writes both sides. Binding one fighter to both would alias them.
+  assert.equal(plan.attacker, "_root.arena.gladiators.hero");
+  assert.equal(plan.game_attacker, "_root.arena.team_arena.state.hero_1");
+  assert.equal(plan.defender, null);
+  assert.equal(plan.game_defender, null);
+  assert.equal(plan.defenderCombatantId, null);
+  assert.equal(plan.selfTargeted, true);
+  assert.match(plan.unmapped, /distinct parameters/);
+  assert.notEqual(plan.attacker, plan.defender);
+  assert.notEqual(plan.game_attacker, plan.game_defender);
+
+  // And the same through presentation, for the vocabulary's legal self-target.
+  const battle = makeBattle(1, 1);
+  applyAction(battle, { actorId: "red-1", type: "rest", targetId: "red-1" });
+  const wire = toTeamWireState(battle);
+  const { commands } = presentResolvedEvents(wire, { layout: buildArenaLayout(wire) });
+  const bind = commands.find((command) => command.kind === CommandKind.BIND_GLOBALS);
+  assert.equal(bind.globals.selfTargeted, true);
+  assert.equal(bind.globals.defender, null);
+  assert.equal(bind.globals.game_defender, null);
+  // One clip, so the actor's animation plays and nothing else is aimed at it.
+  assert.deepEqual(
+    commands.filter((command) => command.kind === CommandKind.CLIP_GOTO).map((command) => [command.role, command.combatantId]),
+    [["actor", "red-1"]]
+  );
+
+  // A binding table that *does* name a target label for a self-targeted action
+  // has nowhere to play it, and that is reported rather than dropped.
+  const selfHarm = {
+    id: "test-self-harm-bindings",
+    verification: "placeholder",
+    action: () => ({ actor: { label: "attack5", provenance: LabelProvenance.PLACEHOLDER }, target: { label: "hurt5", provenance: LabelProvenance.PLACEHOLDER } }),
+    defeated: () => ({ label: "death", provenance: LabelProvenance.PLACEHOLDER })
+  };
+  const reported = presentResolvedEvents(wire, { layout: buildArenaLayout(wire), bindings: selfHarm });
+  const unmapped = reported.commands.find((command) => command.kind === CommandKind.UNMAPPED);
+  assert.ok(unmapped, "the target label has to go somewhere, and saying so beats dropping it");
+  assert.match(unmapped.reason, /one clip for both roles/);
+  assert.equal(unmapped.detail.label, "hurt5");
 });
 
 test("result labels come from the resolved winner, and a draw is reported unmapped", () => {
@@ -826,9 +1189,14 @@ test("the clip registry holds live handles and refuses to be serialised", () => 
 
   assert.deepEqual(registry.combatantIds().sort(), ["blue-1", "blue-2", "red-1", "red-2"]);
   assert.equal(registry.clipFor("red-2").clip, "hero_ally_2");
-  assert.throws(() => registry.clipFor("nobody"), ClipRegistryError);
-  assert.throws(() => JSON.stringify(registry), ClipRegistryError);
-  assert.throws(() => JSON.stringify({ battle: "x", clips: registry }), ClipRegistryError);
+  assert.throws(
+    () => registry.clipFor("nobody"),
+    (error) => error instanceof ClipRegistryError && /No clip is registered for combatant nobody/.test(error.message)
+  );
+  const refusesSerialisation = (error) =>
+    error instanceof ClipRegistryError && /must never enter a state projection/.test(error.message);
+  assert.throws(() => JSON.stringify(registry), refusesSerialisation);
+  assert.throws(() => JSON.stringify({ battle: "x", clips: registry }), refusesSerialisation);
   assert.deepEqual(registry.describe().map((entry) => entry.instanceName).sort(), [
     "hero",
     "hero_ally_2",
@@ -874,8 +1242,43 @@ test("presentation never mutates combat state", () => {
 test("presentation refuses a live battle and demands the projection", () => {
   const battle = makeBattle(1, 1);
   const layout = buildArenaLayout(toTeamWireState(battle));
-  assert.throws(() => presentResolvedEvents(battle, { layout }), PresentationError);
-  assert.throws(() => presentResolvedEvents({ teams: [] }, {}), PresentationError);
+
+  // A live battle, refused for being a live battle — and the message has to
+  // say so. The second assertion here used to pass `{}` for the options, so it
+  // threw on the missing layout and said nothing at all about live battles.
+  assert.throws(
+    () => presentResolvedEvents(battle, { layout }),
+    (error) => error instanceof PresentationError && /was handed a live battle/.test(error.message)
+  );
+  // Each of the three ways a live battle is recognised, one at a time, all
+  // with a perfectly good layout in hand.
+  const wire = toTeamWireState(battle);
+  assert.throws(
+    () => presentResolvedEvents({ ...wire, settlement: battle.settlement }, { layout }),
+    (error) => error instanceof PresentationError && /it carries settlement/.test(error.message)
+  );
+  assert.throws(
+    () => presentResolvedEvents({ ...wire, controllers: battle.controllers }, { layout }),
+    (error) => error instanceof PresentationError && /it carries controllers/.test(error.message)
+  );
+  assert.throws(
+    () => presentResolvedEvents({ ...wire, rules: battle.rules }, { layout }),
+    (error) => error instanceof PresentationError && /carrying a rule set/.test(error.message)
+  );
+  // And something that is not a projection at all.
+  assert.throws(
+    () => presentResolvedEvents(null, { layout }),
+    (error) => error instanceof PresentationError && /needs a combat projection/.test(error.message)
+  );
+  assert.throws(
+    () => presentResolvedEvents({ notTeams: [] }, { layout }),
+    (error) => error instanceof PresentationError && /needs a combat projection/.test(error.message)
+  );
+  // The missing-layout refusal is its own thing, and says its own thing.
+  assert.throws(
+    () => presentResolvedEvents(wire, {}),
+    (error) => error instanceof PresentationError && /needs an arena layout/.test(error.message)
+  );
 });
 
 test("an individual knockout plays a death animation and nothing else", () => {
@@ -1057,7 +1460,10 @@ test("a mismatched completion token is refused, never settled", () => {
     () => bridge.verifyAcknowledgement({ type: BATTLE_RESULT_ACK_TYPE, completionToken: "nonsense" }),
     AcknowledgementError
   );
-  assert.throws(() => bridge.verifyAcknowledgement({ type: "something-else", completionToken: "x" }), AcknowledgementError);
+  assert.throws(
+    () => bridge.verifyAcknowledgement({ type: "something-else", completionToken: "x" }),
+    (error) => error instanceof AcknowledgementError && /acknowledgement with a non-empty completionToken is required/.test(error.message)
+  );
   assert.deepEqual(settlements, []);
   assert.equal(bridge.isSettled, false);
 
@@ -1087,15 +1493,58 @@ test("the bridge cannot settle a battle the resolver has not decided", () => {
   assert.equal(bridge.sync(), "idle");
   assert.equal(bridge.pendingToken, null);
   assert.equal(bridge.acknowledgement(), null);
-  assert.throws(() => bridge.reportDeathAnimation("blue-1"), AcknowledgementError);
-  assert.throws(() => bridge.reportArenaLabel("combat_won"), AcknowledgementError);
+  assert.throws(
+    () => bridge.reportDeathAnimation("blue-1"),
+    (error) => error instanceof AcknowledgementError && /Cannot report a death animation: no battle result is armed/.test(error.message)
+  );
+  assert.throws(
+    () => bridge.reportArenaLabel("combat_won"),
+    (error) => error instanceof AcknowledgementError && /Cannot report an arena result label: no battle result is armed/.test(error.message)
+  );
 });
 
 test("a death on the winning side is accepted but never gates settlement", () => {
   const settlements = [];
-  const battle = makeBattle(2, 2, { onCampaignSettled: (record) => settlements.push(record) });
-  // Blue knocks a red fighter down first, then red eliminates blue.
-  applyAction(battle, { actorId: "red-1", type: "melee", targetId: "blue-1" });
+  // Blue-1 is the fastest fighter in this battle, so blue really does act
+  // first and really does knock a red fighter down. The previous version of
+  // this test had red attacking on both actions, so no red combatant was ever
+  // knocked down — it passed only because the bridge accepted a death report
+  // for a fighter who was still standing, which is the very thing it now
+  // refuses. It was pinning that bug, not this guarantee.
+  const red = {
+    id: "red",
+    name: "Red",
+    slots: 2,
+    combatants: [brute("red-1", 10), brute("red-2", 8)]
+  };
+  const blue = {
+    id: "blue",
+    name: "Blue",
+    slots: 2,
+    combatants: [
+      brute("blue-1", 30),
+      // Slow and harmless: it gets its turn between red's two, and its hit
+      // must not decide the battle.
+      {
+        ...brute("blue-2", 5),
+        stats: { strength: 0, agility: 5, attack: 40, defense: 0, vitality: 0, stamina: 5, magicka: 0 },
+        loadout: { meleeDamage: 1, rangedDamage: 1, canUseRanged: false, canUseSpell: false, canHeal: false }
+      }
+    ]
+  };
+  const battle = createTeamBattle({
+    teams: [red, blue],
+    rngTape: hitTape(24),
+    onCampaignSettled: (record) => settlements.push(record)
+  });
+
+  assert.equal(currentCombatant(battle).id, "blue-1");
+  applyAction(battle, { actorId: "blue-1", type: "melee", targetId: "red-1" });
+  assert.equal(battle.teams[0].combatants[0].alive, false, "blue really knocked a red fighter down");
+  assert.equal(battle.result, null);
+  applyAction(battle, { actorId: "red-2", type: "melee", targetId: "blue-1" });
+  applyAction(battle, { actorId: "blue-2", type: "melee", targetId: "red-2" });
+  assert.equal(battle.teams[0].combatants[1].alive, true, "blue-2's blow does not decide anything");
   applyAction(battle, { actorId: "red-2", type: "melee", targetId: "blue-2" });
   assert.equal(battle.result.winnerTeamId, "red");
 
@@ -1105,7 +1554,19 @@ test("a death on the winning side is accepted but never gates settlement", () =>
   const winnerSide = bridge.reportDeathAnimation("red-1");
   assert.deepEqual({ accepted: winnerSide.accepted, counted: winnerSide.counted }, { accepted: true, counted: false });
   assert.deepEqual(bridge.awaitingDeathAnimations.sort(), ["blue-1", "blue-2"]);
-  assert.throws(() => bridge.reportDeathAnimation("nobody"), AcknowledgementError);
+  assert.throws(
+    () => bridge.reportDeathAnimation("nobody"),
+    (error) => error instanceof AcknowledgementError && /is not in this battle/.test(error.message)
+  );
+
+  // The winning side's *living* fighter is a different matter: that is not an
+  // animation that played earlier, it is presentation disagreeing with
+  // resolved state, and it is refused like any other desync.
+  assert.equal(battle.teams[0].combatants[1].alive, true);
+  assert.throws(
+    () => bridge.reportDeathAnimation("red-2"),
+    (error) => error instanceof AcknowledgementError && /still standing in resolved state/.test(error.message)
+  );
 
   bridge.reportDeathAnimation("blue-1");
   bridge.reportDeathAnimation("blue-2");

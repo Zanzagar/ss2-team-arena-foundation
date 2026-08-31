@@ -281,17 +281,39 @@ export function assertDistinctPlacements(placements) {
  *
  * This is the whole two-sided reconciliation in one function: whatever the
  * team size, one ordered pair is bound, and it is derived from resolved state.
+ *
+ * **A self-targeted action binds no defender.** The entire binding argument
+ * rests on vanilla's mapped functions taking these four as *distinct*
+ * parameters — `damagecharacter(defender, attacker, game_defender,
+ * game_attacker, ...)`, `attack_chances(game_attacker, game_defender)`. An
+ * action a fighter aims at itself (the placeholder vocabulary's `rest` is one,
+ * and it is legal) used to come out with `attacker` and `defender` both bound
+ * to the same clip and `game_attacker`/`game_defender` both bound to the same
+ * state object, which is not a pair — it is one unit passed twice, and a
+ * mapped function reading and writing both parameters would be aliasing.
+ * There is no defender in a self-targeted action, so none is named:
+ * `selfTargeted` says why, and a host must leave the previous binding alone
+ * rather than point it at the actor.
  */
 export function bindingPlanFor(layout, { actorId, targetId }) {
   const attacker = layout.placementFor(actorId);
-  const defender = targetId === undefined || targetId === null ? null : layout.placementFor(targetId);
+  const selfTargeted = targetId !== undefined && targetId !== null && targetId === actorId;
+  const defender = targetId === undefined || targetId === null || selfTargeted
+    ? null
+    : layout.placementFor(targetId);
   return Object.freeze({
     attacker: attacker.instancePath,
     defender: defender ? defender.instancePath : null,
     game_attacker: attacker.stateObjectPath,
     game_defender: defender ? defender.stateObjectPath : null,
     attackerCombatantId: actorId,
-    defenderCombatantId: defender ? targetId : null
+    defenderCombatantId: defender ? targetId : null,
+    /** True when the action's target is the actor: one unit, so no pair. */
+    selfTargeted,
+    unmapped: selfTargeted
+      ? "a self-targeted action has no vanilla defender: the mapped combat functions take attacker and " +
+        "defender as distinct parameters, so binding one unit to both would alias them"
+      : null
   });
 }
 

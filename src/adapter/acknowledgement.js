@@ -16,7 +16,10 @@
  *    no concept of this: `death()` jumps straight to `combatwon`/`combatlost`
  *    on the first knockout. The bridge waits for every eliminated fighter on
  *    the losing side to report, so the campaign is never paid over the top of
- *    an animation still playing.
+ *    an animation still playing. A death reported for a fighter the resolver
+ *    has *not* knocked down is refused: the reason a winning-side death is
+ *    accepted is that it played earlier, which is a claim about someone the
+ *    resolver knocked down. Membership used to be the only thing checked.
  * 2. **The animation surface must agree with resolved state.** The arena
  *    timeline label the presentation reached is checked against the label the
  *    resolved winner implies. A surface that reports `combat_won` for a battle
@@ -192,8 +195,8 @@ class ResultAcknowledgementBridge {
     }
   }
 
-  #knows(combatantId) {
-    return allCombatants(this.#battle).some((combatant) => combatant.id === combatantId);
+  #combatant(combatantId) {
+    return allCombatants(this.#battle).find((combatant) => combatant.id === combatantId) ?? null;
   }
 
   /**
@@ -203,11 +206,26 @@ class ResultAcknowledgementBridge {
    * Deaths on the winning side are accepted and ignored — they played earlier
    * in the battle and settlement does not wait on them. In a draw there is no
    * winning side, every fighter is awaited, and the last report settles.
+   *
+   * A death report for a fighter who is **still standing** is refused. The
+   * rationale for accepting winning-side deaths is that they *played earlier*,
+   * which is a claim about a fighter the resolver knocked down; a report for a
+   * living one is not an early animation, it is presentation disagreeing with
+   * resolved state — the same desync `reportArenaLabel` refuses. Membership
+   * used to be the only thing checked, so any live combatant's id was accepted
+   * as a death.
    */
   reportDeathAnimation(combatantId) {
     this.#requireArmed("report a death animation");
-    if (!this.#knows(combatantId)) {
+    const combatant = this.#combatant(combatantId);
+    if (!combatant) {
       throw new AcknowledgementError(`Combatant ${String(combatantId)} is not in this battle.`);
+    }
+    if (combatant.alive === true) {
+      throw new AcknowledgementError(
+        `The animation surface reported a death animation for ${String(combatantId)}, who is still standing ` +
+        "in resolved state. Presentation and resolved state disagree; refusing to count it."
+      );
     }
     if (!this.#awaiting.has(combatantId)) {
       return this.#outcome({ accepted: true, counted: false, settled: false });

@@ -24,6 +24,45 @@
  * exactly what a multi-slot battle must not do (battle map, "Battle result and
  * reward callbacks": "It must not run vanilla win settlement after the first
  * individual knockout").
+ *
+ * ---
+ *
+ * **DESIGN GAP, stated and deliberately not filled: per-action animation
+ * acknowledgement.**
+ *
+ * Every command carries the resolver `sequence` it came from, which orders
+ * them relative to each other. Nothing orders them relative to *time*. There
+ * is no acknowledgement anywhere between an action's commands and the next
+ * action's: `BIND_GLOBALS` and `CLIP_GOTO` carry a sequence and no completion
+ * token, the binder's cursor advances on drain rather than on anything the
+ * surface reports, and the only acknowledgement in the whole adapter is the
+ * terminal one in `acknowledgement.js`, which fires once per battle.
+ *
+ * So a host that submits action N+1 while action N's timeline is still running
+ * will rebind `_global.attacker` / `_global.defender` / `game_attacker` /
+ * `game_defender` underneath it, and vanilla's mapped functions read those
+ * globals rather than parameters captured at dispatch. That is a real hazard
+ * and it is not mitigated here.
+ *
+ * What a seam that closed it would have to offer, so nobody has to guess:
+ *
+ * 1. a per-action token on the commands of one resolved action — the resolver
+ *    sequence is already unique per action and would do, but it has to be
+ *    carried on `BIND_GLOBALS` and `CLIP_GOTO` and echoed back, not merely
+ *    stamped;
+ * 2. a reporting call the surface makes when that action's timeline reaches
+ *    its terminal frame, naming the token, shaped like
+ *    `reportDeathAnimation` — accepted once, duplicates answered rather than
+ *    thrown, an unknown token refused;
+ * 3. a gate the host consults before submitting the next action, so "the
+ *    resolver is ready" and "the surface is ready" are two separate questions
+ *    with two separate answers;
+ * 4. an answer for what happens when the surface never reports — a timeout is
+ *    a policy decision and belongs to the host, not to this module.
+ *
+ * None of that is implemented. Inventing a mechanism here without a capture of
+ * the vanilla timeline's own completion signal would put a guess at the centre
+ * of the action loop, which is worse than a documented gap.
  */
 
 import { EliminationEvent } from "../team/elimination.js";
@@ -347,7 +386,11 @@ export function presentResolvedEvents(wire, {
           detail: Object.freeze({
             eventType: event.type,
             winnerTeamId: event.winnerTeamId ?? null,
-            acknowledgedBy: labels.acknowledgedBy ?? null
+            acknowledgedBy: labels.acknowledgedBy ?? null,
+            // Carried even though there is no transition to play: the surface
+            // still has to hand a token back, and a draw's acknowledgement has
+            // no `arena-goto` command to read one off.
+            completionToken: event.completionToken
           })
         }));
         continue;
@@ -380,7 +423,8 @@ export function presentResolvedEvents(wire, {
       continue;
     }
     const actorPlacement = layout.placementFor(event.actorId);
-    const targetPlacement = event.targetId ? layout.placementFor(event.targetId) : null;
+    const selfTargeted = event.targetId != null && event.targetId === event.actorId;
+    const targetPlacement = event.targetId && !selfTargeted ? layout.placementFor(event.targetId) : null;
     commands.push(Object.freeze({
       kind: CommandKind.BIND_GLOBALS,
       sequence: event.sequence,
@@ -389,13 +433,47 @@ export function presentResolvedEvents(wire, {
     if (chosen.actor) commands.push(clipGoto(event.sequence, actorPlacement, chosen.actor, "actor"));
     if (chosen.target && targetPlacement) {
       commands.push(clipGoto(event.sequence, targetPlacement, chosen.target, "target"));
+    } else if (chosen.target && selfTargeted) {
+      // One clip cannot play the actor's animation and the target's at once,
+      // and picking one silently would hide the choice. Reported, as an
+      // unmapped label always is.
+      commands.push(Object.freeze({
+        kind: CommandKind.UNMAPPED,
+        sequence: event.sequence,
+        reason:
+          `a self-targeted ${event.type} has one clip for both roles, so the target label ` +
+          `${chosen.target.label} has nowhere to play`,
+        detail: Object.freeze({
+          eventType: event.type,
+          combatantId: event.actorId,
+          label: chosen.target.label,
+          labelProvenance: chosen.target.provenance
+        })
+      }));
     }
-    if (targetPlacement) {
-      commands.push(panelRefresh(event.sequence, targetPlacement, combatants.get(event.targetId)));
-    }
-    if (!targetPlacement || event.targetId === event.actorId) {
-      commands.push(panelRefresh(event.sequence, actorPlacement, combatants.get(event.actorId)));
-    }
+    // Totality, the same rule `vanillaWritesForResolvedAction` step 2 applies:
+    // every combatant whose panel could be stale is refreshed, not only the
+    // ones the event names. An event names one actor and at most one target,
+    // but an action can move anyone — a rule set that damages three foes emits
+    // one event, and an action that costs the actor health names the target
+    // only. Refreshing the named pair therefore left panels showing numbers
+    // the resolver had already replaced, while every one of those changes
+    // produced a vanilla *write*. Presentation was the half that was not total.
+    //
+    // The values come from the projection, so a refresh cannot carry a stale
+    // number; what it costs is one command per combatant per bound event,
+    // which is inert JSON a host may coalesce.
+    const refreshed = new Set();
+    const refresh = (placement) => {
+      if (!placement || refreshed.has(placement.combatantId)) return;
+      const combatant = combatants.get(placement.combatantId);
+      if (!combatant) return;
+      refreshed.add(placement.combatantId);
+      commands.push(panelRefresh(event.sequence, placement, combatant));
+    };
+    refresh(targetPlacement);
+    refresh(actorPlacement);
+    for (const placement of layout.placements) refresh(placement);
   }
 
   return Object.freeze({ commands: Object.freeze(commands), nextSequence });
