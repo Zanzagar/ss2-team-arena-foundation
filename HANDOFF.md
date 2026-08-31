@@ -6,7 +6,7 @@ session lives in [`docs/handoffs/`](docs/handoffs/README.md), stamped
 the latest handoff in `docs/handoffs/` and proceed" — with this file as the state
 it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session. Latest:
-[2026-08-31 12:38 — corpus audit and provenance repair](docs/handoffs/2026-08-31-1238--corpus-audit-provenance-repair.md).
+[2026-08-31 14:43 — nonce gate, stat arithmetic, toolchain](docs/handoffs/2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain.md).
 
 ## READ THIS FIRST — corrections from the 2026-08-31 audit pass
 
