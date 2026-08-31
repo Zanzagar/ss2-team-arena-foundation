@@ -671,6 +671,119 @@ test("a golden that cites its own candidate's source record is not re-promotable
 });
 
 // ---------------------------------------------------------------------------
+// The pairwise gate, measured on the promotion path rather than in isolation
+// ---------------------------------------------------------------------------
+
+/**
+ * Observations carrying a `capture.launchNonce`, grouped by the candidate they
+ * target. Derived, never listed: a new nonce-bearing capture joins a group on
+ * its own, and the two tests below widen with it.
+ */
+const nonceBearingGroups = new Map();
+for (const record of observationEntries.map((entry) => entry.value)) {
+  if (record.capture.launchNonce === undefined) continue;
+  const group = nonceBearingGroups.get(record.target.fixtureId) ?? [];
+  group.push(record);
+  nonceBearingGroups.set(record.target.fixtureId, group);
+}
+
+/** One record with a different `samples[0].callSite`, resealed so it validates. */
+function forgeCallSite(record) {
+  const forged = cloneJson(record);
+  forged.samples[0].callSite = "root:probe";
+  return reseal(forged);
+}
+
+test("the pairwise gate can refuse a promotion, and does it on callSite", () => {
+  // WHY THIS EXISTS AS AN END-TO-END TEST. `ss2-observation.test.js` already
+  // pins that `ss2ObservationsMatch` sees a callSite disagreement the matcher
+  // is blind to. That is a statement about a FUNCTION. Nothing pinned that the
+  // function is REACHABLE from `promoteSs2CandidateToGolden` — and reachability
+  // is the whole claim, because the gate sits behind the nonce check, the
+  // session-count check and the divergence check, any of which can refuse
+  // first and make the pairwise loop unreachable without a single test going
+  // red. Delete the pairwise loop and this test fails; the unit tests do not.
+  const usable = [...nonceBearingGroups].filter(([, records]) => records.length >= 2);
+  assert.ok(
+    usable.length > 0,
+    "no candidate has two nonce-bearing observations, so this test would be vacuous"
+  );
+
+  for (const [candidateId, records] of usable) {
+    const candidate = candidateById.get(candidateId);
+    assert.ok(candidate, `${candidateId} is missing`);
+    const [left, right] = records.slice(0, 2);
+
+    // CONTROL. The honest pair must promote, or a refusal below would prove
+    // nothing about the forgery — it would only prove the evidence was bad.
+    const honest = [cloneJson(left), cloneJson(right)];
+    const { manifest } = buildSs2CaptureManifest(honest, { createdAt: "2026-08-31T12:00:00Z" });
+    assert.ok(
+      promoteSs2CandidateToGolden(candidate, honest, manifest).golden,
+      `${candidateId} does not promote from its honest nonce-bearing pair`
+    );
+
+    // EXPERIMENT. One record's callSite moved, and nothing else. The matcher is
+    // blind to it — `comparableSamples` drops the field — so the only thing
+    // that can refuse this is the pairwise comparison.
+    const forged = [cloneJson(left), forgeCallSite(right)];
+    assert.ok(
+      matchSs2ObservationToFixture(candidate, forged[1]).match,
+      `${candidateId}: the forged record must still match, or the matcher is refusing it instead`
+    );
+    const forgedManifest = buildSs2CaptureManifest(forged, { createdAt: "2026-08-31T12:00:00Z" }).manifest;
+    assert.throws(
+      () => promoteSs2CandidateToGolden(candidate, forged, forgedManifest),
+      /disagree with EACH OTHER at: \/samples\/0\/callSite/,
+      `${candidateId}: the pairwise gate did not refuse a callSite forgery`
+    );
+  }
+});
+
+test("no promotion the committed goldens rest on ever reaches the pairwise gate", () => {
+  // THE CORRECTION THIS FILE EXISTS TO CARRY, and it is the opposite of the
+  // one above. The gate has teeth, and on the evidence this repository holds
+  // those teeth never get a turn: ZERO of the observation ids the goldens cite
+  // carries a launchNonce, all of them are waived only by having their exact
+  // digest listed in `pre-nonce-observations.js`, and every forgery re-digests
+  // — so each one drops out of the waiver and the NONCE gate refuses it about
+  // forty lines before the pairwise loop runs.
+  //
+  // This is asserted because the two facts are easy to conflate, and the
+  // conflation is dangerous in the permissive direction: "the pairwise gate
+  // has teeth" invites landing a field exclusion on the strength of a gate
+  // that, on committed evidence, is refusing nothing.
+  //
+  // It is a live tripwire rather than a monument. Re-promote any golden from
+  // nonce-bearing evidence and its refusal moves to the pairwise gate, this
+  // test goes red, and it should be narrowed to the goldens that still cite
+  // nonce-free records rather than deleted.
+  let reachedPairwise = 0;
+  let refusedByNonce = 0;
+  let probed = 0;
+
+  for (const { golden, candidate } of goldenPartition.eligible) {
+    const records = recordsFor(golden.provenance.observationIds);
+    assert.ok(records.length >= 2, `${golden.fixtureId} cites fewer than two records`);
+    const forged = [cloneJson(records[0]), forgeCallSite(records[1])];
+    const { manifest } = buildSs2CaptureManifest(forged, { createdAt: "2026-08-31T12:00:00Z" });
+    probed += 1;
+    try {
+      promoteSs2CandidateToGolden(candidate, forged, manifest);
+      assert.fail(`${golden.fixtureId} promoted from a forged record`);
+    } catch (error) {
+      if (/disagree with EACH OTHER/.test(error.message)) reachedPairwise += 1;
+      else if (/carries no capture\.launchNonce/.test(error.message)) refusedByNonce += 1;
+      else throw error;
+    }
+  }
+
+  assert.ok(probed > 0, "no eligible golden to probe: this test would be vacuous");
+  assert.equal(refusedByNonce, probed, "an eligible golden was not refused by the nonce gate");
+  assert.equal(reachedPairwise, 0, "a forgery reached the pairwise gate — narrow this test, do not delete it");
+});
+
+// ---------------------------------------------------------------------------
 // campaign.mjs — the promotable rule, driven with controlled evidence
 // ---------------------------------------------------------------------------
 

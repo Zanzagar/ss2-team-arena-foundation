@@ -465,18 +465,53 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   }
 
   // THE OBSERVATIONS MUST AGREE WITH EACH OTHER, NOT ONLY EACH WITH THE FIXTURE.
-  // DORMANT TODAY, AND THAT IS THE POINT — it is a PRECONDITION, not a fix.
   //
-  // NOTE 2026-08-31: the leaf COUNT below does not reproduce. Measured over all
-  // 67 committed records, full-record leaves range 101-184 and this matcher
-  // projection's range 86-157; NO record has 162 under either. The dormancy
-  // claim itself was not re-measured, so treat the count as unverified and the
-  // conclusion as unconfirmed rather than as a number to quote.
+  // SETTLED 2026-08-31 BY MEASUREMENT. Run `node tools/pairwise-gate-dormancy.mjs`
+  // rather than quoting any number from this comment; it is a committed tool
+  // precisely because this block has been re-argued from memory three times.
   //
-  // Measured before landing: probing all 162 leaves of a committed observation,
-  // perturbing each one and re-digesting, ZERO can differ between two records
-  // while both still match their candidate. So this loop cannot currently
-  // refuse anything, and it must not be described as closing a hole on its own.
+  // THIS LOOP HAS TEETH. 751 of 11,121 single-leaf perturbations across the 67
+  // committed records are FREE — valid, re-digested, and still matching their
+  // candidate — and 407 of them, every one at `/samples/*/callSite`, are
+  // refused by this loop and by nothing else. The FREE count is exact rather
+  // than a sample: a leaf the matcher compares cannot be free, because every
+  // record matches its fixture at baseline, so FREE is exactly the set of
+  // matcher-blind leaves that admit any valid alternative value.
+  //
+  // TWO CLAIMS THAT STOOD HERE ARE WITHDRAWN, and they failed in opposite
+  // directions:
+  //
+  //   "ZERO can differ ... so this loop cannot currently refuse anything" —
+  //   FALSE, and false on what is almost certainly its own record. obs-qk1
+  //   carries 163 full-record leaves, 162 probeable (the 163rd is `digest`,
+  //   which any probe must rewrite), and TEN of those 162 are free.
+  //
+  //   "the leaf COUNT does not reproduce ... NO record has 162 under either" —
+  //   also FALSE. 162 reproduces exactly; it is full-record leaves MINUS the
+  //   digest, for obs-qk1 and ten siblings, and 142 is that same record's
+  //   matcher projection. That retraction measured two surfaces the original
+  //   claim never used. The count was right and only the conclusion was wrong.
+  //
+  // BUT DO NOT READ "HAS TEETH" AS "THIS GATE IS PROTECTING THE CORPUS." It is
+  // not, and the reason is upstream of here. ZERO of the observation ids the
+  // 22 goldens cite carries a `capture.launchNonce`; each is waived only by
+  // having its exact digest listed in `pre-nonce-observations.js`; and every
+  // forgery re-digests, so each one drops out of the waiver and is refused by
+  // the nonce check above — which `defer`s and throws roughly forty lines
+  // BEFORE this loop is reached. Excising this loop entirely changes zero
+  // verdicts on committed evidence. It fires only for nonce-bearing records,
+  // of which the goldens cite none, and `test/capture-campaign.test.js` pins
+  // both halves: that the loop refuses a callSite forgery on nonce-bearing
+  // evidence, and that no promotion the goldens rest on ever reaches it.
+  //
+  // AND THE TEETH ARE NARROWER THAN THE COUNT SUGGESTS. All 407 committed
+  // samples carry ONE callSite literal, because the wrapper has one roll
+  // emitter stamping one compile-time constant — the same fact that makes a
+  // fixture-derived callSite comparison a thing this project has refused to
+  // add. So these teeth cannot bite two honest captures. And this loop catches
+  // DISAGREEMENT, never falsehood: two records carrying the SAME fabricated
+  // callSite agree, match, and promote. Nothing here closes the open hook
+  // attribution hole, and nothing here should be described as closing it.
   //
   // It exists because the hole opens the moment any field stops being compared
   // against the fixture. An auditor demonstrated exactly that: with the
@@ -493,9 +528,21 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   // another. This compares the FULL projection rather than the fixture's key
   // set, which is why it survives a matcher-side exclusion.
   //
-  // Measured free: all 29 cited observation pairs across the 22 promoted
-  // goldens already agree under it, so no existing golden rests on the weaker
-  // rule. LAND ANY FIELD EXCLUSION ONLY AFTER THIS, never before.
+  // Measured free, and RE-MEASURED 2026-08-31: all 29 cited observation pairs
+  // across the 22 promoted goldens agree under it, so no existing golden rests
+  // on the weaker rule and this loop refuses nothing that already stands.
+  //
+  // LAND ANY FIELD EXCLUSION ONLY AFTER THIS, never before. THE DIRECTIVE
+  // STANDS AND ITS OLD REASON DOES NOT, so read the new one: it used to say
+  // this loop was a dormant precondition that would start protecting the
+  // corpus once an exclusion landed. It will not. On the evidence the goldens
+  // cite, this loop is unreachable behind the nonce check, so an exclusion
+  // landed today is backstopped by NOTHING here. "The pairwise gate covers it"
+  // is not an argument available to whoever lands the `staminaleft` exclusion
+  // — it would have been under the old, wrong reading. The exclusion still
+  // needs its own adversarial pass against the named claim "a record carrying
+  // an arbitrary `staminaleft` cannot be promoted", and this loop only starts
+  // helping once the evidence being promoted carries launch nonces.
   //
   for (let left = 0; left < observations.length; left += 1) {
     for (let right = left + 1; right < observations.length; right += 1) {
