@@ -1,9 +1,21 @@
-# Transfer handoff — SS2 Team Arena Foundation
+# Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
 ## State at the end of the 2026-08-30 session
 
 22 promoted goldens. 584 tests, all passing. 36 commits this session, across a
 day of parallel work and one overnight run of twelve agents.
+
+### Expected test profiles after PR #1
+
+- A capture-bearing operator worktree with the complete ignored raw-trace
+  archive runs all **584 tests: 584 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **584 tests:
+  583 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  existence check; the committed observation and divergence integrity checks
+  still run.
+- A partial raw-trace archive does **not** skip: it fails and names every
+  missing expected trace. This keeps the clean-clone accommodation from
+  weakening evidence retention on an operator machine.
 
 Read this section, then [`docs/overnight-agent-plan.md`](docs/overnight-agent-plan.md)
 for how the parallel work is organised.

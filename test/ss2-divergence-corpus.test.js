@@ -117,8 +117,9 @@ async function exists(filePath) {
   try {
     await stat(filePath);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
   }
 }
 
@@ -333,18 +334,22 @@ test("every probe candidate is represented, and the arms with no divergence are 
 
 test("each probe report's raw trace is still archived", async (t) => {
   // The strongest existence check available, and it only runs where the
-  // evidence is: `captures/` is gitignored, so a fresh clone has nothing to
-  // check and this test says so rather than passing vacuously.
-  if (!(await exists(CAPTURES_DIR))) {
-    t.skip("captures/ is absent (gitignored); raw-trace existence cannot be checked from this clone");
-    return;
-  }
+  // evidence is. Raw trace entries under `captures/` are gitignored, but the
+  // directory itself contains a committed README, so directory existence does
+  // not distinguish an operator archive from a fresh clone.
   let found = 0;
   const missing = [];
   for (const { report } of probeReports) {
     const tracePath = path.join(CAPTURES_DIR, report.sessionId, `${report.observationId}.jsonl`);
     if (await exists(tracePath)) found += 1;
     else missing.push(path.relative(REPO_ROOT, tracePath));
+  }
+  if (found === 0) {
+    t.skip(
+      "none of the expected ignored probe raw traces are present; " +
+      "raw-trace existence cannot be checked from this clone"
+    );
+    return;
   }
   assert.deepEqual(
     missing,
