@@ -36,6 +36,17 @@ import {
   STATUS_FLAG_FIELDS
 } from "./vanilla-fields.js";
 
+/**
+ * True for a canonical resource name the vanilla build actually has a field
+ * for. The adapter mirrors exactly those and reports the rest as unmapped —
+ * the same discipline `emitStatus` applies to a status with no vanilla flag.
+ * A rule set is free to invent a resource; the adapter will not invent a
+ * vanilla field to hold it.
+ */
+function mirrorsToVanillaField(name) {
+  return isKnownVanillaField(name) || isTimedSpellField(name);
+}
+
 export class AdapterStateError extends Error {
   constructor(message, options = {}) {
     super(message, options);
@@ -66,12 +77,70 @@ export const CANONICAL_STAT_SOURCES = Object.freeze({
 });
 
 /**
- * Vanilla base stats with no canonical slot today. `charisma` drives the whole
- * taunt path (map, "Chance calculation": the taunt chance and the direction-20
- * damage both read it), so a runtime-verified rule set needs it. Until
- * `src/team/roster.js` carries it, it survives only in the vanilla record.
+ * Vanilla base stats with no canonical `stats` slot. `charisma` drives the
+ * whole taunt path (map, "Chance calculation": the taunt chance and the
+ * direction-20 damage both read it), so a runtime-verified rule set needs it —
+ * and it now reaches one through the canonical **resource** bag below rather
+ * than only through the vanilla record. It is still not a canonical *stat*.
  */
 export const UNMAPPED_VANILLA_STATS = Object.freeze(["charisma"]);
+
+/**
+ * Vanilla fields carried into the canonical **resource** bag
+ * (`src/team/resources.js`), sorted, one name each.
+ *
+ * Why these and not everything: a resource is a per-combatant number a rule
+ * set must be able to *read and write* while the resolver refuses to interpret
+ * it. Before the bag existed, a rule set needing SS2's armour, stamina,
+ * ammunition, charisma, per-piece armour ratings or enchantment values had to
+ * close over the adapter's mirror — a side channel outside `combatStateHash`,
+ * which turns the desync check into a lie. Declaring them here is what makes
+ * the write legal at all: the resolver refuses a write to an undeclared
+ * resource *by design* (`resources.js`, constraint 2), so an undeclared pool
+ * is a pool no rule set can ever move.
+ *
+ * The names are the vanilla field names **verbatim**, exactly as the canonical
+ * status tokens are the vanilla flag names verbatim: an invented resource
+ * vocabulary is one more table that can be mapped wrongly.
+ *
+ * The three `*_max` / `maximum_*` fields are declared as resources of their
+ * own rather than folded into the pools' bounds, because `resources.js` says
+ * so in as many words: "a maximum that itself moves during a battle is
+ * modelled as its own resource, exactly as vanilla models `armourclass_max`,
+ * `staminamax` and `maximum_ammo` as fields alongside the pools they bound".
+ * `remove_armour` moves `armourclass_max` mid-battle, so a frozen bound would
+ * be wrong within one action of a destroyed piece.
+ *
+ * Every entry is a name `VANILLA_FIELD_GROUPS` already carries a citation for;
+ * a test asserts that, so this list cannot drift away from the catalogue.
+ */
+export const CANONICAL_RESOURCE_SOURCES = Object.freeze([
+  // Live resources: the pools and the three maxima that bound them.
+  "ammo_left",
+  "armourclass",
+  "armourclass_max",
+  "maximum_ammo",
+  "staminaleft",
+  "staminamax",
+  // Base stats: the one with no canonical stat slot.
+  "charisma",
+  // Armour: the per-piece ratings (the piece *ids* are equipment identity, not
+  // a numeric pool, and are deliberately left in the vanilla record).
+  "boot_defence",
+  "breastplate_defence",
+  "gauntlet_defence",
+  "greaves_defence",
+  "helmet_defence",
+  "shield_defence",
+  "shinguard_defence",
+  "shoulderguard_defence",
+  // Enchantments: every catalogued field whose name carries `enchantment`.
+  "secondary_weapon_enchantment_potency",
+  "secondary_weapon_enchantment_type",
+  "weapon_enchantment_damage",
+  "weapon_enchantment_potency",
+  "weapon_enchantment_type"
+]);
 
 /**
  * Canonical health maps to the vanilla hitpoint pair and to nothing else.
@@ -234,13 +303,58 @@ export function canonicalStatusesFrom(fields) {
   return DEATH_STATUS_CLEAR_ORDER.filter((flag) => fields[flag] === true);
 }
 
+/** The numeric reading of one resource-backed vanilla field. */
+function vanillaResourceValue(fields, name) {
+  const raw = fields?.[name];
+  if (raw === undefined) return 0;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * The canonical resource bag for one vanilla combat object.
+ *
+ * **No bound is declared, and that is a boundary decision rather than an
+ * oversight.** `min` and `max` are a rail the *blueprint* asserts, and the
+ * adapter has no evidence for one: saying `armourclass` has a floor of zero is
+ * saying what happens when damage exceeds armour, which is exactly the
+ * armour-first split the map records as a formula — rule-set work. So the
+ * adapter declares `{ min: null, max: null }`, which also guarantees the value
+ * round-trips untouched: `normaliseResourceBag` clamps on the way in, and a
+ * clamp here would be the adapter quietly rewriting a vanilla field.
+ *
+ * Absent fields are materialised to 0, the same normalisation the six
+ * undefined-until-set status flags get; `absentResourceSources` records which
+ * ones, so "never written" stays distinguishable from "explicitly zero".
+ */
+export function canonicalResourcesFrom(fields) {
+  const resources = {};
+  for (const name of CANONICAL_RESOURCE_SOURCES) {
+    resources[name] = { value: vanillaResourceValue(fields, name), min: null, max: null };
+  }
+  return resources;
+}
+
+/** Resource-backed fields the combat object carries no finite number for. */
+export function absentResourceSources(fields) {
+  return CANONICAL_RESOURCE_SOURCES.filter((name) => !Number.isFinite(Number(fields?.[name])));
+}
+
 /**
  * Builds the combatant *source* `src/team/roster.js` consumes.
  *
- * The returned `vanilla` record is the authoritative carrier for everything
- * the canonical shape has no room for (armour, stamina, ammunition, equipment,
- * charisma, the chance cache, the inventory). See `docs/ss2-adapter-contract.md`
- * for the list of canonical-shape gaps this exposes.
+ * Every converted combatant declares the **same** canonical resource names, on
+ * whichever side of the vanilla binding it lands. That is not tidiness: the
+ * hero/villain surface is a binding rebound per action, not a roster, so any
+ * combatant can be `game_attacker` on one action and `game_defender` on the
+ * next, and the resolver refuses a write to a resource that combatant did not
+ * declare. Declaring the set on one side only would mean a rule set's armour
+ * write succeeded or threw depending on whose turn it was.
+ *
+ * The returned `vanilla` record remains the authoritative carrier for
+ * everything neither the canonical shape nor the resource bag has room for
+ * (equipment ids, the chance cache, the inventory, the timed spell fields).
+ * See `docs/ss2-adapter-contract.md` for the canonical-shape gaps left.
  */
 export function toCanonicalCombatantSource(source, {
   id,
@@ -263,6 +377,9 @@ export function toCanonicalCombatantSource(source, {
     name: name ?? (typeof fields.character_name === "string" ? fields.character_name : id),
     stats,
     loadout: placeholderLoadoutFrom(fields),
+    // The one open, hashed, resolver-clamped numeric bag. Declared on every
+    // combatant so either side of the per-action binding can be written.
+    resources: canonicalResourcesFrom(fields),
     maxHealth: Number(fields.hitpointsmax ?? 0),
     health: Number(fields.hitpoints ?? 0),
     // `roster.normaliseCombatant` currently hard-codes `status: []` and drops
@@ -273,7 +390,12 @@ export function toCanonicalCombatantSource(source, {
   };
   if (teamId !== null) combatant.teamId = teamId;
   if (controller !== undefined) combatant.controller = controller;
-  return Object.freeze({ combatant: Object.freeze(combatant), vanilla: record });
+  return Object.freeze({
+    combatant: Object.freeze(combatant),
+    vanilla: record,
+    /** Resource-backed fields this combat object never carried; read as 0. */
+    defaultedResources: Object.freeze(absentResourceSources(fields))
+  });
 }
 
 /**
@@ -331,6 +453,15 @@ export function toVanillaCombatant(canonical, record) {
   fields[CANONICAL_HEALTH_SOURCES.maxHealth] = canonical.maxHealth;
   const active = new Set(canonical.status ?? []);
   for (const flag of STATUS_FLAG_FIELDS) fields[flag] = active.has(flag);
+  // Resources, unlike the status flags, are written only where they actually
+  // differ. Writing every declared resource unconditionally would *create* a
+  // field on a combat object that never carried one — inventing vanilla state
+  // rather than mirroring it — for every resource the object left absent.
+  for (const [name, entry] of Object.entries(canonical.resources ?? {})) {
+    if (!mirrorsToVanillaField(name)) continue;
+    if (vanillaResourceValue(fields, name) === entry.value) continue;
+    fields[name] = entry.value;
+  }
   return Object.freeze({
     fields,
     clip: Object.freeze({ ...record.clip }),
@@ -345,11 +476,16 @@ export function toVanillaCombatant(canonical, record) {
  * Every place a vanilla record disagrees with resolved canonical state, as
  * human-readable strings. Empty means the mirror is in step.
  *
- * Only the fields the adapter owns are compared — `hitpoints`, `hitpointsmax`
- * and the six status flags — because they are the only canonical values that
- * exist. Armour, stamina, ammunition and the rest have no canonical
- * counterpart to disagree with; see `docs/ss2-adapter-contract.md`,
- * "Canonical-shape gaps this exposes".
+ * The fields compared are the ones the adapter owns: `hitpoints`,
+ * `hitpointsmax`, the six status flags, and — since the canonical resource bag
+ * exists — every declared resource the vanilla build has a field for. Armour,
+ * stamina, ammunition and charisma used to have no canonical counterpart to
+ * disagree with, so a mirror that was wrong about 44 points of armour reported
+ * itself in perfect step. It no longer can.
+ *
+ * A resource the build has no field for is skipped rather than reported: a
+ * rule set may invent a resource, and the adapter will not invent a vanilla
+ * field to hold it (the same rule `emitStatus` applies to statuses).
  */
 export function mirrorDifferences(record, canonical) {
   assertVanillaRecord(record);
@@ -364,6 +500,15 @@ export function mirrorDifferences(record, canonical) {
   for (const flag of STATUS_FLAG_FIELDS) {
     const mirrored = record.fields[flag] === true;
     if (mirrored !== active.has(flag)) problems.push(`${flag} ${String(record.fields[flag])} != canonical ${active.has(flag)}`);
+  }
+  for (const [name, entry] of Object.entries(canonical.resources ?? {})) {
+    if (!mirrorsToVanillaField(name)) continue;
+    // An absent field reads as 0, exactly as an unwritten status flag reads as
+    // false: a resource nothing has written yet must not look like drift.
+    const mirrored = vanillaResourceValue(record.fields, name);
+    if (mirrored !== entry.value) {
+      problems.push(`${name} ${String(record.fields[name])} != resource ${String(entry.value)}`);
+    }
   }
   return problems;
 }
@@ -410,8 +555,8 @@ function fieldWrite({ combatantId, placement, field, from, to, reason, target = 
     from,
     to,
     // `from === undefined` means the field did not exist before this write:
-    // the six status flags are undefined until something sets them, so the
-    // first write to one *materialises* it.
+    // the six status flags are undefined until something sets them, and a
+    // resource-backed field can be absent too, so the first write *creates* it.
     materialises: from === undefined,
     reason
   });
@@ -421,10 +566,18 @@ function fieldWrite({ combatantId, placement, field, from, to, reason, target = 
  * Converts one resolved action's effects into ordered vanilla field writes.
  *
  * The write values come from `after` — the canonical state the resolver
- * produced, clamped by the resolver — not from `effect.amount`. The effect
- * list only supplies the *ordering* and the *reason*. This is the whole point:
- * the adapter can misattribute a reason, but it structurally cannot produce a
- * combat value the resolver did not already decide.
+ * produced, clamped by the resolver — not from `effect.amount` and not from a
+ * resource effect's `effect.to`. The effect list only supplies the *ordering*
+ * and the *reason*. This is the whole point: the adapter can misattribute a
+ * reason, but it structurally cannot produce a combat value the resolver did
+ * not already decide.
+ *
+ * Three kinds of field are written: `hitpoints` from canonical health, the six
+ * status flags from canonical status, and one vanilla field per canonical
+ * **resource** — which is how `armourclass`, `staminaleft`, `ammo_left` and
+ * the armour piece ratings are written. An armour-first split arrives as two
+ * ordered effects (`resource` then `damage`) and leaves as two ordered writes;
+ * the adapter never performs the subtraction that decided them.
  *
  * @param {object[]} params.before combatant projections before `applyAction`
  * @param {object[]} params.after  combatant projections after `applyAction`
@@ -469,6 +622,66 @@ export function vanillaWritesForResolvedAction({
     }));
   };
 
+  /**
+   * The resource branch. `armourclass`, `staminaleft`, `ammo_left` and the
+   * armour piece ratings reach vanilla through here and nowhere else.
+   *
+   * The value written is `after`'s resource value — the absolute value the
+   * rule set asked for, already clamped to the declared bounds by the
+   * resolver. It is never `before - effect.amount`, and it is never
+   * `effect.to`: reading the post-action projection is what makes it
+   * structurally impossible for the adapter to write a number the resolver did
+   * not produce, and a rule set's `to` that the resolver clamped must land on
+   * the clamped value, not the requested one.
+   */
+  const emitResource = (id, resource, reason) => {
+    const key = `${id}:resource:${resource}`;
+    if (emitted.has(key)) return;
+    const current = afterById.get(id);
+    if (!current) throw new AdapterStateError(`No resolved state for combatant ${String(id)}.`);
+    const entry = current.resources?.[resource];
+    if (entry === undefined) {
+      // The resolver refuses a write to an undeclared resource, so this should
+      // be unreachable through `applyAction`. It is reported rather than
+      // assumed away, because the same function serves hand-built projections.
+      emitted.add(key);
+      unmapped.push(Object.freeze({
+        combatantId: id,
+        resource,
+        reason: "the resolved projection declares no such resource"
+      }));
+      return;
+    }
+    const previous = beforeById.get(id)?.resources?.[resource];
+    // Checked before the vanilla-field test so the totality pass, which walks
+    // every declared resource on every combatant, stays silent about the ones
+    // nothing moved.
+    if (previous !== undefined && previous.value === entry.value) return;
+    if (!mirrorsToVanillaField(resource)) {
+      // The adapter will not invent a vanilla field for a resource the build
+      // does not have, exactly as it will not for an unmapped status.
+      emitted.add(key);
+      unmapped.push(Object.freeze({
+        combatantId: id,
+        resource,
+        reason: "no vanilla field carries this resource"
+      }));
+      return;
+    }
+    emitted.add(key);
+    const mirror = mirrorFor(id);
+    writes.push(fieldWrite({
+      combatantId: id,
+      placement: placementFor(id),
+      field: resource,
+      // A resource-backed field can be absent on the live combat object just
+      // as a status flag can, so the first write to one *materialises* it.
+      from: mirror ? mirror.fields[resource] : previous?.value,
+      to: entry.value,
+      reason
+    }));
+  };
+
   const emitStatus = (id, status, active, reason) => {
     const key = `${id}:${status}`;
     if (emitted.has(key)) return;
@@ -503,6 +716,11 @@ export function vanillaWritesForResolvedAction({
   for (const effect of effects) {
     if (effect.kind === EffectKind.DAMAGE || effect.kind === EffectKind.HEAL) {
       emitHealth(effect.targetId, `${effect.kind}-effect`);
+    } else if (effect.kind === EffectKind.RESOURCE) {
+      // An armour-first split is `{ resource: armourclass, to: 0 }` then
+      // `{ damage: overflow }`, and the writes come out in that order because
+      // the effects did. The split itself is the rule set's, never ours.
+      emitResource(effect.targetId, effect.resource, "resource-effect");
     } else if (effect.kind === EffectKind.STATUS) {
       const current = afterById.get(effect.targetId);
       if (!current) throw new AdapterStateError(`No resolved state for combatant ${String(effect.targetId)}.`);
@@ -514,6 +732,11 @@ export function vanillaWritesForResolvedAction({
   //    produced for every canonical difference, attributed or not.
   for (const [id, current] of afterById) {
     emitHealth(id, "resolved-state-diff");
+    // Resource bag key order is normalised by `normaliseResourceBag`, so this
+    // is a stable order two peers both produce.
+    for (const resource of Object.keys(current.resources ?? {})) {
+      emitResource(id, resource, "resolved-state-diff");
+    }
     const previous = beforeById.get(id);
     const was = new Set(previous?.status ?? []);
     const now = new Set(current.status ?? []);

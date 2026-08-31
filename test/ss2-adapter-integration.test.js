@@ -30,7 +30,9 @@ import {
   describeTeamRuleSet,
   EffectKind,
   isCampaignSettled,
+  lastResolvedAction,
   placeholderTeamRules,
+  resourceValue,
   RuleSetVerification,
   toControllerState,
   toTeamWireState
@@ -40,8 +42,8 @@ import {
   AcknowledgementError,
   BattleHostError,
   bindingPlanFor,
+  CANONICAL_RESOURCE_SOURCES,
   CommandKind,
-  createEffectRecordingRuleSet,
   createVanillaBattleHost,
   ClipRegistryError,
   HERO_SIDE,
@@ -196,6 +198,33 @@ function makeHost(size, { tape = hitTape(40), settlements = null, ...options } =
   });
 }
 
+/**
+ * DEMONSTRATION ONLY — invented, never measured against the licensed build.
+ * It exists to show the shape a runtime-verified rule set would use for the
+ * map's armour-first damage path: the pool written absolutely, then the
+ * overflow as damage, both decided here and neither computed by the adapter.
+ */
+const armourFirstRules = defineTeamRuleSet({
+  id: "test-armour-first",
+  verification: RuleSetVerification.PLACEHOLDER,
+  provenance: { runtimeVerified: false, note: "Invented armour-first split. Not SS2 behaviour." },
+  actionTypes: ["strike"],
+  maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+  legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+  resolveAction(request) {
+    const armour = resourceValue(request.target, "armourclass");
+    const blow = 60;
+    return {
+      effects: [
+        { kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "armourclass", to: Math.max(0, armour - blow) },
+        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: Math.max(0, blow - armour) }
+      ],
+      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId }]
+    };
+  },
+  chooseAiAction: (view, actorId, options) => options[0]
+});
+
 /** Red's living fighters strike down blue's, one action each, in order. */
 function fightToSettlement(host) {
   const blueIds = host.battle.teams.find((team) => team.id === "blue").combatants.map((c) => c.id);
@@ -290,6 +319,10 @@ test("1v1 through the adapter leaves the resolver bit-identical to running it ba
         name: combatant.name,
         stats: { ...combatant.stats },
         loadout: { ...combatant.loadout },
+        // The conversion now includes the canonical resource bag, so the bare
+        // blueprint has to carry it too: it is combat state, and the hash
+        // covers it. Omitting it here would be comparing two different battles.
+        resources: JSON.parse(JSON.stringify(combatant.resources)),
         maxHealth: combatant.maxHealth,
         health: combatant.maxHealth
       }))
@@ -367,6 +400,110 @@ test("2v2 and 3v3 fill a slot with AI and mix controller kinds on one team", () 
     assert.equal(steps.length, size);
     for (const step of steps) assert.deepEqual(Object.keys(step.action).sort(), ["actorId", "targetId", "type"]);
   }
+});
+
+test("every combatant declares the same canonical resources, on both sides of the binding, at every size", () => {
+  for (const size of [1, 2, 3]) {
+    const host = makeHost(size);
+    const names = [...CANONICAL_RESOURCE_SOURCES].sort();
+    for (const combatant of host.battle.teams.flatMap((team) => team.combatants)) {
+      assert.deepEqual(
+        Object.keys(combatant.resources).sort(),
+        names,
+        `${combatant.id} must declare the whole set: the vanilla surface is a binding rebound per action, ` +
+        "so any combatant can be game_attacker on one action and game_defender on the next"
+      );
+      assert.equal(combatant.resources.armourclass.value, 44);
+      assert.equal(combatant.resources.charisma.value, 7);
+    }
+    // Including the slot the roster invented: its resources come from the
+    // caller's fill template, so a write to it is legal like any other.
+    if (size > 1) {
+      assert.equal(host.combatant("blue-fill-2").aiFilled, true);
+      assert.equal(host.combatant("blue-fill-2").resources.armourclass.value, 44);
+      assert.deepEqual(host.diagnostics.aiFillResourceGaps, []);
+    }
+    // Both sides of the layout, not just the hero side.
+    const sides = new Set(host.layout.placements.map((placement) => placement.side));
+    assert.deepEqual([...sides].sort(), [HERO_SIDE, VILLAIN_SIDE].sort());
+  }
+});
+
+test("an armour write lands on an AI-filled ally at 3v3, which is what declaring on both sides buys", () => {
+  const member = (side, index) => {
+    const vanilla = vanillaGladiator({ speed: side === "red" ? 30 - index : 4 - index });
+    // Blue's middle slot is the one the roster invents.
+    if (side === "blue" && index === 1) return { fill: "ai", vanilla };
+    return { id: `${side}-${index + 1}`, controller: side === "red" ? "local" : "peer-7", vanilla };
+  };
+  const host = createVanillaBattleHost({
+    teams: ["red", "blue"].map((side) => ({
+      id: side,
+      name: side,
+      members: [0, 1, 2].map((index) => member(side, index))
+    })),
+    rules: armourFirstRules
+  });
+
+  const filled = host.combatant("blue-fill-2");
+  assert.equal(filled.aiFilled, true);
+  assert.equal(host.layout.placementFor(filled.id).side, VILLAIN_SIDE);
+  assert.equal(filled.resources.armourclass.value, 44);
+
+  // Before the resource bag reached AI-filled slots this threw from the
+  // resolver: an invented combatant declared no resources, so the rule set's
+  // armour write to it was refused while the identical write to a supplied
+  // gladiator succeeded — the outcome depending on whose turn it was.
+  const step = host.submit({ actorId: "red-1", type: "strike", targetId: filled.id });
+  assert.deepEqual(
+    step.writes.map((write) => [write.combatantId, write.field, write.to]),
+    [[filled.id, "armourclass", 0], [filled.id, "hitpoints", filled.maxHealth - 16]]
+  );
+  assert.equal(host.vanillaState()[filled.id].combatObject.armourclass, 0);
+  assert.equal(host.layout.placementFor(filled.id).stateObjectPath, "_root.arena.team_arena.state.villain_2");
+});
+
+test("the roster's one-fill-template-per-team limit is reported, never guessed around", () => {
+  const host = createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      {
+        id: "blue",
+        members: [
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 4, armourclass: 44 }) },
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 3, armourclass: 12 }) }
+        ]
+      }
+    ],
+    rngTape: hitTape(8)
+  });
+
+  // `src/team/roster.js` builds every filled slot from one `team.aiFill`, so
+  // two templates that disagree about armour have nowhere to both live.
+  // Picking a winner would put an invented number in the state hash.
+  assert.deepEqual(host.diagnostics.aiFillResourceGaps.map((gap) => gap.teamId), ["blue"]);
+  assert.match(host.diagnostics.aiFillResourceGaps[0].reason, /one AI-fill template per team/);
+  for (const combatant of host.battle.teams.find((team) => team.id === "blue").combatants) {
+    assert.deepEqual(combatant.resources, {}, "the filled slots declare nothing rather than the wrong thing");
+  }
+
+  // A caller that says what it wants is obeyed instead.
+  const declared = createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      {
+        id: "blue",
+        aiFill: { resources: { armourclass: 7 } },
+        members: [
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 4, armourclass: 44 }) },
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 3, armourclass: 12 }) }
+        ]
+      }
+    ],
+    rngTape: hitTape(8)
+  });
+  assert.deepEqual(declared.diagnostics.aiFillResourceGaps, []);
+  assert.equal(declared.combatant("blue-fill-1").resources.armourclass.value, 7);
 });
 
 test("there is no second code path: one resolver, one adapter pipeline, four globals, at every size", () => {
@@ -709,31 +846,31 @@ test("no clip handle reaches the state hash, even with live handles registered a
   ]);
 });
 
-test("the effect recorder is inert: it changes neither the rule-set descriptor nor the hash", () => {
-  const recorded = makeHost(2);
-  const plain = makeHost(2, { recordEffects: false });
+test("the host injects the rule set undecorated and takes the effect list from the resolver's trace", () => {
+  const host = makeHost(2);
 
-  assert.deepEqual(describeTeamRuleSet(recorded.battle.rules), describeTeamRuleSet(placeholderTeamRules));
-  assert.equal(recorded.hash(), plain.hash());
+  // The rule set reaches the resolver as the caller's own object. It used to
+  // be wrapped in a recording decorator, because `applyAction` discarded
+  // `outcome.effects` and a host had no other way to see the write ordering.
+  // `lastResolvedAction` made that wrapper redundant, and the wrapper is gone:
+  // there is now nothing between the injected rule set and the resolver.
+  assert.equal(host.battle.rules, placeholderTeamRules, "no decorator sits between the caller and the resolver");
+  assert.deepEqual(describeTeamRuleSet(host.battle.rules), describeTeamRuleSet(placeholderTeamRules));
 
-  const a = recorded.submit({ actorId: "red-1", type: "melee", targetId: "blue-1" });
-  const b = plain.submit({ actorId: "red-1", type: "melee", targetId: "blue-1" });
-  assert.equal(recorded.hash(), plain.hash());
-  assert.deepEqual(a.commands, b.commands);
-  assert.deepEqual(
-    a.writes.map((write) => [write.combatantId, write.field, write.to]),
-    b.writes.map((write) => [write.combatantId, write.field, write.to])
-  );
+  const step = host.submit({ actorId: "red-1", type: "melee", targetId: "blue-1" });
+  const trace = lastResolvedAction(host.battle);
+  assert.deepEqual(step.effects, trace.effects, "the step's effects are the resolver's own record");
+  assert.deepEqual(step.effects, [{ kind: "damage", targetId: "blue-1", amount: 101 }]);
+  assert.deepEqual(trace.knockouts, ["blue-1"]);
+  assert.equal(trace.actorId, "red-1");
 
-  // The one thing it does change: without it, no write can be attributed.
-  assert.deepEqual(a.writes.map((write) => write.reason), ["damage-effect"]);
-  assert.deepEqual(b.writes.map((write) => write.reason), ["resolved-state-diff"]);
-  assert.deepEqual(b.effects, [], "applyAction discards outcome.effects; nothing on the battle carries them");
+  // And every write is attributed, with no opt-in and no wrapper to forget.
+  assert.deepEqual(step.writes.map((write) => write.reason), ["damage-effect"]);
 
-  // And a recorder built by hand passes the same rule-set gate.
-  const recorder = createEffectRecordingRuleSet(placeholderTeamRules);
-  assert.deepEqual(describeTeamRuleSet(recorder.rules), describeTeamRuleSet(placeholderTeamRules));
-  assert.deepEqual(recorder.take(), []);
+  // The trace is a read-only copy: reading it cannot move combat state.
+  const hash = host.hash();
+  assert.ok(Object.isFrozen(trace.effects));
+  assert.equal(host.hash(), hash);
 });
 
 /* ------------------------------------------------------------------ */
@@ -825,7 +962,7 @@ test("GAP: a gladiator who enters already burning loses that condition at constr
   );
 });
 
-test("GAP: armour lives outside canonical state, so no field write ever reaches armourclass", () => {
+test("a placeholder rule set that declares no armour effect still writes only hitpoints", () => {
   const host = makeHost(1);
   fightToSettlement(host);
 
@@ -835,48 +972,98 @@ test("GAP: armour lives outside canonical state, so no field write ever reaches 
     ["hitpoints"],
     "the only field the whole battle ever wrote"
   );
-  assert.equal(everyWrite.some((write) => write.field === "armourclass"), false);
   // EffectKind gained a generic resource kind rather than a bespoke armour
   // one: a bespoke kind would put an SS2 noun inside a game-agnostic resolver
   // and need a sibling for stamina, ammo and everything after.
   assert.deepEqual(Object.values(EffectKind).sort(), ["damage", "heal", "resource", "status"]);
 
   // The defeated fighter is at 0 hitpoints with all 44 points of armour still
-  // standing. That is correct *adapter* behaviour — the armour-first split is
-  // a formula and the adapter may not compute one — and it is a state vanilla
-  // could never be in, because `damagecharacter` subtracts from `armourclass`
-  // first and carries only the overflow into `hitpoints`.
+  // standing, and that is right: `classicStyleRules` has no armour rule, and
+  // the adapter may not invent the subtraction. A vanilla-shaped outcome needs
+  // a rule set that declares the split — the test below — not adapter code.
   const defeated = host.vanillaState()["blue-1"].combatObject;
   assert.deepEqual({ hitpoints: defeated.hitpoints, armourclass: defeated.armourclass }, {
     hitpoints: 0,
     armourclass: 44
   });
-  // And the mirror check cannot see it. `mirrorDifferences` compares only the
-  // fields canonical state has, so a mirror that is wrong about armour, stamina
-  // and ammunition still reports itself in perfect step with the resolver.
   assert.deepEqual(mirrorDifferences(host.mirrorFor("blue-1"), host.combatant("blue-1")), []);
 });
 
-test("GAP: a rule set cannot read the vanilla record, and smuggling it in defeats the hash", () => {
+test("an armour-first split declared by a rule set reaches armourclass, in effect order", () => {
+  const host = createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      { id: "blue", members: [{ id: "blue-1", controller: "peer-7", vanilla: vanillaGladiator({ speed: 4 }) }] }
+    ],
+    rules: armourFirstRules
+  });
+
+  const step = host.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
+  assert.deepEqual(step.unmapped, []);
+  assert.deepEqual(
+    step.writes.map((write) => [write.combatantId, write.field, write.from, write.to, write.reason]),
+    [
+      ["blue-1", "armourclass", 44, 0, "resource-effect"],
+      ["blue-1", "hitpoints", 30, 14, "damage-effect"]
+    ],
+    "armour first, then the overflow: the write order is the effect order"
+  );
+  assert.equal(step.writes[0].path, "_root.arena.team_arena.state.villain_1");
+  assert.equal(step.writes[0].target, WriteTarget.COMBAT_OBJECT);
+
+  // The live vanilla object now holds a state vanilla could actually be in.
+  const combatObject = host.vanillaState()["blue-1"].combatObject;
+  assert.deepEqual({ hitpoints: combatObject.hitpoints, armourclass: combatObject.armourclass }, {
+    hitpoints: 14,
+    armourclass: 0
+  });
+  // Nothing about the split was the adapter's: 60 - 44 never appears here, the
+  // write value is the resolver's post-action projection.
+  assert.equal(host.combatant("blue-1").resources.armourclass.value, 0);
+  assert.equal(host.combatant("blue-1").health, 14);
+  assert.deepEqual(mirrorDifferences(host.mirrorFor("blue-1"), host.combatant("blue-1")), []);
+
+  // Blue strikes back, so the same split lands on the *other* side of the
+  // binding — which only works because both sides declared the resource.
+  const reply = host.submit({ actorId: "blue-1", type: "strike", targetId: "red-1" });
+  assert.deepEqual(
+    reply.writes.map((write) => [write.combatantId, write.field, write.from, write.to]),
+    [["red-1", "armourclass", 44, 0], ["red-1", "hitpoints", 30, 14]]
+  );
+
+  // A second blow with blue's pool already empty spills the lot.
+  host.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
+  assert.equal(host.vanillaState()["blue-1"].combatObject.hitpoints, 0);
+  assert.equal(host.battle.result.winnerTeamId, "red");
+  // Blue's armour was written once: an unchanged pool is not rewritten again.
+  assert.equal(
+    host.steps
+      .flatMap((step) => step.writes)
+      .filter((write) => write.field === "armourclass" && write.combatantId === "blue-1").length,
+    1
+  );
+});
+
+test("CLOSED: a rule set reads armour off the canonical view, and the hash covers it", () => {
   const seen = [];
   /**
    * DEMONSTRATION ONLY — not SS2 behaviour and not a proposal. It exists to
-   * show what a runtime-verified rule set would have to do to see armour, and
-   * what that costs.
+   * show what a runtime-verified rule set can now do *without* a side channel:
+   * read armour out of the view the resolver handed it.
    */
-  const armourAware = (armourByCombatantId) => defineTeamRuleSet({
-    id: "test-armour-side-channel",
+  const armourAware = defineTeamRuleSet({
+    id: "test-armour-reader",
     verification: RuleSetVerification.PLACEHOLDER,
     provenance: {
       runtimeVerified: false,
-      note: "Demonstration of the canonical-shape gap. Invented; never measured against the licensed build."
+      note: "Demonstration of the canonical resource bag. Invented; never measured against the licensed build."
     },
     actionTypes: ["strike"],
     maximumHealth: (combatant) => combatant.maxHealth ?? 30,
     legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
     resolveAction(request) {
       seen.push(Object.keys(request.target).sort());
-      const armour = armourByCombatantId.get(request.targetId) ?? 0;
+      const armour = resourceValue(request.target, "armourclass");
       const spilled = Math.max(0, 25 - armour);
       return {
         effects: [{ kind: EffectKind.DAMAGE, targetId: request.targetId, amount: spilled }],
@@ -886,113 +1073,202 @@ test("GAP: a rule set cannot read the vanilla record, and smuggling it in defeat
     chooseAiAction: (view, actorId, options) => options[0]
   });
 
-  const build = (armourclass) => {
-    const armour = new Map([["blue-1", armourclass]]);
-    return createVanillaBattleHost({
-      teams: [
-        { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
-        { id: "blue", members: [{ id: "blue-1", controller: "peer-7", vanilla: vanillaGladiator({ speed: 4, armourclass }) }] }
-      ],
-      rules: armourAware(armour)
-    });
-  };
+  const build = (armourclass) => createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      { id: "blue", members: [{ id: "blue-1", controller: "peer-7", vanilla: vanillaGladiator({ speed: 4, armourclass }) }] }
+    ],
+    rules: armourAware
+  });
 
   const armoured = build(44);
   const bare = build(0);
 
-  // Two peers that agree perfectly on combat state, and disagree on 44 points
-  // of armour: the hash cannot tell them apart.
-  assert.equal(armoured.hash(), bare.hash(), "armourclass is not in the combat state hash");
-  assert.notEqual(
-    armoured.mirrorFor("blue-1").fields.armourclass,
-    bare.mirrorFor("blue-1").fields.armourclass
-  );
+  // This test used to document the gap: two peers that disagreed about 44
+  // points of armour hashed *identically*, because the adapter's mirror was
+  // the only carrier for armour and the projection could not see it. A hash
+  // that agrees right up to the moment two peers diverge is not a desync
+  // check. `toCanonicalCombatantSource` now emits the resource bag, so the
+  // disagreement is visible before the first action rather than after it.
+  assert.notEqual(armoured.hash(), bare.hash(), "armourclass is in the combat state hash");
+  assert.equal(armoured.combatant("blue-1").resources.armourclass.value, 44);
+  assert.equal(bare.combatant("blue-1").resources.armourclass.value, 0);
 
   armoured.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
   bare.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
 
-  // The rule set never saw armour in what the resolver handed it...
-  // The view now carries `resources`, and the invariant that makes it sound is
-  // that the projection carries everything the view does - so a value a rule
-  // set can read can no longer sit outside the state hash.
+  // The rule set still cannot see the vanilla record, and it no longer needs
+  // to: `resources` is on the view, and the invariant that makes that sound is
+  // that the projection carries everything the view does.
   assert.deepEqual(seen[0], [
     "aiFilled", "alive", "health", "id", "loadout", "maxHealth",
     "name", "resources", "seatId", "slotIndex", "stats", "status", "teamId"
   ].sort());
-  assert.equal(seen[0].includes("armourclass"), false);
   assert.equal(seen[0].includes("vanilla"), false);
+  assert.equal(seen[0].includes("armourclass"), false, "armour arrives inside `resources`, not as a top-level field");
 
-  // ...so it had to close over the adapter's mirror, and the two now disagree
-  // on the outcome after starting from identical hashes.
   assert.equal(armoured.combatant("blue-1").health, 30);
   assert.equal(bare.combatant("blue-1").health, 5);
-  assert.notEqual(armoured.hash(), bare.hash());
 });
 
-test("GAP: a drawn battle arms settlement that the adapter bridge can never acknowledge", () => {
-  const settlements = [];
-  /** DEMONSTRATION ONLY. A vocabulary that can kill both fighters at once. */
-  const mutual = defineTeamRuleSet({
-    id: "test-mutual-destruction",
-    verification: RuleSetVerification.PLACEHOLDER,
-    provenance: { runtimeVerified: false, note: "Invented; forces the draw branch. Not SS2 behaviour." },
-    actionTypes: ["strike"],
-    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
-    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
-    resolveAction: (request) => ({
-      effects: [
-        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 999 },
-        { kind: EffectKind.DAMAGE, targetId: request.actorId, amount: 999 }
-      ],
-      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId, damage: 999 }]
-    }),
-    chooseAiAction: (view, actorId, options) => options[0]
-  });
-
-  const host = createVanillaBattleHost({
-    teams: [
-      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
-      { id: "blue", members: [{ id: "blue-1", controller: "peer-7", vanilla: vanillaGladiator({ speed: 4 }) }] }
+/** DEMONSTRATION ONLY. A vocabulary that kills both fighters at once. */
+const mutualDestruction = defineTeamRuleSet({
+  id: "test-mutual-destruction",
+  verification: RuleSetVerification.PLACEHOLDER,
+  provenance: { runtimeVerified: false, note: "Invented; forces the draw branch. Not SS2 behaviour." },
+  actionTypes: ["strike"],
+  maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+  legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+  resolveAction: (request) => ({
+    effects: [
+      { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 999 },
+      { kind: EffectKind.DAMAGE, targetId: request.actorId, amount: 999 }
     ],
-    rules: mutual,
-    onCampaignSettled: (record) => settlements.push(record)
+    events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId, damage: 999 }]
+  }),
+  chooseAiAction: (view, actorId, options) => options[0]
+});
+
+/** A host whose every fighter can wipe the pair, so a draw is reachable. */
+function drawnHost(size, settlements) {
+  const member = (side, index) => ({
+    id: `${side}-${index + 1}`,
+    controller: side === "red" ? "local" : "peer-7",
+    vanilla: vanillaGladiator({ speed: side === "red" ? 30 - index : 4 - index })
   });
+  const team = (side) => ({
+    id: side,
+    name: side,
+    members: Array.from({ length: size }, (unused, index) => member(side, index))
+  });
+  return createVanillaBattleHost({
+    teams: [team("red"), team("blue")],
+    rules: mutualDestruction,
+    onCampaignSettled: settlements ? (record) => settlements.push(record) : null
+  });
+}
+
+test("CLOSED: a drawn battle settles end to end through the bridge, on the death animations alone", () => {
+  const settlements = [];
+  const host = drawnHost(1, settlements);
   const step = host.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
 
   assert.equal(host.battle.result.reason, "draw");
   assert.equal(host.battle.result.winnerTeamId, null);
   assert.equal(step.bridgeStatus, "armed");
-  // Presentation reports the missing transition rather than guessing one.
+
+  // Presentation still reports the missing transition rather than guessing
+  // one — vanilla's `death()` dispatches only `combatwon`/`combatlost` — but
+  // the record now names what acknowledges a draw instead.
   // (The `strike` action event is also unmapped: these placeholder bindings
   // serve the melee/ranged/spell/rest vocabulary, not this test vocabulary.)
   const unmapped = step.commands.filter((command) => command.kind === CommandKind.UNMAPPED);
-  assert.deepEqual(unmapped.length, 2);
-  assert.equal(unmapped.filter((command) => /no draw transition/.test(command.reason)).length, 1);
+  assert.equal(unmapped.length, 2);
+  const drawCommand = unmapped.find((command) => /no draw transition/.test(command.reason));
+  assert.match(drawCommand.detail.acknowledgedBy, /completed death animations/);
+  assert.equal(drawCommand.detail.winnerTeamId, null);
   assert.equal(unmapped.filter((command) => /no animation binding/.test(command.reason)).length, 1);
-
-  // Both fighters can report their death animations, and it still cannot settle:
-  // `reportArenaLabel` is the only thing that can arm the final gate, and a
-  // draw has no arena label for it to accept.
-  assert.equal(host.bridge.expectedArenaLabel, null);
-  for (const combatantId of ["red-1", "blue-1"]) {
-    assert.equal(host.bridge.reportDeathAnimation(combatantId).settled, false);
-  }
-  assert.throws(
-    () => host.bridge.reportArenaLabel("combat_won"),
-    (error) => error instanceof AcknowledgementError && /a draw/.test(error.message)
+  assert.equal(
+    step.commands.some((command) => command.kind === CommandKind.ARENA_GOTO),
+    false,
+    "a draw reaches no arena transition, so none may be dispatched"
   );
-  assert.deepEqual(settlements, [], "the campaign is never settled for a draw, through the bridge");
 
-  // The resolver's own gate would settle it perfectly well, which is what
-  // makes this a composition defect rather than a resolver one.
+  // The bridge says outright that there is no arena label to wait for.
+  assert.equal(host.bridge.expectedArenaLabel, null);
+  assert.equal(host.bridge.expectsArenaLabel, false);
+  assert.match(host.bridge.unmappedArenaTransition, /no draw transition/);
+  // A draw eliminates both teams, so every fighter's animation is awaited.
+  assert.deepEqual([...host.bridge.awaitingDeathAnimations].sort(), ["blue-1", "red-1"]);
+
+  // This is the whole acknowledgement: the deaths, and the last one settles.
+  assert.equal(host.bridge.reportDeathAnimation("red-1").settled, false);
+  assert.deepEqual(settlements, []);
+  const final = host.bridge.reportDeathAnimation("blue-1");
+  assert.equal(final.settled, true);
+  assert.equal(host.bridge.status, "settled");
+  assert.equal(isCampaignSettled(host.battle), true);
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0].winnerTeamId, null);
+  assert.equal(settlements[0].reason, "draw");
+  assert.deepEqual(settlements[0].loserTeamIds, ["blue", "red"]);
+  assert.equal(settlements[0].acknowledgedToken, host.bridge.pendingToken);
+
+  // Once only, exactly as an elimination is.
+  for (let repeat = 0; repeat < 3; repeat += 1) {
+    const again = host.bridge.reportDeathAnimation("blue-1");
+    assert.equal(again.settled, false);
+    assert.equal(again.alreadySettled, true);
+  }
+  assert.equal(settlements.length, 1);
+  // And the resolver's own gate agrees it is already paid.
   assert.equal(
     acknowledgeResultAnimation(host.battle, {
       type: BATTLE_RESULT_ACK_TYPE,
       completionToken: host.bridge.pendingToken
     }),
-    true
+    false
   );
   assert.equal(settlements.length, 1);
+
+  // Reporting an arena label for a draw is still a refusal: the surface and
+  // the resolved result disagree, and a desync is not settled.
+  assert.throws(
+    () => host.bridge.reportArenaLabel("combat_won"),
+    (error) => error instanceof AcknowledgementError && /a draw/.test(error.message)
+  );
+});
+
+test("a drawn 2v2 settles through the host's own animation drain, with no arena transition", () => {
+  const settlements = [];
+  const host = drawnHost(2, settlements);
+  host.constructArena();
+
+  host.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
+  assert.equal(host.battle.result, null, "two fighters down is not a decided 2v2");
+  host.submit({ actorId: "red-2", type: "strike", targetId: "blue-2" });
+  assert.equal(host.battle.result.reason, "draw");
+
+  const outcomes = host.acknowledgeResultAnimations();
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.kind),
+    ["death", "death", "death", "death"],
+    "no arena-label step: a draw has no vanilla transition to report"
+  );
+  assert.deepEqual([...outcomes.map((outcome) => outcome.combatantId)].sort(), [
+    "blue-1", "blue-2", "red-1", "red-2"
+  ]);
+  assert.deepEqual(outcomes.map((outcome) => outcome.settled), [false, false, false, true]);
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0].winnerTeamId, null);
+
+  // Draining again has nothing left to report and pays nothing again.
+  assert.deepEqual(host.acknowledgeResultAnimations(), []);
+  assert.equal(settlements.length, 1);
+
+  // An explicit arena label is still offered to the bridge, and still refused.
+  assert.throws(
+    () => host.acknowledgeResultAnimations({ arenaLabel: "combat_won" }),
+    (error) => error instanceof AcknowledgementError && /a draw/.test(error.message)
+  );
+  // A mismatched completion token is refused before the deaths are reported,
+  // because in a draw the last death is what settles.
+  const fresh = drawnHost(2, []);
+  fresh.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
+  fresh.submit({ actorId: "red-2", type: "strike", targetId: "blue-2" });
+  assert.throws(
+    () => fresh.acknowledgeResultAnimations({ completionToken: "team-arena:red:blue:elimination" }),
+    (error) => error instanceof AcknowledgementError && /does not match the armed result/.test(error.message)
+  );
+  assert.equal(fresh.bridge.isSettled, false);
+  assert.deepEqual([...fresh.bridge.awaitingDeathAnimations].sort(), [
+    "blue-1", "blue-2", "red-1", "red-2"
+  ]);
+  // The right token settles it.
+  assert.equal(
+    fresh.acknowledgeResultAnimations({ completionToken: fresh.bridge.pendingToken }).at(-1).settled,
+    true
+  );
 });
 
 test("GAP: the adapter presents the resolver's initiative and never translates a vanilla phase", () => {

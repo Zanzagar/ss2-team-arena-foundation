@@ -22,6 +22,17 @@
  *    resolved winner implies. A surface that reports `combat_won` for a battle
  *    the resolver decided the other way is a desync, and it is refused rather
  *    than settled.
+ * 3. **A draw is acknowledged by the death animations alone.** The resolver
+ *    produces and settles draws — `battleStanding` is total, and "both teams
+ *    are down" has to have an answer — but vanilla's `death()` dispatches only
+ *    `combatwon` or `combatlost`, so a drawn battle has no arena transition to
+ *    report. The bridge therefore does not wait for one: the acknowledgement
+ *    is the completed death animations, and the last of them settles. The
+ *    alternative was worse in both directions — inventing an arena label would
+ *    make the adapter decide an outcome vanilla never dispatches, and refusing
+ *    to settle leaves a decided battle that can never pay its campaign.
+ *    Reporting an arena label for a draw stays a refusal, because a surface
+ *    that reached `combat_won` for a draw is a desync like any other.
  *
  * Nothing here decides an outcome. The bridge cannot make a battle end, cannot
  * choose a winner, and cannot settle a battle the resolver has not armed.
@@ -50,6 +61,7 @@ class ResultAcknowledgementBridge {
   #acknowledge;
   #pending = null;
   #expectedArenaLabel = null;
+  #unmappedArenaTransition = null;
   #awaiting = new Set();
   #reported = new Set();
   #arenaLabelSeen = false;
@@ -85,6 +97,9 @@ class ResultAcknowledgementBridge {
     this.#pending = pending;
     const labels = resultLabelsFor(this.#layout, pending.winnerTeamId);
     this.#expectedArenaLabel = labels.arenaLabel;
+    // Null for a draw, and only for a draw: `resultLabelsFor` reports the
+    // missing vanilla transition rather than guessing one.
+    this.#unmappedArenaTransition = labels.arenaLabel === null ? (labels.unmapped ?? null) : null;
     const losers = new Set(pending.loserTeamIds);
     for (const combatant of allCombatants(this.#battle)) {
       // Every fighter on an eliminated team is down by definition, and each
@@ -105,6 +120,22 @@ class ResultAcknowledgementBridge {
 
   get expectedArenaLabel() {
     return this.#expectedArenaLabel;
+  }
+
+  /**
+   * Whether this result has a vanilla arena transition to wait for at all.
+   *
+   * False exactly for a draw. A caller draining the animation surface should
+   * read this rather than treating a null `expectedArenaLabel` as an error:
+   * the deaths are the whole acknowledgement.
+   */
+  get expectsArenaLabel() {
+    return this.#expectedArenaLabel !== null;
+  }
+
+  /** Why there is no arena transition, when there is none. Null otherwise. */
+  get unmappedArenaTransition() {
+    return this.#unmappedArenaTransition;
   }
 
   get awaitingDeathAnimations() {
@@ -170,7 +201,8 @@ class ResultAcknowledgementBridge {
    * finished playing.
    *
    * Deaths on the winning side are accepted and ignored — they played earlier
-   * in the battle and settlement does not wait on them.
+   * in the battle and settlement does not wait on them. In a draw there is no
+   * winning side, every fighter is awaited, and the last report settles.
    */
   reportDeathAnimation(combatantId) {
     this.#requireArmed("report a death animation");
@@ -200,7 +232,10 @@ class ResultAcknowledgementBridge {
     }
     if (this.#expectedArenaLabel === null) {
       throw new AcknowledgementError(
-        "The resolved result has no vanilla arena transition (a draw), so no arena label can acknowledge it."
+        "The resolved result has no vanilla arena transition (a draw), so no arena label can acknowledge it: " +
+        `${this.#unmappedArenaTransition ?? "no transition is mapped"}. ` +
+        "A draw is acknowledged by the completed death animations alone; reaching an arena result label for one " +
+        "means presentation and resolved state disagree."
       );
     }
     if (arenaLabel !== this.#expectedArenaLabel) {
@@ -229,7 +264,9 @@ class ResultAcknowledgementBridge {
 
   #maybeSettle() {
     if (this.#settled) return false;
-    if (!this.#arenaLabelSeen) return false;
+    // A draw has no arena transition to wait for; its acknowledgement is the
+    // completed death animations and nothing else.
+    if (this.expectsArenaLabel && !this.#arenaLabelSeen) return false;
     if (this.awaitingDeathAnimations.length > 0) return false;
     // Latch before submitting, mirroring CampaignSettlement: a throwing
     // campaign callback must not leave the bridge able to fire again.

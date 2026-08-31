@@ -20,14 +20,14 @@
  * 1. it will not invent a vanilla combat object for an AI-filled slot. The
  *    roster invents the *combatant*; nothing invents its equipment, armour or
  *    inventory, so the caller must supply a template or the host refuses;
- * 2. it will not compute a vanilla value the resolver did not produce. In
- *    particular it never writes `armourclass`, because `EffectKind` cannot
- *    express an armour-first split and the adapter may not do the subtraction;
- * 3. it will not reach into the rule set for the effect list. `applyAction`
- *    discards `outcome.effects`, so the only honest way to recover the write
- *    ordering is a pass-through recorder around the injected rule set, which
- *    is opt-in and provably inert (`describeTeamRuleSet` and the combat state
- *    hash are unchanged by it).
+ * 2. it will not compute a vanilla value the resolver did not produce. An
+ *    armour-first split reaches `armourclass` only because a rule set declared
+ *    it as an ordered `resource` effect and the resolver applied and clamped
+ *    it; the host writes the post-action projection and does no subtraction;
+ * 3. it will not decorate, wrap or re-run the injected rule set. The resolver
+ *    records what it applied on `battle.lastResolution`, so the effect list
+ *    comes from `lastResolvedAction(battle)` — the authoritative trace of what
+ *    actually happened, rather than a recording wrapper's guess at it.
  *
  * Node builtins only; no assets, no game data.
  */
@@ -36,12 +36,14 @@ import {
   allCombatants,
   applyAction,
   assertTeamRuleSet,
+  BATTLE_RESULT_ACK_TYPE,
   chooseAiAction,
   combatantById,
   combatStateHash,
   createTeamBattle,
   currentCombatant,
   isAiControlled,
+  lastResolvedAction,
   legalActions,
   placeholderTeamRules,
   toTeamWireState
@@ -54,6 +56,7 @@ import { buildArenaLayout } from "./slot-layout.js";
 import {
   applyVanillaWrites,
   assertMirrorAgrees,
+  canonicalResourcesFrom,
   compareMaximumHealth,
   denormaliseVanillaCombatant,
   facingWrite,
@@ -91,54 +94,8 @@ export const HOST_PIPELINE = Object.freeze([
   "bridge.sync"
 ]);
 
-const clone = (value) => JSON.parse(JSON.stringify(value));
-
 function projectionsOf(wire) {
   return wire.teams.flatMap((team) => team.combatants);
-}
-
-/* ------------------------------------------------------------------ */
-/* Effect recorder                                                     */
-/* ------------------------------------------------------------------ */
-
-/**
- * A pass-through decorator that remembers the effect list a rule set returned.
- *
- * `vanillaWritesForResolvedAction` accepts the rule set's declarative effects
- * so the write order matches the order the effects were declared in, and so
- * each write carries an attributed reason. But `applyAction` applies
- * `outcome.effects` and then discards them: nothing on the battle, the event
- * log or the wire projection carries them, so a host cannot get at them. This
- * decorator is the only route that does not either re-run the rule set (which
- * would draw the ordered RNG channel twice) or teach the adapter the rule
- * set's vocabulary (which the boundary forbids).
- *
- * It is inert by construction: it calls through, records a deep copy, and
- * returns the underlying outcome object unchanged. Every property the
- * rule-set contract and the wire projection read — `id`, `contractVersion`,
- * `verification`, `provenance`, `actionTypes` — is carried over untouched, so
- * `describeTeamRuleSet` and `combatStateHash` do not move.
- */
-export function createEffectRecordingRuleSet(rules) {
-  assertTeamRuleSet(rules);
-  let pending = [];
-  const wrapped = assertTeamRuleSet({
-    ...rules,
-    resolveAction(request, rolls) {
-      const outcome = rules.resolveAction(request, rolls);
-      pending.push(clone(outcome?.effects ?? []));
-      return outcome;
-    }
-  });
-  return Object.freeze({
-    rules: Object.freeze(wrapped),
-    /** Every effect recorded since the last take, flattened in order. */
-    take() {
-      const taken = pending.flat();
-      pending = [];
-      return taken;
-    }
-  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -161,6 +118,42 @@ function assertMember(member, teamId, index) {
   return filled;
 }
 
+/**
+ * Carries the canonical resource bag onto a team's AI-filled slots.
+ *
+ * A supplied gladiator gets its resources from its own combat object
+ * (`toCanonicalCombatantSource`), and it has to: the resolver refuses a write
+ * to an undeclared resource, and the hero/villain surface is a binding rebound
+ * per action, so *every* combatant must declare the set or an armour write
+ * would succeed or throw depending on whose turn it was.
+ *
+ * An AI-filled slot is the one case the adapter cannot serve per slot.
+ * `src/team/roster.js` builds a filled slot from `team.aiFill` — **one
+ * template per team, not per slot** — so when two slots on one team are filled
+ * from two different vanilla templates there is nowhere to put the second bag.
+ * That is reported rather than papered over: guessing which template wins
+ * would put an invented number in the state hash.
+ */
+function aiFillWithResources(teamId, declared, fillResources, gaps) {
+  if (fillResources.length === 0) return declared;
+  // A caller that declared resources on `aiFill` has said what it wants.
+  if (declared?.resources !== undefined) return declared;
+  const [first, ...rest] = fillResources;
+  const serialised = JSON.stringify(first);
+  if (rest.some((bag) => JSON.stringify(bag) !== serialised)) {
+    gaps.push(Object.freeze({
+      teamId,
+      reason:
+        `Team ${teamId} AI-fills ${fillResources.length} slots from templates that disagree about their ` +
+        "canonical resources, and src/team/roster.js carries one AI-fill template per team rather than " +
+        "one per slot. The filled slots therefore declare no resources, and a rule set's write to one " +
+        "will be refused. Supply real gladiators, matching templates, or an explicit `aiFill.resources`."
+    }));
+    return declared;
+  }
+  return { ...declared, resources: first };
+}
+
 /* ------------------------------------------------------------------ */
 /* The host                                                            */
 /* ------------------------------------------------------------------ */
@@ -172,7 +165,6 @@ class VanillaBattleHost {
   #bridge;
   #clips = new ClipRegistry();
   #mirrors = new Map();
-  #recorder;
   #steps = [];
   #pipeline = [];
   #diagnostics;
@@ -184,8 +176,7 @@ class VanillaBattleHost {
     rngTape = null,
     heroTeamId = null,
     bindings = PLACEHOLDER_ANIMATION_BINDINGS,
-    onCampaignSettled = null,
-    recordEffects = true
+    onCampaignSettled = null
   } = {}) {
     if (!Array.isArray(teams) || teams.length !== 2) {
       throw new BattleHostError("A hosted battle needs exactly two teams.");
@@ -196,10 +187,12 @@ class VanillaBattleHost {
     const sources = [];
     const templates = new Map();
     const aiFilledSlots = [];
+    const aiFillResourceGaps = [];
     const blueprintTeams = teams.map((team, teamIndex) => {
       const teamId = team.id ?? `team-${teamIndex + 1}`;
       const members = Array.isArray(team.members) ? team.members : [];
       if (members.length === 0) throw new BattleHostError(`Team ${teamId} has no slots.`);
+      const fillResources = [];
       const combatants = members.map((member, index) => {
         const filled = assertMember(member, teamId, index);
         if (filled) {
@@ -214,7 +207,12 @@ class VanillaBattleHost {
               "Supply `vanilla` for the slot, or fill it with a real gladiator."
             );
           }
-          templates.set(`${teamId}#${index}`, normaliseVanillaCombatant(member.vanilla, { clip: member.clip ?? null }));
+          const template = normaliseVanillaCombatant(member.vanilla, { clip: member.clip ?? null });
+          templates.set(`${teamId}#${index}`, template);
+          // The roster invents the fighter; its resources still come from the
+          // caller's template, so the filled slot declares the same bag every
+          // other combatant does and can be written on either side.
+          fillResources.push(canonicalResourcesFrom(template.fields));
           return { fill: "ai" };
         }
         const source = toCanonicalCombatantSource(member.vanilla, {
@@ -228,16 +226,23 @@ class VanillaBattleHost {
         templates.set(`${teamId}#${index}`, source.vanilla);
         return source.combatant;
       });
-      return { id: teamId, name: team.name ?? teamId, slots: members.length, combatants, aiFill: team.aiFill };
+      return {
+        id: teamId,
+        name: team.name ?? teamId,
+        slots: members.length,
+        combatants,
+        aiFill: aiFillWithResources(teamId, team.aiFill, fillResources, aiFillResourceGaps)
+      };
     });
 
-    /* 2. one shared resolver, whatever the team size. */
-    this.#recorder = recordEffects ? createEffectRecordingRuleSet(rules) : null;
+    /* 2. one shared resolver, whatever the team size. The rule set is injected
+     *    exactly as the caller supplied it: undecorated, unwrapped, and the
+     *    same object `describeTeamRuleSet` will report on. */
     this.#battle = createTeamBattle({
       teams: blueprintTeams,
       seed,
       rngTape,
-      rules: this.#recorder ? this.#recorder.rules : rules,
+      rules,
       onCampaignSettled
     });
 
@@ -274,6 +279,12 @@ class VanillaBattleHost {
     this.#diagnostics = Object.freeze({
       /** Slots the roster AI-filled. Their mirror came from a caller template. */
       aiFilledSlots: Object.freeze(aiFilledSlots.map((entry) => Object.freeze({ ...entry }))),
+      /**
+       * Teams whose AI-filled slots could not be given canonical resources,
+       * because the roster carries one fill template per team and theirs
+       * disagreed. Empty in every other case.
+       */
+      aiFillResourceGaps: Object.freeze(aiFillResourceGaps),
       /** Where the mirror had to be pulled to canonical state before turn one. */
       canonicalSyncs: Object.freeze(canonicalSyncs),
       /** Reported, never corrected: `hitpointsmax` is a vanilla formula. */
@@ -385,7 +396,11 @@ class VanillaBattleHost {
     const after = projectionsOf(wire);
     const afterById = new Map(after.map((combatant) => [combatant.id, combatant]));
 
-    const effects = this.#recorder ? this.#recorder.take() : [];
+    // The resolver's own trace of what it just applied. It is not projected
+    // and not hashed — the state the effects produced is already in the
+    // projection — but it is authoritative about the *order* the rule set
+    // declared them in, which is the order the vanilla writes must follow.
+    const effects = lastResolvedAction(this.#battle)?.effects ?? [];
     const { writes, unmapped } = vanillaWritesForResolvedAction({
       before,
       after,
@@ -452,13 +467,31 @@ class VanillaBattleHost {
    * The whole animation surface reporting in: one death animation per fighter
    * on every eliminated team, then the arena timeline label. Returns the
    * bridge outcomes in order; exactly one of them can carry `settled: true`.
+   *
+   * **A draw stops after the deaths.** Vanilla's `death()` dispatches only
+   * `combatwon`/`combatlost`, so a drawn battle has no arena transition to
+   * report and the completed death animations are the entire acknowledgement.
+   * Passing an explicit `arenaLabel` for one is still reported — and still
+   * refused — because a surface that reached a result label for a draw
+   * disagrees with resolved state.
    */
   acknowledgeResultAnimations({ arenaLabel = null, completionToken = undefined } = {}) {
     this.#bridge.sync();
+    // Armed and no arena transition means a draw. An unarmed battle falls
+    // through to `reportArenaLabel`, which refuses it — the bridge cannot
+    // acknowledge a battle the resolver has not decided.
+    const drawn =
+      this.#bridge.pendingToken !== null && arenaLabel === null && !this.#bridge.expectsArenaLabel;
+    if (drawn && completionToken !== undefined) {
+      // Checked *before* the deaths, because in a draw the last death is what
+      // settles: a token verified afterwards would be verified too late.
+      this.#bridge.verifyAcknowledgement({ type: BATTLE_RESULT_ACK_TYPE, completionToken });
+    }
     const outcomes = [];
     for (const combatantId of [...this.#bridge.awaitingDeathAnimations]) {
       outcomes.push(Object.freeze({ kind: "death", combatantId, ...this.#bridge.reportDeathAnimation(combatantId) }));
     }
+    if (drawn) return Object.freeze(outcomes);
     const label = arenaLabel ?? this.#bridge.expectedArenaLabel;
     outcomes.push(Object.freeze({
       kind: "arena-label",

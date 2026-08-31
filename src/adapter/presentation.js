@@ -336,11 +336,19 @@ export function presentResolvedEvents(wire, {
     if (event.type === BATTLE_RESULT_PENDING_TYPE) {
       const labels = resultLabelsFor(layout, event.winnerTeamId);
       if (labels.arenaLabel === null) {
+        // A draw. There is no transition to play, and the adapter will not
+        // invent one — but the acknowledgement path is not missing, only
+        // different: the death animations already emitted above are the whole
+        // of it, and `acknowledgedBy` says so on the record itself.
         commands.push(Object.freeze({
           kind: CommandKind.UNMAPPED,
           sequence: event.sequence,
           reason: labels.unmapped,
-          detail: Object.freeze({ eventType: event.type, winnerTeamId: event.winnerTeamId ?? null })
+          detail: Object.freeze({
+            eventType: event.type,
+            winnerTeamId: event.winnerTeamId ?? null,
+            acknowledgedBy: labels.acknowledgedBy ?? null
+          })
         }));
         continue;
       }

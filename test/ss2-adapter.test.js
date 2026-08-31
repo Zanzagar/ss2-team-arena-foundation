@@ -9,10 +9,14 @@ import {
   combatStateHash,
   createTeamBattle,
   currentCombatant,
+  defineTeamRuleSet,
+  EffectKind,
+  RuleSetVerification,
   toTeamWireState
 } from "../src/team/index.js";
 
 import {
+  absentResourceSources,
   AcknowledgementError,
   AdapterStateError,
   applyVanillaWrites,
@@ -20,7 +24,9 @@ import {
   ARENA_Y,
   buildArenaLayout,
   bindingPlanFor,
+  CANONICAL_RESOURCE_SOURCES,
   CANONICAL_STAT_SOURCES,
+  canonicalResourcesFrom,
   canonicalStatusesFrom,
   citationFor,
   ClipRegistryError,
@@ -36,6 +42,7 @@ import {
   initialStatusEffects,
   LabelProvenance,
   MAP_SILENCE,
+  mirrorDifferences,
   normaliseVanillaCombatant,
   PLACEHOLDER_ANIMATION_BINDINGS,
   presentArenaConstruction,
@@ -335,6 +342,104 @@ test("vanilla starting statuses are surfaced as declarative effects, because the
   assert.deepEqual(battle.teams[0].combatants[0].status, ["burning"]);
 });
 
+/* ------------------------------------------------------------------ */
+/* State bridge: the canonical resource bag                            */
+/* ------------------------------------------------------------------ */
+
+test("the vanilla resources with no canonical slot are emitted as a canonical resource bag", () => {
+  const { combatant, vanilla } = toCanonicalCombatantSource(freshVanillaGladiator(), { id: "red-1" });
+
+  // Every name is the vanilla field name verbatim, exactly as the status
+  // tokens are the vanilla flag names verbatim: no translation table.
+  assert.deepEqual(Object.keys(combatant.resources).sort(), [...CANONICAL_RESOURCE_SOURCES].sort());
+  const value = (name) => combatant.resources[name].value;
+  assert.equal(value("armourclass"), 44);
+  assert.equal(value("armourclass_max"), 44);
+  assert.equal(value("staminaleft"), 105);
+  assert.equal(value("staminamax"), 110);
+  assert.equal(value("ammo_left"), 0);
+  assert.equal(value("charisma"), 2, "charisma has no canonical stat slot, so it travels as a resource");
+  assert.equal(value("helmet_defence"), 20, "the armour piece ratings, one resource each");
+  assert.equal(value("shield_defence"), 24);
+  assert.equal(value("weapon_enchantment_potency"), 0);
+
+  // The values are copied, never transformed: the vanilla record still agrees.
+  for (const name of CANONICAL_RESOURCE_SOURCES) {
+    if (vanilla.fields[name] === undefined) continue;
+    assert.equal(value(name), Number(vanilla.fields[name]), `${name} must round-trip untransformed`);
+  }
+  // Nothing here is folded into health: the armour-first split is a formula.
+  assert.equal(combatant.health, 30);
+  assert.equal(combatant.maxHealth, 30);
+});
+
+test("the adapter declares no resource bound, because a floor on armour would be a combat rule", () => {
+  const resources = canonicalResourcesFrom(freshVanillaGladiator());
+  for (const [name, entry] of Object.entries(resources)) {
+    assert.deepEqual(
+      { min: entry.min, max: entry.max },
+      { min: null, max: null },
+      `${name} must not carry a bound the adapter cannot evidence`
+    );
+  }
+  // `armourclass_max` is its own resource rather than `armourclass`'s ceiling,
+  // because a maximum that moves during a battle is modelled as a resource —
+  // `remove_armour` moves this one.
+  assert.ok(CANONICAL_RESOURCE_SOURCES.includes("armourclass_max"));
+  assert.ok(CANONICAL_RESOURCE_SOURCES.includes("staminamax"));
+  assert.ok(CANONICAL_RESOURCE_SOURCES.includes("maximum_ammo"));
+});
+
+test("a resource field the combat object never carried reads as zero, and the absence is recorded", () => {
+  const source = freshVanillaGladiator();
+  // The fixture stages no secondary weapon, so neither enchantment field exists.
+  assert.equal("secondary_weapon_enchantment_type" in source, false);
+  const converted = toCanonicalCombatantSource(source, { id: "red-1" });
+  assert.equal(converted.combatant.resources.secondary_weapon_enchantment_type.value, 0);
+  assert.deepEqual(converted.defaultedResources, absentResourceSources(source));
+  assert.deepEqual([...converted.defaultedResources].sort(), [
+    "secondary_weapon_enchantment_potency",
+    "secondary_weapon_enchantment_type",
+    "weapon_enchantment_damage"
+  ]);
+  // Materialising it in the bag must not invent the vanilla field.
+  assert.equal("secondary_weapon_enchantment_type" in converted.vanilla.fields, false);
+  // ...and the mirror still agrees, exactly as an unwritten status flag does.
+  assert.deepEqual(mirrorDifferences(converted.vanilla, converted.combatant), []);
+});
+
+test("a mirror that is wrong about armour is drift now, where it used to be silence", () => {
+  const record = normaliseVanillaCombatant(freshVanillaGladiator());
+  const canonical = {
+    id: "red-1",
+    health: 30,
+    maxHealth: 30,
+    status: [],
+    resources: canonicalResourcesFrom(freshVanillaGladiator())
+  };
+  assert.deepEqual(mirrorDifferences(record, canonical), []);
+
+  const spent = { ...canonical, resources: { ...canonical.resources, armourclass: { value: 22, min: null, max: null } } };
+  assert.deepEqual(mirrorDifferences(record, spent), ["armourclass 44 != resource 22"]);
+  assert.throws(() => assertMirrorAgrees(record, spent), AdapterStateError);
+
+  // A resource the build has no field for is skipped, not reported: a rule set
+  // may invent a resource, and the adapter will not invent a field for it.
+  const invented = { ...canonical, resources: { ...canonical.resources, momentum: { value: 9, min: null, max: null } } };
+  assert.deepEqual(mirrorDifferences(record, invented), []);
+});
+
+test("every canonical resource name is a field the battle map already cites", () => {
+  for (const name of CANONICAL_RESOURCE_SOURCES) {
+    assert.ok(citationFor(name), `${name} must cite a battle-map section`);
+  }
+  assert.equal(new Set(CANONICAL_RESOURCE_SOURCES).size, CANONICAL_RESOURCE_SOURCES.length);
+  // The reserved canonical field names are not resource names.
+  for (const reserved of ["health", "maxHealth", "status", "stats", "id"]) {
+    assert.equal(CANONICAL_RESOURCE_SOURCES.includes(reserved), false);
+  }
+});
+
 test("maximum health is compared against the rule set, never corrected by the adapter", () => {
   const battle = makeBattle(1, 1);
   const source = toCanonicalCombatantSource(freshVanillaGladiator(), { id: "red-1" });
@@ -432,6 +537,131 @@ test("a status with no vanilla flag produces no field write and is reported as u
   assert.deepEqual(result.writes, []);
   assert.equal(result.unmapped.length, 1);
   assert.equal(result.unmapped[0].status, "invented-status");
+});
+
+test("a resource effect writes the resolver's resource value, so writes reach armourclass", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const mirror = normaliseVanillaCombatant(freshVanillaGladiator());
+  const resources = canonicalResourcesFrom(freshVanillaGladiator());
+  // Staged at the mirror's own 30/30 so the writes read against the fixture.
+  const before = projections(battle).map((combatant) => ({
+    ...combatant,
+    health: 30,
+    maxHealth: 30,
+    resources
+  }));
+  // The armour-first split as a rule set declares it: the pool down to 19,
+  // then the overflow into health. The adapter performs neither subtraction.
+  const after = before.map((combatant) =>
+    combatant.id === "blue-1"
+      ? {
+        ...combatant,
+        health: 24,
+        resources: { ...resources, armourclass: { value: 19, min: null, max: null } }
+      }
+      : combatant
+  );
+
+  const { writes, unmapped } = vanillaWritesForResolvedAction({
+    before,
+    after,
+    effects: [
+      { kind: "resource", targetId: "blue-1", resource: "armourclass", to: 19 },
+      { kind: "damage", targetId: "blue-1", amount: 6 }
+    ],
+    placements: layout.byCombatantId,
+    mirrors: { "blue-1": mirror }
+  });
+
+  assert.deepEqual(unmapped, []);
+  assert.deepEqual(
+    writes.map((write) => [write.combatantId, write.field, write.from, write.to, write.reason]),
+    [
+      ["blue-1", "armourclass", 44, 19, "resource-effect"],
+      ["blue-1", "hitpoints", 30, 24, "damage-effect"]
+    ],
+    "the effect order is the write order: armour first, then the overflow"
+  );
+  assert.equal(writes[0].target, WriteTarget.COMBAT_OBJECT);
+  assert.equal(writes[0].path, "_root.arena.team_arena.state.villain_1");
+  const applied = applyVanillaWrites(mirror, writes);
+  assert.equal(applied.fields.armourclass, 19);
+  assert.equal(applied.fields.hitpoints, 24);
+});
+
+test("a resource write mirrors the resolver's clamped value, never the value the rule set asked for", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const resources = canonicalResourcesFrom(freshVanillaGladiator());
+  const before = projections(battle).map((combatant) => ({ ...combatant, resources }));
+  // The rule set asked for -30; the resolver clamped the declared pool to 0.
+  const after = before.map((combatant) =>
+    combatant.id === "blue-1"
+      ? { ...combatant, resources: { ...resources, armourclass: { value: 0, min: 0, max: null } } }
+      : combatant
+  );
+  const { writes } = vanillaWritesForResolvedAction({
+    before,
+    after,
+    effects: [{ kind: "resource", targetId: "blue-1", resource: "armourclass", to: -30 }],
+    placements: layout.byCombatantId
+  });
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].to, 0);
+  assert.notEqual(writes[0].to, -30, "the write comes from the post-action projection, not from effect.to");
+});
+
+test("a resource with no vanilla field produces no field write and is reported as unmapped", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const before = projections(battle).map((combatant) => ({
+    ...combatant,
+    resources: { momentum: { value: 0, min: null, max: null } }
+  }));
+  const after = before.map((combatant) =>
+    combatant.id === "blue-1"
+      ? { ...combatant, resources: { momentum: { value: 3, min: null, max: null } } }
+      : combatant
+  );
+  const result = vanillaWritesForResolvedAction({
+    before,
+    after,
+    effects: [{ kind: "resource", targetId: "blue-1", resource: "momentum", to: 3 }],
+    placements: layout.byCombatantId
+  });
+  assert.deepEqual(result.writes, []);
+  assert.deepEqual(result.unmapped.map((entry) => [entry.combatantId, entry.resource]), [["blue-1", "momentum"]]);
+  assert.match(result.unmapped[0].reason, /no vanilla field carries this resource/);
+
+  // An effect naming a resource the projection does not declare at all is
+  // reported rather than written; the resolver refuses it upstream anyway.
+  const undeclared = vanillaWritesForResolvedAction({
+    before,
+    after,
+    effects: [{ kind: "resource", targetId: "blue-1", resource: "armourclass", to: 3 }],
+    placements: layout.byCombatantId
+  });
+  assert.deepEqual(undeclared.writes, []);
+  assert.match(undeclared.unmapped[0].reason, /declares no such resource/);
+});
+
+test("an unattributed resource change is still written, and an unchanged one is not", () => {
+  const battle = makeBattle(1, 1);
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const resources = canonicalResourcesFrom(freshVanillaGladiator());
+  const before = projections(battle).map((combatant) => ({ ...combatant, resources }));
+  const after = before.map((combatant) =>
+    combatant.id === "blue-1"
+      ? { ...combatant, resources: { ...resources, staminaleft: { value: 90, min: null, max: null } } }
+      : combatant
+  );
+  const { writes } = vanillaWritesForResolvedAction({ before, after, placements: layout.byCombatantId });
+  assert.deepEqual(
+    writes.map((write) => [write.combatantId, write.field, write.to, write.reason]),
+    [["blue-1", "staminaleft", 90, "resolved-state-diff"]],
+    "totality: a resource the effects did not explain is written anyway, and the other 19 are untouched"
+  );
 });
 
 test("writes follow effect order and stay total for unattributed differences", () => {
@@ -893,6 +1123,56 @@ test("a 3v3 waits for all three death animations", () => {
   assert.deepEqual(settlements, []);
   assert.equal(bridge.reportDeathAnimation("blue-3").settled, true);
   assert.equal(settlements.length, 1);
+});
+
+test("a draw is acknowledged by the death animations, and an elimination is not", () => {
+  /** DEMONSTRATION ONLY. A vocabulary that kills both fighters at once. */
+  const mutual = defineTeamRuleSet({
+    id: "test-mutual-destruction",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented; forces the draw branch. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [
+        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 999 },
+        { kind: EffectKind.DAMAGE, targetId: request.actorId, amount: 999 }
+      ],
+      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+
+  const settlements = [];
+  const battle = makeBattle(1, 1, { rules: mutual, onCampaignSettled: (record) => settlements.push(record) });
+  applyAction(battle, { actorId: "red-1", type: "strike", targetId: "blue-1" });
+  const layout = buildArenaLayout(toTeamWireState(battle));
+  const bridge = createResultAcknowledgementBridge(battle, { layout });
+
+  assert.equal(bridge.sync(), "armed");
+  assert.equal(bridge.expectsArenaLabel, false, "vanilla dispatches no transition for a draw");
+  assert.equal(bridge.expectedArenaLabel, null);
+  assert.match(bridge.unmappedArenaTransition, /no draw transition/);
+  assert.deepEqual([...bridge.awaitingDeathAnimations].sort(), ["blue-1", "red-1"]);
+
+  assert.equal(bridge.reportDeathAnimation("blue-1").settled, false);
+  assert.equal(bridge.reportDeathAnimation("red-1").settled, true);
+  assert.equal(settlements.length, 1);
+  assert.equal(settlements[0].winnerTeamId, null);
+  assert.equal(settlements[0].reason, "draw");
+  assert.equal(bridge.arenaLabelReached, false, "nothing ever reached an arena label");
+
+  // A decided battle keeps the stricter gate: the deaths alone do not settle
+  // it, because there really is a transition the campaign must not outrun.
+  const decided = settledBattle(2, 2);
+  decided.bridge.sync();
+  assert.equal(decided.bridge.expectsArenaLabel, true);
+  assert.equal(decided.bridge.unmappedArenaTransition, null);
+  decided.bridge.reportDeathAnimation("blue-1");
+  assert.equal(decided.bridge.reportDeathAnimation("blue-2").settled, false);
+  assert.deepEqual(decided.settlements, []);
+  assert.equal(decided.bridge.reportArenaLabel("combat_won").settled, true);
 });
 
 test("the bridge submits through the resolver's own once-only gate", () => {

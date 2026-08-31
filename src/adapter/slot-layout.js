@@ -303,14 +303,17 @@ export function bindingPlanFor(layout, { actorId, targetId }) {
  * defeated ally clip matches neither, so that comparison must never be the
  * decision — and it is not: the resolver decides, and this function only
  * translates the resolved winner into the two labels. A draw has no vanilla
- * transition at all, so it is reported as unmapped rather than guessed.
+ * transition at all, so it is reported as unmapped rather than guessed — and
+ * `acknowledgedBy` names what stands in for it, because the acknowledgement
+ * bridge has to settle a drawn battle without one.
  */
 export function resultLabelsFor(layout, winnerTeamId) {
   if (winnerTeamId === null || winnerTeamId === undefined) {
     return Object.freeze({
       overlayLabel: null,
       arenaLabel: null,
-      unmapped: "vanilla has no draw transition: death() dispatches only combatwon or combatlost"
+      unmapped: "vanilla has no draw transition: death() dispatches only combatwon or combatlost",
+      acknowledgedBy: "the completed death animations; the last one settles the campaign"
     });
   }
   const side = layout.sideOf(winnerTeamId);
