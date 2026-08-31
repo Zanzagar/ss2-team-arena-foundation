@@ -231,6 +231,88 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+**ANSWERED FROM THE MAP, BLIND TO THE CAPTURES.** `staminaleft` is read by
+**nothing** in the attack-resolution chain, and the pinned 105 is not derivable
+from the fixtures' own inputs. The analysis was done by an agent forbidden from
+opening `captures/`, the divergence reports, this file, or the staging runbook,
+so its warrant is independent of anything the runs recorded.
+
+Complete reference inventory — 42 `staminaleft` sites, 24 `staminamax`, every one
+attributed by offset:
+
+- `checkattackroll` (overlay `+0x2c30`–`+0x3192`): **zero** stamina references.
+- `attack_chances`: **zero**. Reads `attack`, `defence`, `charisma`, `magicka`,
+  `shield` only.
+- Deflection (`+0x3030`–`+0x3095`): reads `helmet` and `greaves` only.
+- `remove_armour` / `destroy_armour`: **zero**.
+- `damagecharacter`: one touch, and it is a **write** —
+  `game_defender.staminaleft += ceil(breastplate * damage / 100)` at `+0x1928`.
+  Nothing downstream consumes it; the defeat gate reads `hitpoints`.
+- `check_stats`: reads `staminamax` only to clamp `staminaleft`. Self-referential.
+
+**It is path-determined, not scenario-determined.** In `normal_attack` the cost is
+*set* at `+0x61a3`, `attack_direction` drawn at `+0x61f1`, `checkattackroll()` at
+`+0x62ad`, and `staminaleft -= staminacost` only later in `nextphase` (`+0x32a7`).
+So the value at the roll reflects history *before* the attack. Each prior turn
+nets `-staminacost + (1 + round(stamina/3))`, and a walk costs
+`round(movement_speed/2)` where `movement_speed = clamp(round(speed*1.5), 4, 60)`.
+**The fixtures state neither `stamina` nor `speed` for either combatant.**
+
+**And 105 is arithmetically unreachable from the fixture.** `staminamax = 100 +
+stamina*10`, so 110 implies base `stamina` 1 and per-turn regen 1. A fresh bout
+starts full at 110. Reaching 105 needs exactly one prior turn at net −5, i.e. one
+walk at `movement_speed` 11–12, i.e. `speed` 7 or 8 — which the scenario does not
+state. With the stated `strength: 10` a prior *attack* would have cost 20 and
+landed on 91. The same 105/110 is pinned for the villain, whose block states no
+`strength` and no `speed` at all. **Two independent combatants landing on the same
+non-derivable number is the signature of a transcribed observation, not a
+derivation** — which, if so, means this predates the session and is the exact
+discipline failure the pipeline exists to prevent.
+
+`staminamax: 110` is separately over-specified: `battlevalues` recomputes it
+unconditionally from base `stamina` at `+0x37b6`, and `nextphase` runs
+`battlevalues` for both combatants at every phase transition, so a staged
+`staminamax` cannot survive one turn.
+
+**And `expected.state.<side>.staminaleft` carries zero information today.** The
+capture window deliberately closes before `nextphase`
+(`ss2-capture-wrapper.as:2456-2459`), so `finalState.staminaleft` = staged value +
+`staminaBonus`; with `breastplate: 0` in all five armoured fixtures,
+`staminaBonus` is 0 and the field is a pure echo of the scenario value. The pin
+costs six exact-equality constraints per fixture, none related to deflection
+thresholds, armour removal, or the equality quirk these fixtures exist to test.
+
+### The prescribed fix, and why I did not apply it
+
+Dropping `staminaleft`/`staminamax` from `scenario` is a clean deletion —
+`assertAllowedKeys` is an allow-list. But `expected.state.<side>.staminaleft`
+cannot simply follow: `assertExactKeys` makes it mandatory on both sides, and the
+resolver's defaults would then pin `staminamax`, or `0` — **a different wrong
+number rather than none.** So the field has to be excluded from the `/finalState`
+comparison, with `expected.mutation.staminaBonus` carrying the derivable claim
+instead. That split is right in principle: the delta
+`ceil(breastplate * damage / 100)` is a pure function of the scenario; the
+absolute level is not.
+
+**STOP AND AUDIT BEFORE IMPLEMENTING THAT.** Excluding a field from
+`matchSs2ObservationToFixture` repeats the structural shape of one of the two
+forgeries closed in `cc42503`: cosmetic opcode rolls were excluded from sample
+matching by label regex on both sides, and a record carrying 120 fabricated
+debris rolls matched a 7-sample fixture. The analysis cites
+`isCosmeticDebrisSample` as the precedent to follow — but that mechanism *was*
+the vulnerability. An exclusion that is "obviously harmless because the chain
+never reads the field" is exactly the argument that was made for debris rolls.
+
+The next session should implement it, but only behind an adversarial pass whose
+single named claim is **"a record carrying an arbitrary `staminaleft` cannot be
+promoted"**, and it must check the 22 existing goldens, whose `breastplate` is
+not always 0.
+
+Undocumented behaviour found on the way, for the battle map: the `taunt` branch
+carries the rest branch's restoration inline — `+0x684c`
+`hitpoints += 3 + ceil(stamina)` and `+0x6894` `staminaleft += stamina` — guarded
+only by `attacker.struck != null`, i.e. on every completed taunt.
+
 **All eight currently reachable fixtures pin the identical
 `staminaleft: 105 / staminamax: 110` for BOTH combatants** — the five
 `candidate-armoured-*` and the three `candidate-tournament-*`. It reads as one
