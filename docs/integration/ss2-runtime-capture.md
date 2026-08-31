@@ -1,11 +1,16 @@
 # SS2 controlled runtime-capture workflow
 
 Status: capture, verification, and promotion landed 2026-08-30 and are fully
-covered by tests. The loop now runs unattended end to end, and the whole
-`prisoner-normal-kill` family — all four normal-band attack directions — is
-promoted to runtime-observed goldens, each backed by two matching
-observations from two independent sessions. Every other committed fixture is
-still `classification: "candidate"`. This document is the operating procedure
+covered by tests. The loop runs unattended end to end, and since `e4d02a3` it
+runs **concurrently** as well. **22 fixtures are promoted** to runtime-observed
+goldens in `test/fixtures/ss2-1v1-golden/`: twelve prisoner kills covering all
+twelve melee attack directions (the normal, power and quick bands) and ten
+probe arms that measure `rollneeded` per band, the critical-deflection
+threshold, and the armour-selection draw. Each cleared the same gate — at least
+two matching observations from at least two independent sessions. The other 33
+committed fixtures are still `classification: "candidate"`.
+
+This document is the operating procedure
 for Stage 3 of [the roadmap](../roadmap.md): promoting static candidates to
 runtime-observed goldens with repeated evidence from the licensed local build
 in [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json).
@@ -53,7 +58,7 @@ Module responsibilities:
 | `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate (distinct sessions, no shared launch nonce), promotion, divergence reports |
 | `src/golden/simulate-capture-trace.js` | reference trace generator (`synthetic-simulator` method, never promotable) for pipeline dry runs and wrapper validation |
 | `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `tape`, `delog`, `ingest`, `verify`, `promote`, `manifest-digest` |
-| `tools/runtime-capture/` | AS2 wrapper source, shell/stub builders, the `validate-vehicle.ps1` gate, and `launch-capture.ps1` (see its README for validation status) |
+| `tools/runtime-capture/` | AS2 wrapper source, shell/stub builders, the `validate-vehicle.ps1` gate, the launchers (`launch-capture.ps1`, `run-capture.ps1`), the campaign driver (`run-campaign.ps1`, `campaign.mjs`), and the arena route (`run-arena.ps1`). Its README carries the validation status, how to run sessions concurrently, and the wrapper cache |
 
 ## Capture session protocol
 
@@ -79,7 +84,11 @@ derivations, and open staging questions) are catalogued in
 5. `node tools/capture-session.mjs verify --fixture <candidate> --observation
    <record>`; a divergence is preserved automatically, never deleted.
 6. Repeat from step 1 in a fresh game launch (a new `sessionId`) until at
-   least two matching observations from at least two sessions exist.
+   least two matching observations from at least two sessions exist. A fresh
+   launch also mints a fresh `launchNonce`, and promotion refuses two
+   observations that share one. Since `e4d02a3` these repeats can run
+   **concurrently**, each session given its own SharedObject store; see
+   [`tools/runtime-capture/README.md`](../../tools/runtime-capture/README.md).
 7. Write the capture manifest listing every session and observation, then
    `node tools/capture-session.mjs promote --fixture <candidate> --manifest
    <manifest> --observation <record1> --observation <record2>`.
@@ -113,9 +122,10 @@ session the same way, loading the installed SWF in place via a `file:` URL.
 A licensed AIR/projector runtime remains the fallback vehicle if Ruffle's
 AVM1 fidelity proves insufficient on the real battle timeline.
 
-The wrapper source is committed as an unvalidated draft at
-`tools/runtime-capture/ss2-capture-wrapper.as`. It instruments without
-patching:
+The wrapper source is committed at
+`tools/runtime-capture/ss2-capture-wrapper.as`. It is no longer a draft: it has
+passed the stub gate and produced the sessions behind all 22 promoted goldens.
+It instruments without patching:
 
 - serves the injected deterministic tape from a tap on the shared `Math`
   singleton underneath every `randomBetween` body, because frame 52 re-defines
@@ -230,8 +240,10 @@ rediscovered as surprises:
   player and the promotion gate refuses two observations that share one. That
   narrows the gap rather than closing it — the nonce distinguishes player
   launches, and nothing still binds an observation to a distinct process.
-  Legacy records carry no nonce, so for the 22 goldens already promoted,
-  independence remains exactly the two operator strings.
+  Legacy records carry no nonce, and **not one of the 22 promoted goldens
+  cites an observation that carries one** (only 9 of the 67 committed records
+  do, and none of those 9 is cited), so for every golden in the repository
+  today independence remains exactly the two operator strings.
 
 **How to strengthen a match rather than repeat it.** Because three of the
 seven tape slots in the prisoner scenario write nothing observable (the
@@ -240,10 +252,14 @@ enchantment draws write nothing), many different roll orderings produce an
 identical observation. Repeating that capture adds sessions, not information.
 A *discriminating* tape does: stage an armoured defender so the removal roll
 above 66 is visible, choose a deflection roll at the threshold, and choose a
-knockback value that crosses its gate. The power band is the worked example
-of the other half of the discipline — its candidates were derived from the
-map before any power session existed, so the eight sessions that matched them
-confirmed a prediction rather than a fit.
+knockback value that crosses its gate. **That is exactly what the ten probe
+goldens are**: each arm is a one-member family whose tape pins one draw at a
+value that either does or does not cross a gate, promoted in pairs
+(`*-hit`/`*-miss`, `*-above`/`*-below`, `*-cleared`/`*-critical`) so the
+threshold is bracketed rather than asserted. The power band is the worked
+example of the other half of the discipline — its candidates were derived from
+the map before any power session existed, so the twelve sessions that matched
+them confirmed a prediction rather than a fit.
 
 ### Reference traces (simulator)
 
@@ -314,10 +330,13 @@ meaningless, and a `synthetic-simulator` trace has no live RNG behind it to draw
 from at all.
 
 There is exactly one escape hatch, the ingest option
-`{ allowMissingOverdraw: true }`. It exists for a single documented purpose: the
-archived raw traces under the ignored `captures/` directory predate the field
-(113 of 177 carry it), and regenerating divergence reports from them must not be
-blocked by evidence they could not have recorded. The live capture path —
+`{ allowMissingOverdraw: true }`. It exists for a single documented purpose:
+many of the archived raw traces under the ignored `captures/` directory predate
+the field, and regenerating divergence reports from them must not be blocked by
+evidence they could not have recorded. (That archive is ignored and local, so
+any ratio quoted here is a snapshot that drifts with every session; at the time
+of writing 121 of the 168 archived traces carrying an `end` line at all report
+`overdraw`.) The live capture path —
 `tools/capture-session.mjs` and `tools/runtime-capture/campaign.mjs` — must never
 pass it, and a test asserts that neither file mentions it. A record ingested
 under the hatch carries **no** `capture.overdraw` at all rather than a
@@ -365,8 +384,11 @@ and `mutationGranularity`. It also admits exactly two optional members,
 `overdraw` and `launchNonce`, carried from the trace's `end` line and described
 under [the capture attestations](#the-two-capture-attestations-on-the-end-line);
 `overdraw` may only be `0`, `launchNonce` must be a token, and no other key is
-accepted. Every record committed to date predates both, which is why they are
-optional and why no committed record was rewritten to add them.
+accepted. **9 of the 67 committed records carry both** — `obs-cachecold`,
+`obs-cachewarm`, `obs-iso2`, `obs-par1`–`obs-par3` and `obs-pq1`–`obs-pq3`, all
+of them isolated-store or concurrent sessions. The other 58 predate the fields,
+which is why the fields are optional and why no committed record was rewritten
+to add them.
 
 ## Matching rules
 
@@ -418,33 +440,121 @@ later, at `attack_chances`, so that draw comes from the live RNG and is not
 on the injected tape. Which candidate a run is evidence for is therefore not
 known until the trace has been read.
 
+The spell ingress has no direction chain at all — `magic_damage_character` is
+reached without one — so a spell run is identified by its `spell_id` instead.
+The driver treats the two uniformly; see [what a family
+is](#what-a-family-is-exactly).
+
 ```text
-run-campaign.ps1  (loop, one Ruffle window at a time)
+run-campaign.ps1  (batch loop, -Concurrency sessions at once)
   -> run-capture.ps1 -SkipPipeline        one unattended session, raw log only
+     (concurrently: each gets its own -SaveDirectory)
   -> campaign.mjs ingest-round            resolve, ingest, file the observation
   -> campaign.mjs settle                  build manifests, promote what qualifies
 ```
 
+The **capture** half of a batch runs concurrently; `ingest-round` and `settle`
+run after it, **serially**, because they are CPU-only, they mutate
+`test/observations/`, and promotion reads the evidence set as a whole.
+`-Concurrency` above 1 is refused for any navigator but `prisoner`: concurrent
+sessions get isolated SharedObject stores, which fork the save, and the arena
+route has to accumulate state across bouts. The operating detail is in
+[`tools/runtime-capture/README.md`](../../tools/runtime-capture/README.md).
+
 | File | Responsibility |
 | --- | --- |
-| `tools/runtime-capture/run-campaign.ps1` | the round loop: unique ids, sequential sessions, per-round ingest and settle, coverage summary |
+| `tools/runtime-capture/run-campaign.ps1` | the round loop: unique ids, `-Concurrency` sessions per batch, per-batch ingest and settle, coverage summary |
 | `tools/runtime-capture/campaign.mjs` | `plan` (coverage), `seed` (which tape a round injects), `ingest-round` (file one session), `settle` (promote what qualifies) |
 | `tools/runtime-capture/build-manifest.mjs` | derive a capture manifest from the observation records it attests |
 
-A **family** is the set of candidate fixtures whose ids share the prefix
-`candidate-<family>` and differ only in `scenario.attackDirection` — the
-candidates one staged scenario can produce. `ingest-round` ingests a session
-against every member and keeps the one that MATCHES, so a run is only ever
-filed as evidence for a candidate it agrees with in full; two matches would
-mean the members are not mutually exclusive, and that is rejected as a
-malformed family. When nothing matches, the run is a real divergence and the
-report is written against the member for the direction the trace actually
-recorded.
+### What a family is, exactly
+
+A **family** is the set of candidate fixtures whose ids share a `-`-delimited
+id segment and differ only in their **action identity** — the candidates one
+staged scenario can produce.
+
+**Membership is a segment boundary, not a raw string prefix.** `isFamilyMember`
+accepts `candidate-<family>` exactly, or `candidate-<family>-<rest>`. The raw
+prefix test this replaced was a live collision in this repository rather than a
+hypothetical: `--family armour` also swept the five `candidate-armoured-*`
+fixtures alongside the three `candidate-armour-*` ones, so a campaign staged
+unarmoured would have ingested every round against armoured candidates too. The
+exact-match arm is what keeps `candidate-prisoner-normal-kill` — the unsuffixed
+direction-7 member — inside its own family, and what makes a whole candidate id
+usable as a one-member family (`--family prisoner-normal-kill-dir6`). A
+truncation of a real id now selects nothing rather than something.
+
+**The family index is the action identity, not the attack direction.**
+`actionIdentityFor(scenario, describe)` reads a fixture and an ingested record
+identically, and returns exactly one of two keys:
+
+| Ingress | Field | Key | Why |
+| --- | --- | --- | --- |
+| physical | `scenario.attackDirection` | `attack-direction:<n>` | the dispatcher and the death chain both read the `attack_direction` global |
+| spell | `scenario.spellId` | `spell-id:<n>` | `magic_damage_character` has no direction chain at all; the wrapper emits `spell_id` instead |
+
+It is **total** for both ingresses, because a scenario carries exactly one, and
+it **throws** for neither or both — `validateSs2OneVsOneFixture` enforces that
+invariant on the fixture side and `ingestSs2CaptureTrace` projects whichever
+identity the target fixture stages. Indexing on `attackDirection` alone was a
+defect rather than a simplification: a spell family carries no direction, so
+all eight `candidate-spell-*` members collapsed onto the single key `undefined`
+and the family looked malformed.
+
+`ingest-round` ingests a session against every member and keeps the one that
+MATCHES, so a run is only ever filed as evidence for a candidate it agrees with
+in full; two matches would mean the members are not mutually exclusive, and
+that is rejected as a malformed family. When nothing matches, the run is a real
+divergence and the report is written against the member **for the action
+identity the trace actually recorded** — resolved through the same key
+`loadFamily` indexes by, so a spell trace resolves on its `spell_id` exactly as
+a physical one resolves on its `attack_direction`. Every successfully ingested
+record is consulted in turn, not only the first, because ingest projects the
+identity the *target* fixture stages; the family's first member is the
+last-resort fallback when the trace recorded an identity no member claims.
+
+### Which families are single-tape campaigns, and which are not
+
+`loadFamily` refuses a family whose members are not distinguishable by action
+identity, because that key is what a divergence report is filed under — an
+ambiguous index means a divergent run has no single candidate to be reported
+against. Taking the eighteen first-segment names the 55 committed candidates
+offer, **six** are refused for that reason:
+
+| Refused family | Members | Colliding identity |
+| --- | --- | --- |
+| `armour` | 3 | all attack direction 5 |
+| `armoured` | 5 | all attack direction 5 |
+| `normal` | 2 | both attack direction 5 |
+| `probe` | 10 | six at direction 5, two at 9, two at 1 |
+| `spell` | 8 | five at spell id 30, two at 34, one at 32 |
+| `tournament` | 3 | all attack direction 5 |
+
+That is correct, not a limitation to be worked around. The ten probe arms
+differ only in an *injected roll value*, so no scenario-derived key could
+separate them, and `seed` refuses them independently on tape disagreement
+anyway. They are run **one candidate at a time**, as one-member families
+(`--family probe-normal-rollneeded-hit`), which is exactly how the ten probe
+goldens were captured.
+
+The families that do work as campaigns are the ones whose members genuinely
+differ only in the direction the game drew: `prisoner-normal-kill`,
+`prisoner-power-kill` and `prisoner-quick-kill`, four members each and one
+shared tape. Note that the whole `prisoner` name — all twelve members — is a
+valid *family* but not a valid *campaign*: its members carry three distinct
+tapes, so `seed` refuses it.
 
 `seed` refuses to nominate a tape when a family's members disagree about
 their injectable samples. Injection is tape-positional, so a mismatched tape
 would feed one direction's rolls into another's call order and the trace
 would be an experiment rather than evidence.
+
+`--manifest-prefix` is vestigial. It named the old `<prefix>-dir<n>.json`
+manifest path and names nothing now that manifests are named after the
+candidate they attest. It is still parsed rather than rejected — a script that
+passes it should not die on "Unknown option" — but `settle` prints that it is
+being ignored, because silently swallowing an operator's flag is its own
+hazard.
 
 `build-manifest.mjs` copies every manifest field out of the validated
 observation records and originates only `createdAt`. Rebuilding the
@@ -490,23 +600,30 @@ gladiator that owns a bow, not on the wrapper.
 The first goldens are in, so what is left is breadth, not feasibility. In
 rough order of cost:
 
-1. **Power and quick bands.** `power_attack` and `quick_attack` live on the
-   same controller frame as `normal_attack` and need no new staging, but the
-   directions they produce (9–12 and 1–4) have no candidate fixtures yet, and
-   their roll orders differ from the normal band (`max_damage` with a 5–20
-   critical sample; `min_damage` with a −20..20 sample). Author the
-   candidates from the battle map first, then run the family through
-   `run-campaign.ps1` exactly as the normal band was.
-2. **Single-direction actions.** Bash (23), bombard (21), and snipe (22) are
-   one fixture each rather than a family, but bombard/snipe/bash need the bow
-   weapon mode, so they need a gladiator that owns a bow — a staging problem,
-   not a tooling one.
-3. **Richer scenarios.** Every golden so far comes from one staged pair (the
-   tutorial prisoner against a level-1 gladiator with no armour). Armour,
-   status flags, and non-lethal outcomes are all still candidate-only, and
-   the armour-first and equality-quirk fixtures are the ones most worth
-   confirming live.
-4. **Out of scope by design.** Range taunts and other opcode-rolled paths
+1. **~~Power and quick bands.~~ Done.** Both bands were authored from the
+   battle map and then run through `run-campaign.ps1` exactly as the normal
+   band was. All twelve melee directions (1–4 quick, 5–8 normal, 9–12 power)
+   are promoted goldens, backed by 25 normal-band, 12 power-band and 9
+   quick-band observations from as many independent sessions.
+2. **The spell ingress, which has never had a capture session.** Eight
+   `candidate-spell-*` fixtures exist and no observation targets any of them.
+   The driver already handles the ingress — `actionIdentityFor` keys a spell
+   scenario on `spell_id` — but the eight members are not mutually exclusive
+   by that key (five share spell id 30), so they are one-at-a-time captures
+   rather than a campaign family.
+3. **Single-direction actions.** Bash (23), bombard (21), snipe (22), taunt
+   (20) and grievous (30) are one fixture each rather than a family.
+   Bash/bombard/snipe need the bow weapon mode, so they need a gladiator that
+   owns a bow — a staging problem, not a tooling one.
+4. **Richer scenarios.** Every golden so far comes from one staged pair (the
+   tutorial prisoner against a level-1 gladiator with no armour) — the probe
+   arms included, which vary an injected roll value rather than the staging.
+   Armour, status flags, and non-lethal outcomes are all still candidate-only,
+   and the armour-first and equality-quirk fixtures are the ones most worth
+   confirming live. `candidate-duel-firstblood-normal-kill` is the closest of
+   the 33: it has one matching observation and needs one more independent
+   session.
+5. **Out of scope by design.** Range taunts and other opcode-rolled paths
    make no `randomBetween` calls, so no wrapper can inject or record them.
 
 Staging requirements per fixture are in

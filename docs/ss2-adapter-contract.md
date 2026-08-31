@@ -177,10 +177,12 @@ one thing the hash exists to prevent.
   is already in the projection and hashing the derivation too would make a rule
   set's internal bookkeeping look like a desync. An integration that needs the
   declared effect order — the adapter does, to order its vanilla writes — can
-  read it straight off the battle. `battle-host.js` does not yet: it still
-  wraps the injected rule set in a pass-through recorder
-  (`createEffectRecordingRuleSet`, on by default), which predates
-  `lastResolvedAction` and is now redundant.
+  read it straight off the battle, and `battle-host.js` does: it injects the
+  caller's rule set **undecorated** and takes the effect list from
+  `lastResolvedAction(battle)`. The pass-through recorder that predated this
+  (`createEffectRecordingRuleSet`) is deleted, so every write is attributed
+  with no opt-in and `host.battle.rules` is the object the caller passed —
+  which is also what `describeTeamRuleSet` and the wire state report on.
 
 ## The verified/placeholder gate
 
@@ -351,7 +353,7 @@ That is enforced by module shape, not by convention:
 
 | Guarantee | How it is structural |
 | --- | --- |
-| the adapter cannot invent a combat value | every vanilla field write is an **absolute assignment mirroring resolved canonical state**. `vanillaWritesForResolvedAction` reads the resolver's post-action projection; the effect list supplies only ordering and a reason. `to:` is never `before - effect.amount`. |
+| the adapter cannot invent a combat value | every vanilla field write is an **absolute assignment mirroring resolved canonical state**. `vanillaWritesForResolvedAction` reads the resolver's post-action projection; the effect list supplies only ordering and a reason. That holds for all three write kinds, the `RESOURCE` branch included: `to:` is never `before - effect.amount`, and for a resource it is never `effect.to` either — it is `after`'s resource value, so a `to` the resolver *clamped* lands on the clamped number and not on the number the rule set asked for. |
 | presentation cannot mutate the battle | the only combat input `presentation.js` accepts is a plain `toTeamWireState(battle)` projection. A live battle is refused by shape (`assertCombatProjection`), so there is nothing there to mutate. Output is inert JSON command records — no callbacks, no clip handles. |
 | the adapter cannot end a battle | `acknowledgement.js` can only observe the resolver's terminal `battle-result-pending`. It cannot arm settlement, choose a winner, or acknowledge a battle the resolver has not decided. |
 | clip handles cannot enter deterministic state | `ClipRegistry` keeps handles in a private field, is never attached to a battle, and its `toJSON()` **throws**, so serialising anything that reaches one fails loudly instead of embedding it. |
@@ -405,8 +407,9 @@ sections of [the battle map](integration/ss2-battle-map.md).
 | `status[]` | `burning`, `frozen`, `poison`, `life_stolen`, `taunted1`, `taunted2` | Combatant state objects (runtime-observed 2026-08-30) | Canonical status tokens are the vanilla flag names **verbatim**; there is deliberately no translation table. |
 | `name` | `character_name` | Identity/progression | |
 | `loadout.*` | `min_damage`, `secondary_min_damage`, `using_bow`, `maximum_ammo`, `inventory1..6` | Derived combat; Spell and vanilla AI surface | **Placeholder-vocabulary bridge only.** See below. |
-| a declared resource — *not emitted yet* | `charisma` | Base stats | There is no canonical *stat* named charisma and there should not be. Since `src/team/resources.js` landed there **is** a canonical home for it: a declared resource, projected and hashed. `toCanonicalCombatantSource` does not emit one, so today it survives only in the vanilla record. |
-| a declared resource — *not emitted yet* | `armourclass`, `armourclass_max` | Live resources; Hit and damage path | Still deliberately **not** folded into `health`: the armour-first split is a formula (`damagecharacter` subtracts from `armourclass` first and carries only overflow into `hitpoints`). It now has a canonical home — a declared resource moved by an absolute `resource` effect — but `toCanonicalCombatantSource` emits no `resources` bag and `vanillaWritesForResolvedAction` has no `RESOURCE` branch, so `battle-host.js` refuses to write `armourclass` at all. |
+| `resources.charisma` | `charisma` | Base stats | There is no canonical *stat* named charisma and there should not be. It is a declared **resource** instead — projected, hashed, and writable by an absolute `resource` effect. |
+| `resources.armourclass`, `resources.armourclass_max` | `armourclass`, `armourclass_max` | Live resources; Hit and damage path | Emitted as declared resources, and still deliberately **not** folded into `health`: the armour-first split is a formula (`damagecharacter` subtracts from `armourclass` first and carries only overflow into `hitpoints`), so it stays rule-set work. The adapter carries the pool; a rule set moves it. |
+| the other seventeen `resources.*` | `ammo_left`, `maximum_ammo`, `staminaleft`, `staminamax`, the eight `*_defence` piece ratings, and the five enchantment fields | Live resources; Armour; Primary weapon; Secondary weapon; Derived combat | `toCanonicalCombatantSource` emits a **twenty-entry** resource bag in total. See [the resource bag](#the-resource-bag-the-adapter-emits). |
 | — | everything else | Observed data fields | Passed through unchanged. |
 
 Three fields get special treatment, each because the map says so.
@@ -434,6 +437,83 @@ fold the clip's facing into the scenario) and reported as `facingSource:
 **Totality.** Every own key of the source object survives the round trip,
 including the timed `spell_*` fields the map declines to name and any key a
 future build adds. Only the two rules above move anything.
+
+### The resource bag the adapter emits
+
+`CANONICAL_RESOURCE_SOURCES` in `src/adapter/state-bridge.js` is the list, and
+it has **twenty** entries in four groups. The names are the vanilla field names
+**verbatim**, exactly as the status tokens are — an invented resource
+vocabulary is one more table that can be mapped wrongly.
+
+| Group | Names |
+| --- | --- |
+| Live resources | `ammo_left`, `armourclass`, `armourclass_max`, `maximum_ammo`, `staminaleft`, `staminamax` |
+| Base stats | `charisma` |
+| Armour (per-piece ratings) | `boot_defence`, `breastplate_defence`, `gauntlet_defence`, `greaves_defence`, `helmet_defence`, `shield_defence`, `shinguard_defence`, `shoulderguard_defence` |
+| Enchantments | `weapon_enchantment_damage`, `weapon_enchantment_potency`, `weapon_enchantment_type`, `secondary_weapon_enchantment_potency`, `secondary_weapon_enchantment_type` |
+
+Every name is one `VANILLA_FIELD_GROUPS` already carries a citation for, and a
+test asserts that, so the list cannot drift away from the catalogue.
+
+**Every converted combatant declares the identical set**, whichever side of the
+vanilla binding it lands on. That is not tidiness. The hero/villain surface is
+a binding rebound per action, not a roster, so any combatant can be
+`game_attacker` on one action and `game_defender` on the next — and the
+resolver refuses a write to a resource that combatant did not declare. A set
+declared on one side only would make a rule set's armour write succeed or throw
+depending on whose turn it was.
+
+Absent fields are materialised to `0`, the same normalisation the six
+undefined-until-set status flags get, and `toCanonicalCombatantSource` reports
+which ones as `defaultedResources` — so "never written" stays distinguishable
+from "explicitly zero". Symmetrically, `toVanillaCombatant` writes a resource
+back only where it actually *differs*: writing all twenty unconditionally would
+**create** a field on a combat object that never carried one, which is
+inventing vanilla state rather than mirroring it.
+
+#### Three judgement calls, recorded so they can be overruled
+
+1. **The three maxima are resources of their own.** `armourclass_max`,
+   `staminamax` and `maximum_ammo` are declared alongside the pools they bound
+   rather than folded into those pools' `max`. This follows
+   `src/team/resources.js` in as many words: a maximum that itself moves during
+   a battle is its own resource. `remove_armour` moves `armourclass_max`
+   mid-battle, so a frozen bound would be wrong within one action of a
+   destroyed piece.
+2. **Armour PIECE IDS are excluded.** The eight per-piece *ratings* are
+   resources; the piece identities are equipment identity, not a numeric pool,
+   and stay in the vanilla record. A future `remove_armour` rule set — which
+   has to know *which* piece was destroyed, not only that armour fell — will
+   need this list to grow, and that growth is the point at which the exclusion
+   should be re-argued rather than assumed.
+3. **Every resource declares `min: null, max: null`.** A bound is a rail the
+   *blueprint* asserts, and the adapter has no evidence for one. Declaring
+   `min: 0` on `armourclass` would be the adapter asserting what happens when
+   damage exceeds armour — which is exactly the armour-first split the map
+   records as a formula, and therefore rule-set work. Declaring no bound also
+   guarantees the value round-trips untouched, since `normaliseResourceBag`
+   clamps on the way in and a clamp here would be the adapter quietly
+   rewriting a vanilla field. Note that this is a deliberate *departure* from
+   the resolver's own default, which is `min: 0`.
+
+#### One resolver limitation the host reports rather than papers over
+
+`src/team/roster.js` builds an AI-filled slot from `team.aiFill` — **one
+template per team, not one per slot**. A supplied gladiator gets its bag from
+its own combat object; a filled slot has to get one from the caller's template,
+and there is only one place to put it. So when two slots on one team are filled
+from templates that disagree about their canonical resources, there is nowhere
+to put the second bag.
+
+`battle-host.js` reports that as `diagnostics.aiFillResourceGaps` — one entry
+per affected team, naming the team and the reason — and declares **no**
+resources on those filled slots rather than guessing which template wins. A
+guess would put an invented number inside `combatStateHash`, which is the one
+thing the hash exists to prevent. The consequence is concrete and worth
+knowing: a rule set's write to a resource on such a slot will be refused by the
+resolver. The remedies are to supply real gladiators, matching templates, or an
+explicit `aiFill.resources`. Closing it properly needs a per-slot fill source
+from the roster, which is `src/team/` work, not adapter work.
 
 ### The loadout bridge is a placeholder, twice over
 
@@ -523,7 +603,11 @@ Two rules matter more than the command vocabulary:
    overlay label, no arena label, no reward UI. Vanilla's `death()` jumps
    straight to `combatwon` / `combatlost` on the first knockout, which is
    exactly what a multi-slot battle must not do. The overlay and arena labels
-   are emitted **only** for the terminal `battle-result-pending` event.
+   are emitted **only** for the terminal `battle-result-pending` event — and
+   for a draw they are not emitted at all: the command is an `unmapped` record
+   naming the missing transition, and carrying `acknowledgedBy` so the record
+   itself says what stands in for it (see [result
+   acknowledgement](#result-acknowledgement)).
 2. **Animation labels are injected, not owned.** The label vocabulary follows
    the rule set's action vocabulary, so `bindings` is a parameter.
    `PLACEHOLDER_ANIMATION_BINDINGS` serves the placeholder vocabulary;
@@ -543,7 +627,8 @@ a matching `battle-result-animation-complete` returns.
 `createResultAcknowledgementBridge` is what *produces* that acknowledgement
 from the animation surface, and it is the only state machine in the adapter.
 
-Two things make it more than a pass-through, and both are multi-slot concerns:
+Three things make it more than a pass-through, and all three are concerns
+vanilla's own `death()` has no answer for:
 
 1. **The final animation is the last one, not the first.** A losing team can
    have three fighters and three death animations. The bridge waits for every
@@ -554,6 +639,18 @@ Two things make it more than a pass-through, and both are multi-slot concerns:
    the surface reached is checked against the label the resolved winner
    implies. `combat_won` reported for a battle the resolver decided the other
    way is a desync and is refused, not settled.
+3. **A draw is acknowledged by the death animations alone.** The resolver
+   produces draws and settles them on its own two gates — `battleStanding`
+   reports `reason: "draw"` with `winnerTeamId: null` when both teams go down
+   on the same action, `checkResult` arms the settlement, and
+   `acknowledgeResultAnimation` accepts the matching token. Vanilla has no draw
+   transition to report back: `resultLabelsFor(layout, null)` returns
+   `{ overlayLabel: null, arenaLabel: null, unmapped: "vanilla has no draw
+   transition: death() dispatches only combatwon or combatlost",
+   acknowledgedBy: "the completed death animations; the last one settles the
+   campaign" }`. So the bridge does not wait for one. In a draw there is no
+   winning side, **every** fighter is awaited, and the last death animation to
+   report settles the campaign through the resolver's own gate.
 
 Refusals and repeats: reporting anything before elimination throws; an unknown
 combatant id throws; a mismatched completion token throws; a repeat is answered
@@ -562,19 +659,20 @@ every further report returns `settled: false` with `alreadySettled: true`. The
 bridge latches *before* submitting, mirroring `CampaignSettlement`, so a
 throwing campaign callback cannot leave it able to fire again.
 
-**A drawn battle cannot settle through this bridge today.** The resolver
-produces draws and settles them on its own two gates — `battleStanding` reports
-`reason: "draw"` with `winnerTeamId: null` when both teams go down on the same
-action, `checkResult` arms the settlement, and `acknowledgeResultAnimation`
-accepts the matching token. The bridge is the gap: `resultLabelsFor(layout,
-null)` returns `{ overlayLabel: null, arenaLabel: null, unmapped: "vanilla has
-no draw transition: death() dispatches only combatwon or combatlost" }`, and
-`reportArenaLabel` is the only thing that arms the final gate, so on a draw it
-throws instead. Reporting the missing transition as unmapped rather than
-guessing at a label is right; leaving the bridge with no way to acknowledge a
-draw is not. The acknowledgement a draw should carry is the completed death
-animations with no arena transition, and the resolver side is already pinned as
-a contract to code against.
+`expectsArenaLabel` is what a caller draining the animation surface should
+read; it is false exactly for a draw, and `unmappedArenaTransition` says why. A
+null `expectedArenaLabel` is a draw, not an error.
+`host.acknowledgeResultAnimations()` follows that rule — it reports the deaths
+and then stops, and when it is given an explicit `completionToken` for a draw
+it verifies the token *before* the deaths, because in a draw the last death is
+what settles and a token checked afterwards would be checked too late.
+
+Reporting an arena label for a draw is still **refused**. That is not the old
+gap surviving in a new place: a surface that reached `combat_won` for a battle
+the resolver called a draw disagrees with resolved state, which is a desync
+like any other. The two alternatives were both worse — inventing an arena label
+would make the adapter decide an outcome vanilla never dispatches, and refusing
+to settle would leave a decided battle that can never pay its campaign.
 
 ## Verified, static, assumed
 
@@ -594,40 +692,42 @@ every entry is complete and uniquely identified.
 
 ## Canonical-shape gaps this exposes
 
-This section used to list five limits of `src/team/`. **Four of them are
-closed**, and the honest statement today is that the canonical shape is no
-longer the binding constraint — the adapter is. What follows separates the two,
-because conflating them is how a document keeps apologising for a gap that was
-fixed.
+This section used to list five limits of `src/team/`. Four of them closed in
+`src/team/`, and the fifth — that the adapter used none of it — closed in
+`src/adapter/`. What follows separates what was fixed from what genuinely
+remains, because conflating them is how a document keeps apologising for a gap
+that was closed two commits ago.
 
-### Closed in `src/team/`
+### Closed
 
 | Was | What closed it |
 | --- | --- |
 | **No SS2 field bag on a canonical combatant** — armour, stamina, ammunition, charisma and the chance cache could not enter the combat state hash | `src/team/resources.js`. A combatant declares a named, bounded numeric bag at construction; `combatantView` exposes it and `combatantProjection` carries it, so it is inside `combatStateHash`. Names are the blueprint's, not the resolver's. |
 | **No `charisma` canonical stat**, which the whole taunt path reads | the same module. `charisma` is a resource, not a stat — which is the right shape for it: `DEFAULT_STATS` is the placeholder vocabulary's seven, and a verified rule set has no reason to grow it. |
-| **`normaliseCombatant` drops `source.status`**, so a gladiator entering already burning could not express it | `normaliseStatus` in `src/team/roster.js`, which carries `source.status` through in declaration order, deduplicated, and refuses a malformed list. The adapter's `initialStatusEffects` is now redundant for this purpose: `toCanonicalCombatantSource` already emits `status`, and the roster now honours it. **`battle-host.js` has not caught up** — it still reports the same list as `diagnostics.unappliedInitialStatusEffects`, and that name is now wrong: the roster applied them. |
+| **`normaliseCombatant` drops `source.status`**, so a gladiator entering already burning could not express it | `normaliseStatus` in `src/team/roster.js`, which carries `source.status` through in declaration order, deduplicated, and refuses a malformed list. The adapter's `initialStatusEffects` is now redundant for this purpose: `toCanonicalCombatantSource` already emits `status`, and the roster now honours it. **`battle-host.js` has still not caught up** (re-checked at `e4d02a3`) — it reports the same list as `diagnostics.unappliedInitialStatusEffects`, and both that name and the comment above it ("`normaliseCombatant` hard-codes `status: []`") are now false: the roster applied them. The diagnostic is inert — nothing re-applies it — but a caller who trusts the name and applies it would be applying a status twice. |
 | **No armour effect kind** — a verified rule set could not express "this hit consumed 22 points of armour and spilled 3 into hitpoints" | `EffectKind.RESOURCE`. An armour-first split is two ordered effects — write the pool down absolutely, then apply the overflow as damage — and the resolver applies exactly that, in exactly that order, without knowing what "armour" is. |
+| **The adapter used none of it** — `toCanonicalCombatantSource` emitted no bag and `vanillaWritesForResolvedAction` had no `RESOURCE` branch, so armour, stamina, ammunition, charisma and the eight piece ratings lived only in the vanilla mirror, outside the hash | `adeb05e`, both halves together, because the resolver refuses a write to an undeclared resource by design. `toCanonicalCombatantSource` emits the twenty-entry bag on **both** sides of the vanilla binding, and `vanillaWritesForResolvedAction` gained the `RESOURCE` branch, so a write reaches `armourclass` — with the value taken from the post-action projection, never from `effect.to`. See [the resource bag](#the-resource-bag-the-adapter-emits). |
 
 ### Still open
 
-1. **The adapter does not use any of it yet.** As of `1a05ce1`,
-   `toCanonicalCombatantSource` emits no `resources` bag and
-   `vanillaWritesForResolvedAction` has no `RESOURCE` branch, so `armourclass`,
-   `staminaleft`, `ammo_left`, `charisma` and the eight per-piece armour
-   ratings still live only in the adapter's vanilla mirror, outside the hash.
-   `battle-host.js` refuses to write `armourclass` for exactly this reason. The
-   resolver refuses a write to an undeclared resource by design, so the two
-   halves have to land together: emit the bag **on both sides**, then add the
-   branch.
+1. **AI-filled slots get one resource bag per team, not per slot.**
+   `src/team/roster.js` carries a single `aiFill` template per team, so two
+   filled slots on one team whose templates disagree cannot both get a bag.
+   `battle-host.js` reports `diagnostics.aiFillResourceGaps` and declares none
+   rather than guessing a number into the state hash. This is the one gap the
+   resource work left, and closing it is `src/team/` work: a per-slot fill
+   source from the roster.
 2. **Resources are numbers, so not everything vanilla carries has a home.**
    `normaliseResourceBag` accepts finite scalars only. Numeric pools fit;
-   equipment identity, the six numbered inventory slots read as *ids* rather
-   than pools, and the placeholder `loadout` shape do not. That is a deliberate
-   line — anything needing structure is the rule set's own static configuration
-   and is not per-combatant battle state — but it means the loadout bridge
-   stays an assumption until a verified rule set reads the vanilla record
-   directly.
+   equipment identity does not — the **armour piece ids**, the six numbered
+   inventory slots read as *ids* rather than pools, and the placeholder
+   `loadout` shape all stay in the vanilla record. That is a deliberate line —
+   anything needing structure is the rule set's own static configuration and is
+   not per-combatant battle state — but it has two live consequences: the
+   loadout bridge stays an assumption until a verified rule set reads the
+   vanilla record directly, and a future `remove_armour` rule set, which has to
+   know *which* piece was destroyed and not merely that armour fell, will need
+   `CANONICAL_RESOURCE_SOURCES` to grow.
 3. **Facing is read but not carried.** `gladiator_dir` affects the knockback
    sign and the debris direction in the 1v1 candidate. It is a string
    (`"right"` / `"left"`), so the numeric resource bag is not its home either.
@@ -680,8 +780,6 @@ What is still missing before a playable mod:
   measured has been dropped into them yet. `classicStyleRules` is the only rule
   set anywhere under `src/`, and it is a declared placeholder; the others in the
   repository exist only inside `test/`, to exercise the seam;
-- **the resource emission on both sides of the adapter**, without which no
-  verified rule set can express the armour-first split (see *Still open* above);
 - **campaign roster and reward integration** — the record layer stores an
   outcome, but nothing reads a record back into a roster or pays a reward;
 - **the launcher route** into the Collection's mods folder.
