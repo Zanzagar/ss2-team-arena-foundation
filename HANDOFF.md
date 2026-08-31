@@ -86,8 +86,20 @@ check PR state with `git ls-remote github "refs/pull/*/head"`.
   TRUE description of that route; the defect is that the fixture pins a quantity
   the scenario does not determine.
 
+► **THE PAIRWISE GATE'S DORMANCY IS SETTLED — run
+  `node tools/pairwise-gate-dormancy.mjs`, do not read the next two paragraphs
+  as current.** The gate HAS TEETH (407 free leaves it alone refuses, all at
+  `/samples/*/callSite`) and on committed evidence it still refuses NOTHING,
+  because the nonce check refuses every forgery about forty lines earlier. Both
+  facts, and what they do and do not license, are in the block at
+  "The pairwise gate: what the 2026-08-31 measurement settled" below. **The
+  "162" retraction in this bullet is itself wrong: 162 reproduces exactly.**
+
+  *The original bullet is kept below because it was load-bearing.*
+
 ► **THE PAIRWISE GATE'S DORMANCY NUMBERS ARE WRONG, and the gate is weaker than
   recorded.** **Both numbers in this bullet are wrong — see the note below it.**
+  **And the correction is wrong too: see the settled block below.**
   "162 leaves" is a full-record count, not the comparison projection's
   (142); over the surface it names at least 10 leaves can differ, not 0, and 2 of
   them MUST differ in every legitimate promotion. The gate is LOGICALLY unable to
@@ -387,19 +399,55 @@ has per-fixture commands.
 The blocks below are in reverse order of discovery. Read this list first; the
 ones that change what the next session should DO are marked ►.
 
-► **The promotion gate never compared the two observations to each other.** Now
+► **THE FRESH-NONCE RESIDUAL IS WORSE THAN RECORDED: it also unlocks the
+  authored-from gate, and all four self-citing goldens are re-promotable from
+  the very records they were transcribed from.** Found 2026-08-31 by an
+  adversarial pass driving the real promotion entry point, then reproduced
+  independently by the main session: 4 of 4.
+
+  The gate compares `observation.observationId` to
+  `candidate.provenance.authoredFrom` as a **string**, and `observationId` is
+  both invisible to the matcher and excluded from the pairwise projection. So
+  renaming the authored-from record walks straight past it.
+
+  **The rename alone is NOT enough, and the composition is the finding.** A
+  rename re-digests, which drops the record out of the pre-nonce digest waiver,
+  and the nonce check refuses it — verified, 4 of 4 refused. Mint a fresh nonce
+  as well and all four PROMOTE. So this is the already-known "forger who mints a
+  fresh nonce" residual, which turns out to unlock a second gate nobody had
+  connected it to. It is not a separate hole to close; it is a reason the nonce
+  residual outranks its current billing as "smaller than what it replaced".
+
+  **This bears directly on the re-promotion of the four self-citing goldens
+  (next-steps item below).** `test/capture-campaign.test.js` asserts those four
+  cannot be re-promoted from their own source record. That assertion is true of
+  the honest pipeline and bypassable by a forger, which are different
+  guarantees. Re-promote them from genuinely independent nonce-bearing evidence;
+  do not treat the gate as proof the pipeline cannot be walked past.
+
+► **`capture.observedAt` is free end to end, and nothing anywhere checks it.**
+  Its only consumer on the promotion path is the stamp that writes the golden's
+  `provenance.observedAt`. There is no ordering, recency or plausibility check,
+  so a promoted golden's stated observation date is an unverified operator
+  string. Low severity on its own; listed because "when the evidence was taken"
+  is provenance, and every other provenance field here is checked.
+
+- ~~**The promotion gate never compared the two observations to each other.** Now
   it does, and the gate is DORMANT by measurement (0 of 162 leaves can differ
-  while both still match). It is a precondition for any field exclusion, not a
-  fix. Land no exclusion before it.
-► **The "162 leaves" dormancy measurement does not reproduce, and neither does
-  its correction.** Measured 2026-08-31 over all 67 committed records:
-  full-record leaves range **101-184** and the matcher projection's **86-157**.
-  No record carries 162 under either, so "162" is not a full-record count and
-  "142" is one record's projection rather than a constant. A leaf count is a
-  PER-RECORD quantity and no single number describes the surface. The dormancy
-  conclusion ("0 can differ") was not re-measured and is now unconfirmed, not
-  refuted — re-measure it before relying on it, and before landing any field
-  exclusion that depends on the gate being a precondition.
+  while both still match).~~ **CLOSED 2026-08-31 by measurement. Both bullets
+  struck through here were wrong, in opposite directions.** The gate is NOT
+  dormant, and "162" was never unreproducible. See § "The pairwise gate: what
+  the 2026-08-31 measurement settled" below, and run
+  `node tools/pairwise-gate-dormancy.mjs`.
+- ~~**The "162 leaves" dormancy measurement does not reproduce, and neither does
+  its correction.** No record carries 162 under either, so "162" is not a
+  full-record count.~~ **The RANGES in this bullet are right — full-record
+  101-184, matcher projection 86-157, both reproduced exactly — and the
+  CONCLUSION drawn from them is wrong.** 162 is full-record leaves *minus the
+  digest*, which any probe must rewrite; obs-qk1 and ten siblings carry exactly
+  that, and 142 is that same family's matcher projection. Both disputed numbers
+  name one record family. This is the third time this measurement was re-argued
+  from memory, which is why it is now a committed tool.
 
 ► **A candidate was fitted to an observation, and it predates this session.**
   `staminaleft` 105 was transcribed after the map predicted 110. The same hero
@@ -409,8 +457,12 @@ ones that change what the next session should DO are marked ►.
   is unreachable; `hitpointsmax` 250 and `staminamax` 150 likewise). Five
   fixtures join the fifteen impossible-hero ones. Re-derive from the map.
 ► **All eight reachable fixtures over-pin `staminaleft`**, which nothing in the
-  resolution chain reads. Fixing it needs a matcher change, which needs the
-  dormant gate above landed first.
+  resolution chain reads. Fixing it needs a matcher change. **The sequencing
+  advice that stood here — "which needs the dormant gate above landed first" —
+  is superseded.** The gate is landed and has teeth, but on nonce-free evidence
+  it is unreachable, so it backstops an exclusion for exactly nothing today.
+  Whoever lands the exclusion cannot lean on it and must bring the adversarial
+  pass named in § "The prescribed fix" below.
 ► **The stub is far weaker than the gate implies** — 7 of 15 hook slots have
   never wrapped in any gate run; `attack_chances`, the production arming point,
   is exercised 0 times there and ~209 times live.
@@ -455,7 +507,7 @@ So this is a candidate fitted to an observation, it predates this session, and
 the same hero block may have carried it into other fixtures. **Check the rest of
 the corpus before trusting any staged scalar.**
 
-### The pairwise gate, landed dormant and deliberately so
+### The pairwise gate: what the 2026-08-31 measurement settled
 
 `promoteSs2CandidateToGolden` matched every observation against the candidate and
 never against the other observation — so "two matching observations from two
@@ -463,18 +515,54 @@ independent sessions" has always meant two records that each resembled the same
 prediction, never two that resembled each other. `ss2ObservationsMatch` existed,
 was exercised by tests, and was never called from the promotion path.
 
-That gate is now called. **It cannot fire today, and that is recorded rather than
-hidden:** probing all 162 leaves of a committed observation, perturbing each and
-re-digesting, ZERO can differ between two records while both still match their
-candidate. It is a PRECONDITION, not a fix.
+That gate is now called, and **its dormancy is settled by a committed tool rather
+than by a sentence: `node tools/pairwise-gate-dormancy.mjs`.** It takes a minute.
+Three independent implementations agreed on every number below, and an
+adversarial pass drove the real promotion entry point rather than the functions.
+Do not quote these figures without re-running it — this measurement has now been
+re-argued from memory three times and retracted twice.
+
+**The gate HAS TEETH.** 751 of 11,121 single-leaf perturbations across the 67
+records are free — valid, re-digested, still matching their candidate — and
+**407 of them, every one at `/samples/*/callSite`, this gate alone refuses.**
+The free count is exact, not a lower bound: a leaf the matcher compares cannot
+be free, since every record matches its fixture at baseline.
+
+**And on committed evidence it refuses nothing, for a reason nobody had looked
+at.** Zero of the observation ids the 22 goldens cite carries a `launchNonce`;
+each is waived only by its exact digest in `pre-nonce-observations.js`; every
+forgery re-digests and so leaves the waiver. The **nonce check** refuses all 18
+eligible goldens' forgeries about forty lines before the pairwise loop runs.
+Excising the loop changes zero verdicts. It fires only on nonce-bearing
+evidence, of which three promotable groups exist (`obs-cachecold`+`obs-cachewarm`,
+`obs-iso2`+`obs-par1`, `obs-par2`+`obs-par3`) and no golden cites any.
+
+**So the old "DORMANT TODAY" comment was wrong about the function and
+accidentally right about the corpus.** Both halves are now pinned by tests in
+`capture-campaign.test.js`, and both were demonstrated to fail when broken.
+
+**Read the teeth narrowly.** All 407 committed samples carry ONE `callSite`
+literal, because the wrapper has one roll emitter stamping one compile-time
+constant — the same fact that makes a fixture-derived `callSite` comparison
+something this file already refuses to add. These teeth cannot bite two honest
+captures. **And the gate catches disagreement, never falsehood: two records
+carrying the SAME fabricated `callSite` agree, match, and promote.** It does not
+close the hook-attribution hole and must not be described as closing it — the
+same structural reason a pairwise comparison could never have caught the copied
+record, which had to go through the nonce instead.
 
 It becomes load-bearing the moment any field stops being compared. With the
 prescribed `staminaleft` exclusion patched in, an auditor promoted two records
 differing by 99,992 stamina — one negative, one 10^13 above `staminamax`. That is
 the debris forgery's second symptom exactly.
 
-**Land any field exclusion only after this, never before.** Free to keep: all 29
-cited observation pairs across the 22 goldens already agree under it.
+**Land any field exclusion only after this, never before — but the old reason
+for that rule is dead.** It used to read as "the gate is a dormant precondition
+that starts protecting the corpus once an exclusion lands." It will not: on
+nonce-free evidence the gate is unreachable, so an exclusion landed today is
+backstopped here by nothing. Free to keep, re-measured: all 29 cited observation
+pairs across the 22 goldens agree under it, so it refuses no promotion that
+already stands.
 
 **ANSWERED FROM THE MAP, BLIND TO THE CAPTURES.** `staminaleft` is read by
 **nothing** in the attack-resolution chain, and the pinned 105 is not derivable
