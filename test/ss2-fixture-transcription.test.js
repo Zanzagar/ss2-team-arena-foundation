@@ -284,13 +284,40 @@ test("every candidate that could have been copied from a record declares that re
   assert.ok(declaredSources.length > 0, "the detector found no source at all: it would pass on anything");
 });
 
-test("a confirmed prediction is not relabelled as a transcription", () => {
-  // The other half of the guard, and the half a digest-only rule gets wrong. A
-  // candidate whose only digest-matching records were captured AFTER it was
-  // written was confirmed, not copied. Calling it transcribed would be a false
-  // provenance claim, and it would cost the corpus real evidence: each
-  // `candidate-probe-*` arm has exactly two observations, so refusing one as
-  // self-citing would leave one and make the arm unpromotable for ever.
+/**
+ * Declarations the history cannot corroborate, each with a written reason.
+ *
+ * A transcription claim is an ADMISSION AGAINST INTEREST: it can only cost the
+ * declarer evidence — the named record stops counting toward promotion — and can
+ * never gain them any. So an author who says "I copied this" should be believed
+ * even when the record reached the repository later than the fixture, which
+ * happens whenever the capture was held locally before being committed.
+ *
+ * What must never happen is a claim landing SILENTLY. Any fixture here needs a
+ * human sentence saying why the history does not show its source, and adding one
+ * without that sentence turns this file red.
+ *
+ * Empty today: all five declared transcriptions are corroborated by lineage.
+ */
+const ACKNOWLEDGED_UNSUPPORTED = new Map([]);
+
+test("a transcription the history cannot corroborate is acknowledged, not silent", () => {
+  // The original form of this test asserted the OPPOSITE — that a candidate with
+  // no pre-existing matching record must NOT be labelled transcribed. That was
+  // aimed the wrong way round, and an adversarial verifier caught it: it made the
+  // honest label REFUSABLE. An author who genuinely copied a fixture out of an
+  // uncommitted capture, then committed the fixture first, could not say so.
+  //
+  // A guard that punishes a truthful declaration is a defect in its own right,
+  // and it fails in the dangerous direction: the self-serving move is to stay
+  // SILENT and keep `synthetic-static-map`, which this test never touched.
+  //
+  // The protective half is kept. A mechanical relabelling — the one a
+  // digest-only rule would produce — still turns this red, because eighteen
+  // confirmed predictions would arrive here at once with no reason written for
+  // any of them. That is the case worth catching: each `candidate-probe-*` arm
+  // has exactly two observations, so refusing one as self-citing would leave one
+  // and make the arm unpromotable for ever.
   const flaggedByDigest = candidates.filter((candidate) => digestMatches(candidate).length > 0);
   const withPossibleSource = candidates.filter((candidate) => possibleSources(candidate).length > 0);
   assert.ok(
@@ -299,15 +326,25 @@ test("a confirmed prediction is not relabelled as a transcription", () => {
     "but check first that the lineage lookup has not silently stopped resolving"
   );
 
+  let corroborated = 0;
   for (const candidate of candidates) {
-    if (possibleSources(candidate).length > 0) continue;
-    assert.notEqual(
-      candidate.value.provenance.kind,
-      GoldenProvenance.TRANSCRIBED,
-      `${candidate.value.fixtureId} claims it was transcribed from ` +
-      `${candidate.value.provenance.authoredFrom}, but no record matching it existed when the fixture ` +
-      "was written. It is a prediction a later capture confirmed; labelling it a transcription " +
-      "discards that confirmation as self-citation."
+    if (candidate.value.provenance.kind !== GoldenProvenance.TRANSCRIBED) continue;
+    if (possibleSources(candidate).length > 0) { corroborated += 1; continue; }
+    assert.ok(
+      ACKNOWLEDGED_UNSUPPORTED.has(candidate.value.fixtureId),
+      `${candidate.value.fixtureId} declares it was transcribed from ` +
+      `${candidate.value.provenance.authoredFrom}, but no matching record was in the repository when ` +
+      "the fixture was added. That can be honest — a capture held locally and committed afterwards — " +
+      "so the declaration is not refused. It may not stand unexplained: add the fixture to " +
+      "ACKNOWLEDGED_UNSUPPORTED with a sentence saying where its numbers came from. Declaring a " +
+      "transcription only ever COSTS evidence, so the claim is believed; the reason is what is required."
     );
   }
+
+  // Anti-vacuity: the loop above must actually have inspected declarations.
+  assert.ok(
+    corroborated + ACKNOWLEDGED_UNSUPPORTED.size >= 5,
+    `only ${corroborated + ACKNOWLEDGED_UNSUPPORTED.size} transcription declarations were examined; ` +
+    "five are committed, so the lineage lookup or the kind filter has stopped resolving"
+  );
 });
