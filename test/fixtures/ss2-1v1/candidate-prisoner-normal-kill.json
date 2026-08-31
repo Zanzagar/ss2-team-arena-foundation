@@ -9,7 +9,8 @@
     "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
   },
   "provenance": {
-    "kind": "synthetic-static-map",
+    "kind": "transcribed-observation",
+    "authoredFrom": "obs-20260830-t1",
     "runtimeVerified": false,
     "sourceRefs": [
       "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",

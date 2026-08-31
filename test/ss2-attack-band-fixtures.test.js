@@ -58,6 +58,13 @@ function bandInvariant(fixture) {
   delete invariant.fixtureId;
   delete invariant.scenario.attackDirection;
   delete invariant.expected.calculation.attackDirection;
+  // `provenance.authoredFrom` is per-member by construction: each transcribed
+  // member was copied out of its OWN direction's capture, so the four normal-band
+  // members name four different records. That is lineage, not fight setup, and
+  // this invariant is about the fight. The lineage claim is asserted directly in
+  // "no two members of a family were transcribed from one record" below, so
+  // dropping it here hides nothing.
+  delete invariant.provenance.authoredFrom;
   return invariant;
 }
 
@@ -106,6 +113,33 @@ for (const { family, expectedDirections } of BANDS) {
       );
       assert.notEqual(fixture.scenario.attackDirection, reference.scenario.attackDirection);
       assert.notEqual(fixture.fixtureId, reference.fixtureId);
+    }
+  });
+
+  test(`${family}: no two members were transcribed from one record`, () => {
+    // Two members naming one `authoredFrom` would mean one capture was copied
+    // into two directions' fixtures — which cannot be true, since a record
+    // carries exactly one attackDirection. It would also mean the promotion
+    // gate's refusal, which keys on the id, silently covered a fixture whose
+    // real source it had never been told about.
+    const sources = members
+      .filter((fixture) => fixture.provenance.kind === "transcribed-observation")
+      .map((fixture) => fixture.provenance.authoredFrom);
+    assert.equal(
+      new Set(sources).size,
+      sources.length,
+      `${family} has two members claiming the same authoredFrom: ${sources.join(", ")}`
+    );
+    for (const fixture of members) {
+      // Whichever kind a member declares, it is never runtime-verified, and a
+      // synthetic member must not be carrying a source id.
+      assert.equal(fixture.provenance.runtimeVerified, false, fixture.fixtureId);
+      assert.equal(
+        Object.hasOwn(fixture.provenance, "authoredFrom"),
+        fixture.provenance.kind === "transcribed-observation",
+        `${fixture.fixtureId} declares ${fixture.provenance.kind} but ` +
+        `${Object.hasOwn(fixture.provenance, "authoredFrom") ? "carries" : "omits"} authoredFrom`
+      );
     }
   });
 

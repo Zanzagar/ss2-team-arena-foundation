@@ -10,10 +10,41 @@ export const GoldenClassification = Object.freeze({
   GOLDEN: "golden"
 });
 
+/**
+ * Where a fixture's numbers came from.
+ *
+ * `SYNTHETIC` and `TRANSCRIBED` are both CANDIDATE kinds and both carry
+ * `runtimeVerified: false` — a candidate is never runtime-verified, whatever
+ * its numbers were copied from. They differ in the only respect that matters
+ * to the promotion gate: whether some observation record ALREADY CONTAINED
+ * these numbers before the fixture was written.
+ *
+ * Until this distinction existed the schema forced every candidate to declare
+ * `synthetic-static-map`, so a fixture derived from the bytecode map and a
+ * fixture copied verbatim out of a live state dump made the SAME provenance
+ * claim, and the field carried no information about provenance at all. Four
+ * goldens were then promoted counting the very record their candidate was
+ * copied from as one of the two independent observations. A copy cannot fail
+ * to match itself, so that observation confirmed nothing.
+ *
+ * `TRANSCRIBED` therefore REQUIRES `authoredFrom`, and `SYNTHETIC` FORBIDS it:
+ * a fixture either names the record it was authored from or asserts there was
+ * none. Silence is no longer an available answer.
+ */
 export const GoldenProvenance = Object.freeze({
   SYNTHETIC: "synthetic-static-map",
+  TRANSCRIBED: "transcribed-observation",
   LICENSED: "licensed-observation"
 });
+
+/** Candidate provenance kinds. Both are unverified; see GoldenProvenance. */
+export const SS2_CANDIDATE_PROVENANCE_KINDS = Object.freeze([
+  GoldenProvenance.SYNTHETIC,
+  GoldenProvenance.TRANSCRIBED
+]);
+
+/** Observation ids, matching the token grammar `src/golden/observation.js` uses. */
+const OBSERVATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 const TOP_LEVEL_KEYS = Object.freeze([
   "build",
@@ -30,6 +61,7 @@ const BUILD_KEYS = Object.freeze(["fingerprintSchemaVersion", "ss2Sha256", "stea
 const EXPECTED_KEYS = Object.freeze(["calculation", "mutation", "mutationTrace", "resultEvent", "state"]);
 const MUTATION_TRACE_KEYS = Object.freeze(["after", "before", "path", "reason", "sequence"]);
 const CANDIDATE_PROVENANCE_KEYS = new Set([
+  "authoredFrom",
   "candidateFlags",
   "kind",
   "runtimeVerified",
@@ -529,9 +561,41 @@ export function validateSs2OneVsOneFixture(fixture) {
   }
   if (fixture.classification === GoldenClassification.CANDIDATE) {
     assertAllowedKeys(fixture.provenance, CANDIDATE_PROVENANCE_KEYS, "candidate provenance");
-    if (fixture.provenance.kind !== GoldenProvenance.SYNTHETIC || fixture.provenance.runtimeVerified !== false) {
+    if (
+      !SS2_CANDIDATE_PROVENANCE_KINDS.includes(fixture.provenance.kind) ||
+      fixture.provenance.runtimeVerified !== false
+    ) {
       throw new GoldenFixtureValidationError(
-        "candidate fixtures require synthetic-static-map provenance and runtimeVerified=false."
+        `candidate fixtures require ${SS2_CANDIDATE_PROVENANCE_KINDS.join(" or ")} provenance ` +
+        "and runtimeVerified=false."
+      );
+    }
+    // Both directions are enforced, because either one alone leaves the field
+    // able to lie. Without the first, a transcribed candidate can decline to
+    // name its source and be indistinguishable from a derived one — the exact
+    // hole this kind exists to close. Without the second, a candidate could
+    // name a source while still claiming to be derived from the static map,
+    // which is the same falsehood wearing a label.
+    const hasAuthoredFrom = Object.hasOwn(fixture.provenance, "authoredFrom");
+    if (fixture.provenance.kind === GoldenProvenance.TRANSCRIBED) {
+      if (!hasAuthoredFrom) {
+        throw new GoldenFixtureValidationError(
+          `${GoldenProvenance.TRANSCRIBED} provenance requires provenance.authoredFrom naming the ` +
+          "observation this fixture's numbers were copied from. A fixture transcribed from a record " +
+          "cannot be confirmed by that record, so the promotion gate has to be told which one it is."
+        );
+      }
+      if (
+        typeof fixture.provenance.authoredFrom !== "string" ||
+        !OBSERVATION_ID_PATTERN.test(fixture.provenance.authoredFrom)
+      ) {
+        throw new GoldenFixtureValidationError("provenance.authoredFrom must be an observation id token.");
+      }
+    } else if (hasAuthoredFrom) {
+      throw new GoldenFixtureValidationError(
+        `${GoldenProvenance.SYNTHETIC} provenance must not carry provenance.authoredFrom: a fixture ` +
+        `derived from the static map was authored from no observation. Declare kind ` +
+        `${GoldenProvenance.TRANSCRIBED} instead.`
       );
     }
     assertSourceRefs(fixture.provenance.sourceRefs);

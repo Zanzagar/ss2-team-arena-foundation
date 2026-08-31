@@ -583,22 +583,77 @@ test("a shared nonce never discards divergence evidence", () => {
   assert.equal(blocked.divergences[0].observationId, "obs-div-bad");
 });
 
+/**
+ * The committed golden-prisoner-normal-kill-dir6 cites `obs-diag`, which is the
+ * record its candidate was transcribed from, so the gate now refuses that pair
+ * (see "a candidate's own source record is refused as evidence" below). These
+ * two end-to-end regressions therefore promote from an ELIGIBLE pair instead:
+ * `obs-gold3` (the golden's other cited record) and `obs-camp2`, an independent
+ * later capture of the same direction. Both were captured after the candidate
+ * was authored, so neither could have been its source.
+ *
+ * The comparison drops only the four provenance fields that NAME the evidence.
+ * Everything a promotion actually derives — scenario, samples, expected, build,
+ * classification, fixtureId, kind, runtimeVerified, sourceRefs, repetitions —
+ * must still come out byte-identical to the committed golden, which is what
+ * makes this a regression rather than a restatement.
+ */
+const EVIDENCE_NAMING_FIELDS = ["observationIds", "observationDigests", "observedAt", "captureManifestSha256"];
+
+function goldenApartFromItsEvidence(golden) {
+  const projected = cloneJson(golden);
+  for (const field of EVIDENCE_NAMING_FIELDS) delete projected.provenance[field];
+  return projected;
+}
+
+const DIR6_ELIGIBLE_PAIR = ["obs-gold3", "obs-camp2"];
+
 test("the committed evidence still promotes untouched under the nonce gate", async () => {
-  // The end-to-end regression that matters: real records, the real manifest,
-  // and the real candidate, none of which carry a nonce.
+  // The end-to-end regression that matters: real records, a real manifest, and
+  // the real candidate, none of which carry a nonce.
   const golden = await loadJson(path.join(GOLDEN_DIR, "golden-prisoner-normal-kill-dir6.json"));
   const candidate = await loadJson(path.join(FIXTURE_DIR, "candidate-prisoner-normal-kill-dir6.json"));
-  const manifest = await loadJson(path.join(MANIFEST_DIR, "prisoner-dir6.json"));
-  const observations = golden.provenance.observationIds.map((observationId) => {
+  const observations = DIR6_ELIGIBLE_PAIR.map((observationId) => {
     const observation = committedById.get(observationId);
-    assert.ok(observation, `missing cited observation ${observationId}`);
+    assert.ok(observation, `missing observation ${observationId}`);
+    assert.notEqual(observationId, candidate.provenance.authoredFrom, "the pair must be eligible");
     assert.equal(Object.hasOwn(observation.capture, "launchNonce"), false, observationId);
     return observation;
   });
 
-  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
-  assert.equal(promotion.captureManifestSha256, golden.provenance.captureManifestSha256);
-  assert.deepEqual(promotion.golden, golden);
+  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifestFor(observations));
+  assert.deepEqual(promotion.golden.provenance.observationIds, DIR6_ELIGIBLE_PAIR);
+  assert.deepEqual(goldenApartFromItsEvidence(promotion.golden), goldenApartFromItsEvidence(golden));
+});
+
+test("a candidate's own source record is refused as evidence, however well it matches", async () => {
+  // obs-diag is not a divergent record, a duplicate, a same-session repeat or a
+  // nonce collision — it matches candidate-prisoner-normal-kill-dir6 perfectly,
+  // and it is cited by the committed golden. It matches perfectly BECAUSE the
+  // candidate's scenario and tape were copied out of it, which is exactly why
+  // its agreement is worth nothing.
+  const candidate = await loadJson(path.join(FIXTURE_DIR, "candidate-prisoner-normal-kill-dir6.json"));
+  assert.equal(candidate.provenance.kind, "transcribed-observation");
+  assert.equal(candidate.provenance.authoredFrom, "obs-diag");
+
+  const source = committedById.get("obs-diag");
+  const other = committedById.get("obs-gold3");
+  // It really does match — the refusal is not the matcher quietly disagreeing.
+  assert.equal(matchSs2ObservationToFixture(candidate, source).match, true);
+
+  const observations = [source, other];
+  assert.throws(
+    () => promoteSs2CandidateToGolden(candidate, observations, manifestFor(observations)),
+    (error) =>
+      error instanceof PromotionError &&
+      /obs-diag is the record candidate-prisoner-normal-kill-dir6 was authored from/.test(error.message) &&
+      /cannot fail/.test(error.message)
+  );
+
+  // And the taint is one record deep: swap the source out for any independent
+  // capture and the same candidate promotes.
+  const eligible = DIR6_ELIGIBLE_PAIR.map((id) => committedById.get(id));
+  assert.equal(promoteSs2CandidateToGolden(candidate, eligible, manifestFor(eligible)).matches.length, 2);
 });
 
 // ---------------------------------------------------------------------------
@@ -1012,20 +1067,21 @@ test("a golden promoted from staged evidence must say so on its own face", () =>
 });
 
 test("the committed evidence promotes untouched under the staging gate", async () => {
-  // The regression that matters most: real records, the real manifest, the real
-  // candidate, none of which mention staging, producing the committed golden
-  // byte for byte.
+  // The regression that matters most: real records, a real manifest, the real
+  // candidate, none of which mention staging, producing the committed golden's
+  // every derived field. The evidence pair is the eligible one — see
+  // goldenApartFromItsEvidence above for why and for what is compared.
   const golden = await loadJson(path.join(GOLDEN_DIR, "golden-prisoner-normal-kill-dir6.json"));
   const candidate = await loadJson(path.join(FIXTURE_DIR, "candidate-prisoner-normal-kill-dir6.json"));
-  const manifest = await loadJson(path.join(MANIFEST_DIR, "prisoner-dir6.json"));
-  const observations = golden.provenance.observationIds.map((observationId) => {
+  const observations = DIR6_ELIGIBLE_PAIR.map((observationId) => {
     const observation = committedById.get(observationId);
-    assert.ok(observation, `missing cited observation ${observationId}`);
+    assert.ok(observation, `missing observation ${observationId}`);
     assert.equal(Object.hasOwn(observation.capture, "staged"), false, observationId);
     return observation;
   });
 
-  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
+  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifestFor(observations));
   assert.equal(promotion.staged, null);
-  assert.deepEqual(promotion.golden, golden);
+  assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
+  assert.deepEqual(goldenApartFromItsEvidence(promotion.golden), goldenApartFromItsEvidence(golden));
 });

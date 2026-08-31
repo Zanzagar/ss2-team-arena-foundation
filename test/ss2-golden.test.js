@@ -189,6 +189,71 @@ test("fixture validation pins the licensed-build fingerprint", () => {
   }
 });
 
+test("a candidate's provenance kind decides whether it must name a source record", () => {
+  // Before `transcribed-observation` existed, the schema FORCED every candidate
+  // to declare `synthetic-static-map`, so a fixture derived from the bytecode
+  // map and a fixture copied verbatim out of a live state dump made the same
+  // provenance claim and the field carried no information about provenance.
+  // These four cases are the whole content of the repair: the kind and the
+  // source field can no longer disagree in either direction.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  assert.equal(fixture.provenance.kind, GoldenProvenance.SYNTHETIC);
+
+  const transcribed = cloneJson(fixture);
+  transcribed.provenance.kind = GoldenProvenance.TRANSCRIBED;
+  transcribed.provenance.authoredFrom = "obs-20260830-t1";
+  assert.equal(validateSs2OneVsOneFixture(transcribed), transcribed);
+
+  // Transcribed but silent about its source: the exact shape the four prisoner
+  // normal-band candidates had for their whole life.
+  const unnamedSource = cloneJson(transcribed);
+  delete unnamedSource.provenance.authoredFrom;
+  assert.throws(
+    () => validateSs2OneVsOneFixture(unnamedSource),
+    (error) => error instanceof GoldenFixtureValidationError && /requires provenance.authoredFrom/.test(error.message)
+  );
+
+  // Synthetic yet naming a source: the same falsehood wearing the other label.
+  const synthethicWithSource = cloneJson(fixture);
+  synthethicWithSource.provenance.authoredFrom = "obs-20260830-t1";
+  assert.throws(
+    () => validateSs2OneVsOneFixture(synthethicWithSource),
+    (error) => error instanceof GoldenFixtureValidationError && /must not carry provenance.authoredFrom/.test(error.message)
+  );
+
+  // A transcribed candidate is still a candidate: where its numbers came from
+  // says nothing about whether the runtime has confirmed them.
+  const transcribedClaimingVerification = cloneJson(transcribed);
+  transcribedClaimingVerification.provenance.runtimeVerified = true;
+  assert.throws(
+    () => validateSs2OneVsOneFixture(transcribedClaimingVerification),
+    GoldenFixtureValidationError
+  );
+
+  for (const authoredFrom of [42, null, "", "not a token", "x".repeat(129)]) {
+    const malformed = cloneJson(transcribed);
+    malformed.provenance.authoredFrom = authoredFrom;
+    assert.throws(() => validateSs2OneVsOneFixture(malformed), GoldenFixtureValidationError);
+  }
+
+  // And a golden may not borrow the field: its evidence is `observationIds`.
+  const golden = cloneJson(fixture);
+  golden.classification = GoldenClassification.GOLDEN;
+  golden.provenance = {
+    kind: GoldenProvenance.LICENSED,
+    runtimeVerified: true,
+    sourceRefs: cloneJson(fixture.provenance.sourceRefs),
+    observedAt: "2026-08-30T00:00:00Z",
+    captureToolVersion: "test-capture/1",
+    repetitions: 2,
+    observationIds: ["observation-1", "observation-2"],
+    observationDigests: ["1".repeat(64), "2".repeat(64)],
+    captureManifestSha256: "3".repeat(64),
+    authoredFrom: "obs-20260830-t1"
+  };
+  assert.throws(() => validateSs2OneVsOneFixture(golden), GoldenFixtureValidationError);
+});
+
 test("fixture classification and provenance must agree", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
 

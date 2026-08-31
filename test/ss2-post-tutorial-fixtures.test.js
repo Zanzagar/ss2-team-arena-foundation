@@ -59,7 +59,10 @@
  */
 
 import assert from "node:assert/strict";
+import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   deriveExpectedEventsFromSs2Fixture,
@@ -259,8 +262,22 @@ test("every post-tutorial fixture stages the one levelled capture gladiator, unc
   }
 });
 
-test("the levelled gladiator's numbers are derived, not chosen", () => {
-  const herolevel = 4;
+test("the levelled gladiator's formula-derived numbers follow from the battle map", () => {
+  // TITLE AND SCOPE NARROWED DELIBERATELY. This test used to be called "the
+  // levelled gladiator's numbers are derived, not chosen" and closed with
+  //
+  //     assert.equal(HERO.staminamax - HERO.staminaleft, 5);
+  //
+  // whose two operands are literals declared 130 lines above in THIS FILE
+  // (staminamax 110, staminaleft 105). 110 - 105 is 5 however the game behaves,
+  // so the assertion could not fail, and its own comment conceded the 5 was
+  // observed rather than derived. An assertion that cannot fail is not weak
+  // evidence, it is no evidence, and this one was standing under a title
+  // claiming the opposite. The stamina drift is now checked against the
+  // promoted goldens instead — see the test below — and this one claims only
+  // what it actually shows: that the numbers with a FORMULA behind them follow
+  // from it.
+  const herolevel = 4;             // tournament 1 requires herolevel >= 4 (arena route §2)
   const vitality = 1 + 3 * 4;      // level-1 vitality 1, plus 4 points per level-up, 1 -> 4
   const staminaStat = 1;           // unchanged from the verified level-1 loadout
   const strength = 10;
@@ -272,15 +289,50 @@ test("the levelled gladiator's numbers are derived, not chosen", () => {
   // Root frame 214 `+0x02a9` heals the hero to hitpointsmax on every arena
   // entry (arena route §2), so the hero enters at full health.
   assert.equal(HERO.hitpoints, HERO.hitpointsmax);
-  // The five `walkright` autopilot steps that carry the hero from
-  // `longrange_warrior` into `closerange_warrior` cost five stamina, exactly as
-  // observed in the promoted prisoner sessions (capture staging guide, "Stamina
-  // drift"). This is the one staged number that is a function of the autopilot
-  // step count rather than of a formula.
-  assert.equal(HERO.staminamax - HERO.staminaleft, 5);
-  // Level 4 is the gate: tournament 1 requires herolevel >= 4 and a fresh
-  // gladiator starts at current_tournament 1 (arena route §2, tournament table).
-  assert.equal(herolevel, 4);
+  // `assert.equal(herolevel, 4)` used to stand here as well, comparing a const
+  // declared in this same test to its own initialiser. Dropped for the same
+  // reason. `herolevel` still earns its place: it is load-bearing in the
+  // hitpointsmax derivation two lines up, where a wrong value does fail.
+});
+
+test("the staged stamina drift is the drift the promoted goldens measured", async () => {
+  // The one staged number with no formula behind it: five `walkright` autopilot
+  // steps carry the hero from `longrange_warrior` into `closerange_warrior` and
+  // cost one stamina each. There is no rule in the battle map to derive that
+  // from — it is a function of the route the autopilot walks — so the only
+  // honest check is against evidence, and the evidence is outside this file:
+  // the runtime-verified prisoner goldens, whose hero walked the same route.
+  //
+  // Every operand here comes from a committed golden fixture, so the assertion
+  // moves when the goldens move. Editing HERO.staminaleft or HERO.staminamax in
+  // this file now fails it, which is exactly what the assertion it replaced
+  // could not do.
+  const goldenDir = fileURLToPath(new URL("fixtures/ss2-1v1-golden/", import.meta.url));
+  const fileNames = (await readdir(goldenDir))
+    .filter((name) => name.startsWith("golden-prisoner-") && name.endsWith(".json"))
+    .sort();
+  assert.ok(
+    fileNames.length >= 4,
+    `only ${fileNames.length} promoted prisoner goldens under ${goldenDir}; this test needs the ` +
+    "runtime evidence it compares against, and must not pass by finding none"
+  );
+
+  const drifts = new Set();
+  for (const fileName of fileNames) {
+    const golden = JSON.parse(await readFile(path.join(goldenDir, fileName), "utf8"));
+    assert.equal(golden.provenance.runtimeVerified, true, fileName);
+    const { hero } = golden.scenario;
+    drifts.add(hero.staminamax - hero.staminaleft);
+  }
+  assert.equal(drifts.size, 1, `the goldens disagree about the walk cost: ${[...drifts].join(", ")}`);
+  const [observedDrift] = drifts;
+
+  assert.equal(
+    HERO.staminamax - HERO.staminaleft,
+    observedDrift,
+    "the post-tutorial hero's staged stamina drift must equal the drift the promoted prisoner " +
+    "goldens actually measured; it is observed, not derived, so the goldens are the only warrant"
+  );
 });
 
 test("the villain block is a declared parameter surface, and every member says so", () => {

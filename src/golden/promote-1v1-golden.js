@@ -333,6 +333,38 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
       defer(new PromotionError(`Observation ${observation.observationId} is supplied more than once.`));
       continue;
     }
+    // A RECORD THE CANDIDATE WAS COPIED FROM CANNOT CONFIRM THE CANDIDATE.
+    //
+    // Every other independence rule here asks whether two observations are two
+    // experiments. This one asks something prior: whether the observation is
+    // evidence at all. When a candidate's scenario and tape were transcribed
+    // out of a live state dump, comparing the fixture to that dump compares the
+    // copy to its own original. `matchSs2ObservationToFixture` cannot report
+    // anything but a match, whatever the game does — the comparison has no way
+    // to come out false, so a pass carries no information.
+    //
+    // This is not hypothetical. Four goldens were promoted citing exactly such
+    // a record as one of their two observations, and the authoring commit said
+    // so in plain words while drawing the opposite conclusion: that a verbatim
+    // copy "carries no transcription" and so counts as observation 1 of the 2.
+    //
+    // Note what this does NOT do. It taints ONE record, not the fixture. A
+    // transcribed candidate stays fully promotable from two other observations
+    // — the numbers in it may well be right, and independent captures can still
+    // establish that. What it may never do is count its own source.
+    if (
+      candidate.provenance.kind === GoldenProvenance.TRANSCRIBED &&
+      observation.observationId === candidate.provenance.authoredFrom
+    ) {
+      defer(new PromotionError(
+        `Observation ${observation.observationId} is the record ${candidate.fixtureId} was authored ` +
+        "from (provenance.authoredFrom), so it cannot serve as evidence for it. The candidate's " +
+        "scenario and tape were copied out of this record; matching them against it compares the copy " +
+        "to its own original and cannot fail, so a match establishes nothing. Promote from two " +
+        "observations that were captured independently of the transcription."
+      ));
+      continue;
+    }
     observationIds.add(observation.observationId);
     sessionIds.add(observation.capture.sessionId);
     const launchNonce = observation.capture.launchNonce;
