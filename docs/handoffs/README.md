@@ -74,6 +74,13 @@ construction; tell the reader to run `git log --oneline -1` instead.
 | Grows | yes, and it is ~800 lines | no — one screen, ideally |
 | Lifetime | permanent, corrected in place | frozen when the session ends |
 
+**`HANDOFF.md` is itself split (2026-08-31).** Above its `## THE ARCHIVE LINE`
+heading is the LIVING HEAD — state, rules, next steps, open items — which is
+appended to and corrected in place; below it is frozen evidence. So the
+correction path is: the living head, plus the next handoff. That split exists
+because a handoff freezes when its session ends, and a correction with nowhere
+live to land never reaches the next reader.
+
 A handoff **points at** `HANDOFF.md` for state. It must not restate it. The
 moment a handoff starts explaining findings it has become a second state
 document, and the two will disagree — which is worse than having one. If they

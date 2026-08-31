@@ -8,6 +8,70 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session. Latest:
 [2026-08-31 18:20 — the pairwise gate, measured](docs/handoffs/2026-08-31-1820--pairwise-gate-measured.md).
 
+---
+
+**THIS FILE IS SPLIT. Everything above `## THE ARCHIVE LINE` is the LIVING HEAD:
+state, rules, next steps and open items. It is appended to and CORRECTED IN
+PLACE. Everything below that line is frozen evidence and history — do not append
+there.**
+
+The invariant, which this project has now broken twice: **there must be exactly
+ONE document where a wrong instruction can be corrected in place, and it must be
+the one `AGENTS.md` points at.** That document is this head. A handoff under
+`docs/handoffs/` is frozen the moment its session ends, so a correction that
+lives only there never reaches the next reader — which is how a false top-ranked
+next step survived in this file while a correction 270 lines above it already
+said so. **Retract AT THE INSTRUCTION, not only above it.**
+
+If you find a live instruction BELOW the archive line that is not represented up
+here, HOIST IT UP rather than correcting it in place.
+
+---
+
+## The design track is deliberately quarantined
+
+A separate track researches endless progression, on branch
+`design/endless-progression` (PR #1), and it now carries a complete proposed
+Arena Circuit progression, loot, inventory, opponent and settlement design.
+
+**Design must never flow into candidate authoring.** A candidate fitted to a
+design is a candidate fitted to a hypothesis, and the capture that "confirms" it
+confirms a fit rather than a prediction — which is the one failure this whole
+pipeline exists to prevent. The rule is not that the two tracks disagree; it is
+that the measuring instrument must not be shaped by what anyone hopes to
+measure. Read the design if you are working on the design. Do not read it while
+authoring a fixture.
+
+This omission is mine: the rule was in the previous handoff and I dropped it
+when rewriting this file, at exactly the moment the design track grew from a
+brief into a full proposal.
+
+**Repository naming.** The GitHub repo was renamed to
+`Zanzagar/swords-and-sandals-2-multiplayer`; the `github` remote already points
+at the new URL. The local worktree directories and the `origin` bundle keep the
+old `ss2-team-arena-foundation` name **intentionally** — do not rename them or
+hand-edit worktree metadata. `package.json` still carries the old identity on
+`main`; the migration is part of PR #1 and lands when that merges.
+
+## Working agreement for parallel agents
+
+Exclusive file ownership stated in every prompt; no agent runs a state-mutating
+git command; no agent launches Ruffle or touches the installation, the save or
+the snapshots; adversarial verifiers write nothing at all.
+
+**The limit is the file graph, not the budget.** Writers are capped at ten to
+twelve coherent slices. Auditors have no cap, because they write nothing and
+cannot conflict — and several independent auditors on the same target is a
+quality technique, not duplication. Give each one ONE named claim to break.
+
+## Keep the project lawful and reversible
+
+Use only a licensed local copy for inspection. Keep originals untouched, work in
+a separate mod folder, and distribute patches or independently authored files
+rather than the original game files or assets.
+
+---
+
 ## READ THIS FIRST — corrections from the 2026-08-31 audit pass
 
 A 13-agent write-nothing audit checked EVERY hand-authored scalar in all 60
@@ -618,6 +682,62 @@ capture window deliberately closes before `nextphase`
 costs six exact-equality constraints per fixture, none related to deflection
 thresholds, armour removal, or the equality quirk these fixtures exist to test.
 
+### Still open, with the evidence below the archive line
+
+Hoisted 2026-08-31 when the file was split, because these were live instructions
+sitting in what became frozen evidence. Each is a one-line statement of the work;
+the analysis that established it is below the line. **Correct these HERE.**
+
+- **A third working forgery against the promotion gate, and it is open.** Hook
+  attribution: a record carrying deliberately wrong hook labels, `callSite` or
+  `injected` passes ingest, verify and promotion. Partly narrowed since — the
+  matcher now TRANSLATES `reason` rather than stripping it, and the pairwise gate
+  sees `callSite` — but the gate catches only DISAGREEMENT, so two records
+  agreeing on the same false attribution still promote. **Do NOT "fix" it by
+  adding a fixture-derived `callSite` comparison**: it is a compile-time constant
+  and that would compare one constant to another.
+- **The eight reachable fixtures over-pin `staminaleft`/`staminamax`**, and the
+  prescribed exclusion must not be written before the audit named below.
+- **The 81 divergence-report digests are unverified**, and the obvious repair is
+  an assertion that cannot fail. A second code path produces them; until it is
+  traced there is nothing to compare against.
+- **`src/adapter/battle-host.js:155` collapses an array `aiFill` to one object**,
+  reproduced end to end, pinned by NO test. Source edit and test rewrite must
+  land together in one owner's hands.
+- **One `isNum` site survives at `ss2-capture-wrapper.as:1407`**, with a
+  demonstrably NaN operand. Fail-closed, so diagnosability rather than
+  corruption — but the claim that the guard is used everywhere is false.
+- **`-StageGold` re-stages on every `-Attempts` retry.** Scope any fix to make
+  the SHOP TRIP idempotent, not the gold write; the obvious fix is worse than the
+  bug.
+- **`validate-vehicle.ps1` launches Ruffle at the REAL save** with no
+  `--save-directory` and no process guard, while this file mandates running it
+  after every wrapper edit. Its save tripwire also hashes only the FIRST
+  `ss2_data.sol` of three.
+- **`run-arena.ps1` kills every Ruffle process rather than its own pid**, which
+  sabotages any concurrent isolated session.
+- **The spell family (8) cannot arm**; `spell_id` does not exist in the build.
+  The byte-backed candidate arming point is `cast_spell_icon`.
+- **Fifteen fixtures assert a hero the build cannot produce**, and the
+  contradiction is FORCED, not a failed search. Re-derive from the map; never
+  edit them to fit.
+- **Docs known stale, not yet reconciled**: the staging runbook's
+  `parseStageList` mechanism and its "weapon table unmapped" premise;
+  `ss2-arena-route.md` §12 on `armourclass`; `ss2-champion-dna.md` §7 on
+  `fightMode`.
+
+---
+
+## THE ARCHIVE LINE
+
+**Everything below is FROZEN EVIDENCE AND HISTORY. Do not append here, and do not
+correct an instruction here — hoist it into the living head above and correct it
+there.** What is below is the analysis that established the items above: it is
+kept because this project's discipline is that a reader must be able to check a
+claim, not because it is current.
+
+---
+
 ### The prescribed fix, and why I did not apply it
 
 Dropping `staminaleft`/`staminamax` from `scenario` is a clean deletion —
@@ -928,45 +1048,3 @@ not — that is the whole basis of the armoured family); `ss2-champion-dna.md` �
 on `fightMode` (the fixtures carry it now).
 
 ---
-
-## The design track is deliberately quarantined
-
-A separate track researches endless progression, on branch
-`design/endless-progression` (PR #1), and it now carries a complete proposed
-Arena Circuit progression, loot, inventory, opponent and settlement design.
-
-**Design must never flow into candidate authoring.** A candidate fitted to a
-design is a candidate fitted to a hypothesis, and the capture that "confirms" it
-confirms a fit rather than a prediction — which is the one failure this whole
-pipeline exists to prevent. The rule is not that the two tracks disagree; it is
-that the measuring instrument must not be shaped by what anyone hopes to
-measure. Read the design if you are working on the design. Do not read it while
-authoring a fixture.
-
-This omission is mine: the rule was in the previous handoff and I dropped it
-when rewriting this file, at exactly the moment the design track grew from a
-brief into a full proposal.
-
-**Repository naming.** The GitHub repo was renamed to
-`Zanzagar/swords-and-sandals-2-multiplayer`; the `github` remote already points
-at the new URL. The local worktree directories and the `origin` bundle keep the
-old `ss2-team-arena-foundation` name **intentionally** — do not rename them or
-hand-edit worktree metadata. `package.json` still carries the old identity on
-`main`; the migration is part of PR #1 and lands when that merges.
-
-## Working agreement for parallel agents
-
-Exclusive file ownership stated in every prompt; no agent runs a state-mutating
-git command; no agent launches Ruffle or touches the installation, the save or
-the snapshots; adversarial verifiers write nothing at all.
-
-**The limit is the file graph, not the budget.** Writers are capped at ten to
-twelve coherent slices. Auditors have no cap, because they write nothing and
-cannot conflict — and several independent auditors on the same target is a
-quality technique, not duplication. Give each one ONE named claim to break.
-
-## Keep the project lawful and reversible
-
-Use only a licensed local copy for inspection. Keep originals untouched, work in
-a separate mod folder, and distribute patches or independently authored files
-rather than the original game files or assets.

@@ -19,8 +19,17 @@ measured evidence into self-confirming data.
 ## Start here
 
 **Read the newest file in `docs/handoffs/` before doing anything else**, then
-`HANDOFF.md` for accumulated state. `HANDOFF.md` is long and is deliberately NOT
-imported here — open it, do not expect it in context.
+**`HANDOFF.md`'s LIVING HEAD** for accumulated state — everything above the
+`## THE ARCHIVE LINE` heading. Below that line is frozen evidence and history:
+read it to check a claim, never to learn what is current, and never append there.
+
+`HANDOFF.md` is long and is deliberately NOT imported here — open it, do not
+expect it in context.
+
+**The living head is the ONLY place a wrong instruction may be corrected**, and
+corrections go AT the instruction, not only in a block above it. A handoff under
+`docs/handoffs/` freezes when its session ends, so a correction that lives only
+there never reaches the next reader.
 
 ## Non-negotiable
 
