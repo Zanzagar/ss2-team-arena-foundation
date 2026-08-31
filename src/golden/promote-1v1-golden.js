@@ -2,10 +2,11 @@
  * Promotion gate from static candidate fixtures to runtime-observed goldens.
  *
  * A candidate is promoted only when at least two matching observations from
- * at least two independent capture sessions exist, every observation is
- * covered by a validated capture manifest, and each observation's digest
- * verifies. Any divergent observation blocks promotion and yields a
- * divergence report that must be preserved instead of discarded.
+ * at least two independent capture sessions exist, no two of them share a
+ * player-minted `capture.launchNonce`, every observation is covered by a
+ * validated capture manifest, and each observation's digest verifies. Any
+ * divergent observation blocks promotion and yields a divergence report that
+ * must be preserved instead of discarded.
  */
 
 import {
@@ -267,6 +268,14 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
 
   const observationIds = new Set();
   const sessionIds = new Set();
+  // launchNonce -> the first observation that claimed it. The nonce is minted
+  // inside the player, from values the launcher does not supply, so two records
+  // agreeing on one came from a single launch however different their
+  // operator-chosen sessionIds look. Legacy records carry no nonce (the field
+  // was validated and discarded before it was carried into the record), and
+  // they must still promote — so this gate binds only observations that
+  // actually carry one, and says nothing about the ones that do not.
+  const nonceOwners = new Map();
   const divergences = [];
   const matches = [];
   // Gate failures — the manifest included — are deferred until every
@@ -302,6 +311,19 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     }
     observationIds.add(observation.observationId);
     sessionIds.add(observation.capture.sessionId);
+    const launchNonce = observation.capture.launchNonce;
+    if (launchNonce !== undefined) {
+      const owner = nonceOwners.get(launchNonce);
+      if (owner !== undefined) {
+        defer(new PromotionError(
+          `Observations ${owner} and ${observation.observationId} share launchNonce ${launchNonce}; ` +
+          "the nonce is minted once per player launch, so they are one session's evidence offered " +
+          "twice, not two independent observations."
+        ));
+      } else {
+        nonceOwners.set(launchNonce, observation.observationId);
+      }
+    }
     if (manifestSha256 !== null) {
       if (observation.capture.captureToolVersion !== manifest.captureToolVersion) {
         defer(new PromotionError(

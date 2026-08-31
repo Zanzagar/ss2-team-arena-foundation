@@ -447,6 +447,19 @@ function stagedDump(scenarioSide) {
   return { ...PROJECTION_DEFAULTS, ...scenarioSide };
 }
 
+/**
+ * The end line as the wrapper actually emits it, minus the `null`
+ * after-attestation placeholder that only a live run carries. `overdraw` is
+ * mandatory for `injected-tape-runtime` traces and `launchNonce` is the
+ * player-minted identity; both are carried into `capture.*` by ingest.
+ */
+const END_LINE = Object.freeze({
+  t: "end",
+  installHashVerifiedAfter: true,
+  overdraw: 0,
+  launchNonce: "417238-1900311477"
+});
+
 function thresholdTraceLines() {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
   const heroStaged = stagedDump(fixture.scenario.hero);
@@ -482,7 +495,7 @@ function thresholdTraceLines() {
     ...fixture.samples.slice(5).map(roll),
     { t: "final", side: "hero", fields: heroFinal },
     { t: "final", side: "villain", fields: villainFinal },
-    { t: "end", installHashVerifiedAfter: true }
+    { ...END_LINE }
   ];
 }
 
@@ -1071,7 +1084,7 @@ test("an invalid manifest cannot discard divergence evidence during promotion", 
 test("ingest requires a live attestation for placeholder end lines", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
   const lines = thresholdTraceLines();
-  lines[lines.length - 1] = { t: "end", installHashVerifiedAfter: null };
+  lines[lines.length - 1] = { ...END_LINE, installHashVerifiedAfter: null };
   assert.throws(
     () => ingestSs2CaptureTrace(traceText(lines), fixture),
     /null after-attestation placeholder/
@@ -1081,7 +1094,7 @@ test("ingest requires a live attestation for placeholder end lines", () => {
   assert.throws(
     () => ingestSs2CaptureTrace(
       traceText(lines.map((line) =>
-        line.t === "end" ? { t: "end", installHashVerifiedAfter: false } : line
+        line.t === "end" ? { ...END_LINE, installHashVerifiedAfter: false } : line
       )),
       fixture
     ),

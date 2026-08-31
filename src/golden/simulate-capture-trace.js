@@ -185,7 +185,22 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
   for (const side of ["hero", "villain"]) {
     lines.push({ t: "final", side, fields: { ...fixture.expected.state[side] } });
   }
-  lines.push({ t: "end", installHashVerifiedAfter: true });
+  // The mandatory-overdraw rule at ingest is scoped to `injected-tape-runtime`,
+  // so it does not reach a `synthetic-simulator` trace and this line is not
+  // required to carry `overdraw`. It carries it anyway, for two reasons. The
+  // claim is true: the simulator serves exactly the fixture's tape and there is
+  // no live RNG behind it to fall through to, so the count really is zero. And
+  // these traces are the wrapper's executable specification — the wrapper emits
+  // `overdraw` on its end line, so a reference trace that omitted it would
+  // under-specify the grammar the wrapper must reproduce.
+  //
+  // `launchNonce` is deliberately NOT emitted. It exists to carry one identity
+  // the operator did not choose, minted inside a real player launch; a
+  // simulator-invented value would be a fabricated independence token, and the
+  // promotion gate's uniqueness check would then read two synthetic records as
+  // two launches. Absent is the honest value, and simulated records are never
+  // promotable in any case.
+  lines.push({ t: "end", installHashVerifiedAfter: true, overdraw: 0 });
   const trace = `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
 
   // Fail fast: a reference trace that its own pipeline cannot ingest and

@@ -71,6 +71,35 @@ const CAPTURE_KEYS = Object.freeze([
   "observedAt",
   "sessionId"
 ]);
+/**
+ * The two capture attestations the wrapper mints on the trace's `end` line and
+ * `capture-ingest.js` carries into the record.
+ *
+ * They are OPTIONAL, and deliberately so. Every observation committed before
+ * the fields existed was ingested by a version that validated and then
+ * discarded them, and an observation's digest covers its own record — adding a
+ * required field would invalidate the digest of every one of those records and
+ * with it the provenance of every golden that cites them. So a legacy record
+ * that carries neither still validates, still matches, and still promotes; it
+ * simply carries no assurance on these two points. What forces new evidence to
+ * carry them is the mandatory check at ingest (see capture-ingest.js), not this
+ * schema.
+ *
+ * - `overdraw`: draws the armed recording window made AFTER the injected tape
+ *   ran out. Those draws are invisible in the trace itself, so without this
+ *   count a run that drew more randomness than the candidate models is
+ *   indistinguishable from one that matched it. Ingest refuses any trace
+ *   reporting a non-zero count, so the only value a valid record can carry is
+ *   0 — the field is an attestation that the guard ran, not a measurement.
+ * - `launchNonce`: minted inside the player from values the launcher does not
+ *   supply. `sessionId` and `observationId` are both operator strings; the
+ *   nonce is the one identity field on a record that the operator did not
+ *   choose, which is why the promotion gate refuses two observations that
+ *   share one.
+ */
+const CAPTURE_OPTIONAL_KEYS = Object.freeze(["launchNonce", "overdraw"]);
+
+export const SS2_CAPTURE_ATTESTATION_KEYS = CAPTURE_OPTIONAL_KEYS;
 const SAMPLE_KEYS = Object.freeze(["callSite", "injected", "label", "max", "min", "source", "value"]);
 const PROJECTED_BOOLEAN_KEYS = new Set([
   "burning",
@@ -121,6 +150,21 @@ function assertExactKeys(value, expectedKeys, path) {
   const expected = [...expectedKeys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
     throw new ObservationValidationError(`${path} has unexpected or missing fields.`);
+  }
+}
+
+/**
+ * Every required key present, and no key outside required ∪ optional. Used
+ * only where a block has genuinely optional members; everywhere else the
+ * exact-keys check stays, because an unexpected field is a defect.
+ */
+function assertKeysWithOptional(value, requiredKeys, optionalKeys, path) {
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new ObservationValidationError(`${path} has an unexpected field ${key}.`);
+  }
+  for (const key of requiredKeys) {
+    if (!Object.hasOwn(value, key)) throw new ObservationValidationError(`${path} is missing the field ${key}.`);
   }
 }
 
@@ -176,7 +220,7 @@ function assertBuildBlock(build, path) {
 
 function assertCaptureBlock(capture) {
   if (!isPlainObject(capture)) throw new ObservationValidationError("capture must be an object.");
-  assertExactKeys(capture, CAPTURE_KEYS, "capture");
+  assertKeysWithOptional(capture, CAPTURE_KEYS, CAPTURE_OPTIONAL_KEYS, "capture");
   if (typeof capture.sessionId !== "string" || !TOKEN_PATTERN.test(capture.sessionId)) {
     throw new ObservationValidationError("capture.sessionId must be a valid token.");
   }
@@ -204,6 +248,23 @@ function assertCaptureBlock(capture) {
     throw new ObservationValidationError(
       "capture.mutationGranularity must be property-watch; coarser capture cannot match ordered mutation traces."
     );
+  }
+  // Zero is the only value a valid record can carry: ingest refuses any trace
+  // whose armed window drew past the injected tape, so a record claiming a
+  // non-zero count is a record of a divergence that should never have become
+  // one. Checked as `!== 0` rather than as a range so a string "0", a null, or
+  // a float are all refused with the same message.
+  if (Object.hasOwn(capture, "overdraw") && capture.overdraw !== 0) {
+    throw new ObservationValidationError(
+      "capture.overdraw must be 0 when present: it attests that the armed recording window made no " +
+      "draw after the injected tape ran out, and ingest refuses every trace that reports otherwise."
+    );
+  }
+  if (
+    Object.hasOwn(capture, "launchNonce") &&
+    (typeof capture.launchNonce !== "string" || !TOKEN_PATTERN.test(capture.launchNonce))
+  ) {
+    throw new ObservationValidationError("capture.launchNonce must be a valid token when present.");
   }
 }
 
@@ -441,7 +502,9 @@ function comparableSamples(samples) {
 
 /**
  * The projection two independent observations must agree on. Identity and
- * capture metadata are excluded (they must differ); cosmetic debris rolls are
+ * capture metadata are excluded (they must differ — `capture.launchNonce`
+ * emphatically so: two records that agree on it are the same launch, which is
+ * why the promotion gate refuses them); cosmetic debris rolls are
  * excluded (unobservable and combat-irrelevant); mutation reasons are wrapper
  * hook attributions and are kept because independent runs of the same tooling
  * must attribute alike.

@@ -15,10 +15,12 @@
  *   event  semantic event (defender-hurt/defender-blocked/magic-damage/
  *          death/overlay-label)
  *   final  post-action dump, one per side
- *   end    last line: closing hash attestation
+ *   end    last line: closing hash attestation, plus the over-draw count and
+ *          the player-minted launch nonce
  */
 
 import {
+  ObservationCaptureMethod,
   SS2_OBSERVATION_KIND,
   SS2_OBSERVATION_SCHEMA_VERSION,
   SS2_PROJECTED_COMBATANT_KEYS,
@@ -48,6 +50,7 @@ const META_KEYS = Object.freeze([
 ]);
 const HOOK_PATTERN = /^[a-z][a-z-]{0,63}$/;
 const SET_PATH_PATTERN = /^\/(?:hero|villain)\/([a-z][a-z0-9_]*)$/;
+const LAUNCH_NONCE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export class CaptureTraceError extends Error {
   constructor(message, options = {}) {
@@ -108,7 +111,7 @@ function readMeta(lines) {
   return entry;
 }
 
-function readEnd(lines) {
+function readEnd(lines, meta, options) {
   const { lineNumber, entry } = lines[lines.length - 1];
   if (entry.t !== "end") fail(lineNumber, "the last line must be an end line.");
   const allowed = new Set(["t", "installHashVerifiedAfter", "overdraw", "launchNonce"]);
@@ -124,17 +127,32 @@ function readEnd(lines) {
   if (entry.installHashVerifiedAfter !== true && entry.installHashVerifiedAfter !== null) {
     fail(lineNumber, "installHashVerifiedAfter must be true or the null placeholder.");
   }
-  // Draws the armed window made after the injected tape ran out. They are
-  // invisible in the trace itself — they fall through to the live RNG and are
-  // logged only as `dbg` lines, which delog strips — so a run that drew more
-  // times than the candidate models would otherwise be indistinguishable from
-  // one that matched it. That is a divergence, and it must be refused here
-  // rather than silently matched.
+  // `overdraw` is the count of draws the armed window made after the injected
+  // tape ran out. They are invisible in the trace itself — they fall through to
+  // the live RNG and are logged only as `dbg` lines, which delog strips — so a
+  // run that drew more times than the candidate models would otherwise be
+  // indistinguishable from one that matched it. That is a divergence, and it is
+  // refused here rather than silently matched.
   //
-  // Absent on traces from wrappers predating the field; those are accepted so
-  // existing raw evidence stays ingestible, and they simply carry no
-  // assurance on this point.
-  if (Object.hasOwn(entry, "overdraw")) {
+  // Because the field is the ONLY evidence on that point, its absence is not a
+  // lesser form of assurance, it is none at all. So an injected-tape trace must
+  // carry it. Passive captures are exempt because the count is meaningless for
+  // them (with no tape, every draw is past its end), and the simulator's
+  // synthetic traces are exempt because nothing in them can draw at all — see
+  // simulate-capture-trace.js, which emits `overdraw: 0` regardless because it
+  // is the wrapper's executable specification of this same end line.
+  if (!Object.hasOwn(entry, "overdraw")) {
+    if (meta.method === ObservationCaptureMethod.INJECTED_TAPE && options.allowMissingOverdraw !== true) {
+      fail(
+        lineNumber,
+        `an ${ObservationCaptureMethod.INJECTED_TAPE} trace must carry end.overdraw. It is the only ` +
+        "record that the armed window made no draw after the tape ran out; a trace without it " +
+        "carries no assurance on that point at all. Archived traces from wrappers predating the " +
+        "field can still be re-ingested for divergence-report regeneration by passing the ingest " +
+        "option { allowMissingOverdraw: true }, which the live capture path must never pass."
+      );
+    }
+  } else {
     if (!Number.isInteger(entry.overdraw) || entry.overdraw < 0) {
       fail(lineNumber, "end.overdraw must be a non-negative integer.");
     }
@@ -147,8 +165,15 @@ function readEnd(lines) {
       );
     }
   }
-  if (Object.hasOwn(entry, "launchNonce") && typeof entry.launchNonce !== "string") {
-    fail(lineNumber, "end.launchNonce must be a string when present.");
+  // Minted inside the player from values the launcher does not supply, so a
+  // record carries one identity field the operator did not choose. Validated
+  // against the record's own token pattern here so a malformed nonce is
+  // reported against the trace line that carried it rather than surfacing much
+  // later as a schema error on a record ingest itself built.
+  if (Object.hasOwn(entry, "launchNonce")) {
+    if (typeof entry.launchNonce !== "string" || !LAUNCH_NONCE_PATTERN.test(entry.launchNonce)) {
+      fail(lineNumber, "end.launchNonce must be a token string when present.");
+    }
   }
   return entry;
 }
@@ -169,12 +194,25 @@ function projectFields(fields, requiredKeys, context, lineNumber) {
  * given target fixture. The fixture determines which staged fields become the
  * observation scenario; the recorded values are always the observed ones, so
  * a mis-staged scenario surfaces later as an explicit fixture mismatch.
+ *
+ * Options:
+ * - `installHashVerifiedAfter` — supply the live post-session hash result when
+ *   the trace carries the wrapper's `null` placeholder.
+ * - `allowMissingOverdraw` — accept an `injected-tape-runtime` trace whose end
+ *   line has no `overdraw`. This exists for exactly one purpose: the archived
+ *   raw traces under the ignored `captures/` directory predate the field (113
+ *   of 177 carry it; the rest do not), and regenerating divergence reports from
+ *   them must not be blocked by evidence they could not have recorded. The live
+ *   capture path — `tools/capture-session.mjs` and
+ *   `tools/runtime-capture/campaign.mjs` — must never pass it, and does not: a
+ *   record ingested under this option carries no `capture.overdraw`, so it
+ *   openly claims nothing rather than claiming zero.
  */
 export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
   validateSs2OneVsOneFixture(fixture);
   const lines = parseLines(rawText);
   const meta = readMeta(lines);
-  const end = readEnd(lines);
+  const end = readEnd(lines, meta, options);
   const installHashVerifiedAfter =
     end.installHashVerifiedAfter === true || options.installHashVerifiedAfter === true;
   if (!installHashVerifiedAfter) {
@@ -451,7 +489,17 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
       observedAt: meta.observedAt,
       installHashVerifiedBefore: meta.installHashVerifiedBefore,
       installHashVerifiedAfter,
-      mutationGranularity: meta.mutationGranularity
+      mutationGranularity: meta.mutationGranularity,
+      // Carried, not discarded. These two are the only evidence in a committed
+      // record that the over-draw guard ran and that the run was a distinct
+      // player launch, so a reviewer holding nothing but the repository can
+      // check them. Both are omitted when the trace did not carry them, which
+      // is what keeps every observation committed before the fields existed
+      // byte-identical: an observation's digest covers its own record, so a
+      // field present on legacy records would rewrite all of their digests and
+      // invalidate the provenance of every golden citing them.
+      ...(Object.hasOwn(end, "overdraw") ? { overdraw: end.overdraw } : {}),
+      ...(Object.hasOwn(end, "launchNonce") ? { launchNonce: end.launchNonce } : {})
     },
     target: { fixtureId: fixture.fixtureId },
     scenario,

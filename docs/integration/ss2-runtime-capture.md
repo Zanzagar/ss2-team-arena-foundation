@@ -49,8 +49,8 @@ Module responsibilities:
 | File | Responsibility |
 | --- | --- |
 | `src/golden/observation.js` | observation schema/digests, comparison projection, observation-vs-observation and observation-vs-fixture matching |
-| `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks |
-| `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate, promotion, divergence reports |
+| `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks, the mandatory over-draw guard, and carrying the two `end`-line attestations into `capture.*` |
+| `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate (distinct sessions, no shared launch nonce), promotion, divergence reports |
 | `src/golden/simulate-capture-trace.js` | reference trace generator (`synthetic-simulator` method, never promotable) for pipeline dry runs and wrapper validation |
 | `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `tape`, `delog`, `ingest`, `verify`, `promote`, `manifest-digest` |
 | `tools/runtime-capture/` | AS2 wrapper source, shell/stub builders, the `validate-vehicle.ps1` gate, and `launch-capture.ps1` (see its README for validation status) |
@@ -72,7 +72,10 @@ derivations, and open staging questions) are catalogued in
    test/observations/ss2-1v1/<observation-id>.json` — for wrapper traces
    (whose end line carries the `null` attestation placeholder) ingest re-runs
    the installed-hash verification itself and refuses the trace when the
-   post-session check fails.
+   post-session check fails. It also refuses an `injected-tape-runtime` trace
+   whose end line carries no `overdraw`, and any trace whose `overdraw` is
+   non-zero; both are described under
+   [the capture attestations](#the-two-capture-attestations-on-the-end-line).
 5. `node tools/capture-session.mjs verify --fixture <candidate> --observation
    <record>`; a divergence is preserved automatically, never deleted.
 6. Repeat from step 1 in a fresh game launch (a new `sessionId`) until at
@@ -84,8 +87,9 @@ derivations, and open staging questions) are catalogued in
 Promotion enforces, in code, everything the fixture validator already
 requires of goldens: `licensed-observation` provenance, `runtimeVerified:
 true`, at least two unique observation IDs and digests, distinct capture
-sessions, per-observation manifest attestation, and the capture-manifest
-SHA-256. `candidateFlags` do not carry over; a promoted quirk (for example the
+sessions, no two observations sharing a `capture.launchNonce`,
+per-observation manifest attestation, and the capture-manifest SHA-256.
+`candidateFlags` do not carry over; a promoted quirk (for example the
 armour-equality behavior) is thereby confirmed as build behavior.
 
 ## Instrumentation vehicle (installed and stub-validated 2026-08-30)
@@ -138,7 +142,12 @@ patching:
 - emits the end line with a `null` post-session attestation placeholder: the
   hash check cannot have run yet, so `capture-session.mjs ingest` re-runs the
   installed-hash verification live and stamps `installHashVerifiedAfter` only
-  when it passes;
+  when it passes. The same line carries `overdraw` (draws made after the tape
+  ran out — mandatory for an injected-tape capture) and `launchNonce` (minted
+  inside the player before the `Math` tap is installed, so it consumes nothing
+  from the tape); both are carried into the observation record's `capture`
+  block, and both are described under
+  [the capture attestations](#the-two-capture-attestations-on-the-end-line);
 - emits only the JSONL trace grammar below (no screenshots, no assets).
 
 ### Reading divergent traces
@@ -154,10 +163,19 @@ from the *tape's* bounds, and the game's own `randomBetween(a, b)` then
 derives `floor(fraction * (b - a + 1)) + a` from its *real* bounds. Feeding a
 `21..23` entry to a real `5..20` call yields 13, not 22. Second, once the tape
 is exhausted the tap falls through to the live RNG and records the draw only
-as a `dbg` line, which `delog` strips — so a run that made *more* draws than
-the fixture models is not visible in the trace at all. Check
-`"at":"mrand"` in the raw log to rule that out; a capture whose count is
-trusted must show none.
+as a `dbg` line, which `delog` strips — so the draw itself is not visible in
+the delogged trace.
+
+**Those over-draws are no longer silent.** The wrapper counts them and reports
+the total as `overdraw` on the `end` line, ingest refuses any trace reporting a
+non-zero count, and the zero is carried into `capture.overdraw` on the
+observation record, so a reviewer holding only the repository can see that the
+guard was satisfied. An `injected-tape-runtime` trace that carries no count at
+all is refused outright — see
+[the capture attestations](#the-two-capture-attestations-on-the-end-line). The
+individual draws are still only in the raw log: `"at":"mrand"` lines under
+`captures/` are where you read *what* was drawn, and the count is what tells you
+whether you need to.
 
 Interpret divergent raw traces by position, and treat injected values on a
 divergent run as controlled experimental inputs, which they are.
@@ -177,7 +195,9 @@ a candidate:
   whether an attack **hit or missed** is measured, not assumed;
 - the staged and final state dumps;
 - `attack_direction` and `fight_mode`, read from the game;
-- the **number** of draws in the armed window.
+- the **number** of draws in the armed window — including the draws that ran
+  past the end of the injected tape, which the wrapper counts as `overdraw` and
+  ingest refuses when non-zero.
 
 **Not observed** — these are echoed or derived, and a match cannot contradict
 them:
@@ -200,9 +220,18 @@ rediscovered as surprises:
   `synthetic-simulator` trace with the method rewritten ingests, matches and
   promotes, reproducing a committed observation's digest exactly. The raw
   logs under `captures/` are what actually distinguish a live run, and they
-  are not committed;
+  are not committed. Note one incidental consequence of the mandatory
+  over-draw rule: a rewritten-method trace must now also carry a plausible
+  `overdraw`, which is one more line for a forger to edit and no kind of
+  barrier. The rule guards against assurance being silently *absent*, not
+  against it being forged;
 - session independence is `sessionId` and `observationId`, both supplied by
-  the operator. Nothing binds an observation to a distinct process.
+  the operator, plus `launchNonce`, which is not: it is minted inside the
+  player and the promotion gate refuses two observations that share one. That
+  narrows the gap rather than closing it — the nonce distinguishes player
+  launches, and nothing still binds an observation to a distinct process.
+  Legacy records carry no nonce, so for the 22 goldens already promoted,
+  independence remains exactly the two operator strings.
 
 **How to strengthen a match rather than repeat it.** Because three of the
 seven tape slots in the prisoner scenario write nothing observable (the
@@ -232,18 +261,27 @@ Their capture method is
 rejects unconditionally — a simulated trace can never become runtime
 evidence, and simulated records do not belong in `test/observations/`.
 
+A reference trace's `end` line carries `overdraw: 0` and **no** `launchNonce`.
+The mandatory-overdraw rule does not reach `synthetic-simulator`, so the count
+is not required of it; it is emitted anyway because the claim is true (the
+simulator serves exactly the fixture's tape, with no live RNG behind it) and
+because these traces are the wrapper's executable specification of that same
+end line. The nonce is the opposite case: it exists to carry one identity
+minted inside a real player launch, so a simulator-invented value would be a
+fabricated independence token. Absent is the honest value.
+
 ## Raw trace grammar (JSON lines, version 1)
 
 | Line `t` | Position | Contents |
 | --- | --- | --- |
 | `meta` | first | trace schema version, observation/session IDs, tool version, method, timestamp, `mutationGranularity`, `installHashVerifiedBefore: true`, attacker side |
 | `state` | before the action, one per side | staged numeric/boolean field dump per combatant |
-| `var` | any | named scalar: `attack_direction`, `criticalhit` |
+| `var` | any | named scalar: `fight_mode`, `attack_direction` (physical ingress), `spell_id` (spell ingress — `magic_damage_character` has no direction chain), `criticalhit` |
 | `roll` | action | `{label, source, min, max, value, callSite, injected}` in exact call order |
-| `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` is the wrapper's attribution (`damagecharacter`, `remove-armour`, `death`, ...) |
-| `event` | action | `defender-hurt`/`defender-blocked`/`death`/`overlay-label` |
+| `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` is the wrapper's attribution (`damagecharacter`, `magic-damage-character`, `remove-armour`, `death`, ...) |
+| `event` | action | `defender-hurt`/`defender-blocked`/`magic-damage`/`death`/`overlay-label` |
 | `final` | after the action, one per side | post-action field dump |
-| `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails |
+| `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails; `overdraw`, the count of draws the armed window made after the injected tape ran out; `launchNonce`, minted inside the player. See [the capture attestations](#the-two-capture-attestations-on-the-end-line) |
 
 Ingestion (`src/golden/capture-ingest.js`) enforces integrity before a record
 exists: every `set` must chain from the staged value or the previous `after`
@@ -252,6 +290,64 @@ of each watched chain (any gap is an "unobserved mutation" error), a death
 event must be followed by its matching overlay label, and the scenario is
 projected onto exactly the target fixture's staged fields — a mis-staged
 scenario is recorded as observed and surfaces as an explicit mismatch.
+
+### The two capture attestations on the end line
+
+The wrapper mints two fields on the `end` line that are neither observations of
+the game nor operator input. Both are carried into the observation record's
+`capture` block, so a reviewer holding only the repository can check them.
+
+**`overdraw`** is the count of draws the armed recording window made *after* the
+injected tape ran out. Those draws are otherwise invisible: they fall through to
+the live RNG and are logged only as `dbg` lines, which `delog` strips. Without
+the count, a run that drew more randomness than the target candidate models is
+indistinguishable from one that matched it. Ingest refuses any trace reporting a
+non-zero count — that is a divergence, and the fix is to correct the candidate's
+roll order from the raw trace — so the only value a committed record can carry
+is `0`. The field is an attestation that the guard ran, not a measurement.
+
+It is **mandatory** for `injected-tape-runtime` traces. Its absence is not a
+weaker assurance, it is none, so a trace without it is refused rather than
+quietly ingested. The rule is scoped to that one method: a `passive-runtime`
+capture injects no tape, so every draw is past its end and the count would be
+meaningless, and a `synthetic-simulator` trace has no live RNG behind it to draw
+from at all.
+
+There is exactly one escape hatch, the ingest option
+`{ allowMissingOverdraw: true }`. It exists for a single documented purpose: the
+archived raw traces under the ignored `captures/` directory predate the field
+(113 of 177 carry it), and regenerating divergence reports from them must not be
+blocked by evidence they could not have recorded. The live capture path —
+`tools/capture-session.mjs` and `tools/runtime-capture/campaign.mjs` — must never
+pass it, and a test asserts that neither file mentions it. A record ingested
+under the hatch carries **no** `capture.overdraw` at all rather than a
+manufactured zero: it claims nothing, which is the truth about it.
+
+**`launchNonce`** is minted inside the player, before the `Math` tap is
+installed, from values the launcher does not supply. `sessionId` and
+`observationId` are both operator strings, so the nonce is the one identity
+field on a record that the operator did not choose. The promotion gate refuses
+two observations that share one: the nonce is minted once per player launch, so
+agreeing on it means one launch's evidence offered twice, however different the
+two `sessionId`s look. It is not a security boundary — nothing in this chain is
+— and it does not bind an observation to a distinct *process*, only to a
+distinct player start.
+
+**Both fields are optional in the record schema, and must stay optional.** An
+observation's digest covers its own record, and every observation committed
+before the fields existed was ingested by a version that validated and then
+discarded them. Making either field required would change those records'
+digests and invalidate the provenance of every golden citing them. So a legacy
+record validates, matches and promotes exactly as before; it simply carries no
+assurance on these two points. What forces *new* evidence to carry them is the
+mandatory check at ingest, not the schema. For the same reason the nonce gate
+binds only observations that actually carry a nonce — absence is never read as
+a shared value.
+
+Neither field takes part in matching. `projectSs2ObservationForComparison` and
+`matchSs2ObservationToFixture` both exclude the whole `capture` block, so two
+observations that differ only in their nonce still match each other and the
+fixture.
 
 ## Observation records
 
@@ -262,6 +358,15 @@ ordered mutation trace, semantic events, the result event (if any), the final
 state projection, and a SHA-256 digest over the canonical-JSON record (sorted
 keys). The digest covers the observation's identity, so independent
 observations always digest uniquely — exactly what golden provenance requires.
+
+The `capture` block's required members are `sessionId`, `captureToolVersion`,
+`method`, `observedAt`, `installHashVerifiedBefore`, `installHashVerifiedAfter`
+and `mutationGranularity`. It also admits exactly two optional members,
+`overdraw` and `launchNonce`, carried from the trace's `end` line and described
+under [the capture attestations](#the-two-capture-attestations-on-the-end-line);
+`overdraw` may only be `0`, `launchNonce` must be a token, and no other key is
+accepted. Every record committed to date predates both, which is why they are
+optional and why no committed record was rewritten to add them.
 
 ## Matching rules
 
