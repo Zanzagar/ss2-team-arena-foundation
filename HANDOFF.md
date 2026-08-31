@@ -78,7 +78,14 @@ duel; the 2 % special-event draw). Retries deliberately do **not** restore the
 snapshot — the save already holds every completed bout.
 
 Snapshot **`level4-vitality-tournament-gate`** holds the level-4 gladiator:
-vitality 13, 220 hitpoints, 5723 gold, `current_tournament` 1.
+vitality 13, 5723 gold, `current_tournament` 1. (Its `hitpointsmax` reads 220 in
+the level-up log, which is the pre-spend value — `battlevalues` had last run
+before the four points went in. The formula `herolevel*10 + vitality*20` gives
+**300**, and that is what the next `battlevalues` produces.)
+
+Snapshot **`level4-armed-weapon39`** is the same gladiator after a shop trip:
+weapon 39, 843,130 gold, strength and speed 60. It is the one to use for a
+champion attempt.
 
 ### Scenario staging (`-StageHero`, `-StageVillain`)
 
@@ -89,8 +96,32 @@ game re-derives values during battle construction. It stops before the action
 arms, so no staged write can ever appear in the mutation trace. Every field is
 reported on the trace's `end` line, read back from the game rather than echoed.
 
-**Verified live:** eleven fields including `herolevel`, `min_damage 300` and
-`hitpoints 999` all stuck.
+**A claim this file made and has to withdraw.** It previously read "verified
+live: eleven fields including `herolevel`, `min_damage 300` and `hitpoints 999`
+all stuck." That rested on `stagedSummary()`, which at the time read the fields
+back **on the same tick it wrote them** — a tautology that could never report an
+overwrite. The same runs' own later lines contradict it: `staged …
+hero.herolevel=5` is followed seconds later by `battle-ready level 4`, and by
+`capture-refused-unstaged staminaleft:106 staminamax:110 herolevel:4`. It was
+non-deterministic across attempts.
+
+This is the project's named worst failure mode — evidence fitted to the design
+rather than a prediction that could falsify it — committed by the instrument
+built to detect it. The declaration is now read at ARMING time, one whole action
+after the writes, so an overwrite is visible; and staging resets per bout,
+because `stageTicks` was global and bout 1 of a tournament consumed the entire
+budget, leaving the champion bout — the only one that is ever evidence —
+unstaged.
+
+**What is actually established** about what survives, from the bytes:
+`damagecharacter` and the deflection threshold read every operand off the live
+`game_defender` reference at roll time, so staged armour IS honoured; but
+`check_stats` clamps `hitpoints` down to `hitpointsmax` on every phase
+transition, and `battlevalues` recomputes `hitpointsmax`, `min_damage`,
+`max_damage` and `staminamax`, so those four cannot be staged into a fight. The
+armour exception is real and load-bearing: the block that re-sums
+`armourclass_max` is guarded by `if (battle_started == true) skip`, so staged
+armour survives where staged hitpoints do not.
 
 Why it exists: `candidate-armoured-*` stages helmet 6 / greaves 2, which
 `randomise_gladiator` will never produce by chance; and the champion bout needs

@@ -233,19 +233,25 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
             # nothing about it. Waiting for the bout to be won instead would
             # throw away good captures against an opponent nobody can beat,
             # which is exactly the champion's case.
-            if ($ArenaCapture -ne 'never' -and
-                (Select-String -Path $logPath -Pattern '"t":"end"' -SimpleMatch -Quiet)) {
-                $outcome = 'CAPTURED'; break
-            }
-            if (Select-String -Path $logPath -Pattern '"step":"TARGET-REACHED' -SimpleMatch -Quiet) {
-                $outcome = 'REACHED'; break
-            }
+            # An ABORT is checked FIRST, before a closed trace. The wrapper's
+            # hooks keep running after arenaAbort - only the navigator stops -
+            # so a run that hit a gate and then armed would otherwise be
+            # reported as a successful capture. The wrapper now also refuses to
+            # arm once aborted; this is the other half of that fix, and the
+            # cheaper half to get wrong.
             $abort = Select-String -Path $logPath -Pattern '"step":"ABORT:' -SimpleMatch |
                 Select-Object -First 1
             if ($abort) {
                 $outcome = 'ABORTED'
                 if ($abort.Line -match '"step":"ABORT:([a-z-]+)"') { $abortReason = $Matches[1] }
                 break
+            }
+            if ($ArenaCapture -ne 'never' -and
+                (Select-String -Path $logPath -Pattern '"t":"end"' -SimpleMatch -Quiet)) {
+                $outcome = 'CAPTURED'; break
+            }
+            if (Select-String -Path $logPath -Pattern '"step":"TARGET-REACHED' -SimpleMatch -Quiet) {
+                $outcome = 'REACHED'; break
             }
         }
         if (-not (Get-Process ruffle -ErrorAction SilentlyContinue)) { $outcome = 'WINDOW-GONE'; break }

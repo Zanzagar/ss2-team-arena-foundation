@@ -557,7 +557,11 @@ var arenaPolicy = (rawArenaPolicy == undefined || rawArenaPolicy == "") ? "" : r
 if (!arenaMode) arenaPolicy = "";
 if (arenaMode && arenaPolicy == "" && autopilotSteps.length == 0) arenaPolicy = "aggressive";
 var arenaTimeCeiling = Number(rawTimeOfDayCeiling);
-if (!(arenaTimeCeiling > 0)) arenaTimeCeiling = ARENA_DEFAULT_TIME_OF_DAY_CEILING;
+// Clamped BELOW the special event, not merely defaulted. A fat-fingered
+// -TimeOfDayCeiling 1500 would otherwise remove the only protection against
+// the 200-point event that permanently mutates charisma, magicka or gold and
+// saves it. Un-negated `<` so NaN falls to the default.
+if (!(arenaTimeCeiling < 190)) arenaTimeCeiling = ARENA_DEFAULT_TIME_OF_DAY_CEILING;
 var arenaSessionLimitMs = Number(rawSessionLimitSec) * 1000;
 if (!(arenaSessionLimitMs > 0)) arenaSessionLimitMs = ARENA_DEFAULT_SESSION_LIMIT_SEC * 1000;
 
@@ -730,6 +734,11 @@ function arenaReachedTarget(root) {
 
 /** A fresh bout re-arms the fight policy; the prisoner route never loops. */
 function arenaResetAutopilot() {
+    // Staging is PER BOUT, not per process. It was global, so on a tournament
+    // run bout 1 consumed the whole 20-tick budget and the champion bout - the
+    // only one that is ever evidence - was never staged at all.
+    stageTicks = 0;
+    stageReported = false;
     autopilotIndex = 0;
     autopilotIdleTicks = 0;
     autopilotCooldown = 0;
@@ -774,8 +783,27 @@ var stageGold = Number(rawStageGold);
 if (!(stageGold > 0)) stageGold = 0;
 var shopWeaponTop = Number(rawShopWeapon);
 if (!(shopWeaponTop > 0)) shopWeaponTop = 0;
+// ARMOUR BUYING IS NOT IMPLEMENTED, and is refused rather than half-done.
+//
+// Two independent defects, both byte-verified. shopConfirm's assignment block
+// is guarded `if (which == "weapon")`, so for armour it would subtract gold and
+// call constructDNA WITHOUT EQUIPPING ANYTHING - a pure gold sink. And the real
+// confirm (character 1907) dispatches on `armourpiece` (+0x017b: 1 boot,
+// 2 shinguard, 3 greaves, 4 breastplate, 5 gauntlet, 6 shoulderguard, ...),
+// which getarmourinfo sets on rollover - a mapping this wrapper does not
+// implement. The page list was wrong too: armourbuttons() is called from
+// sprite 1909 frames 48..177, never from `browse`, so the handlers could never
+// have been found.
+//
+// A half-implemented purchase that spends a licensed gladiator's gold and
+// equips nothing is worse than no purchase, so this refuses loudly.
 var shopArmourTop = Number(rawShopArmour);
 if (!(shopArmourTop > 0)) shopArmourTop = 0;
+if (shopArmourTop > 0) {
+    trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"shop-armour-unimplemented\"" +
+        ",\"requested\":" + jnum(shopArmourTop) + "}");
+    shopArmourTop = 0;
+}
 
 var goldStaged = false;
 var heroStagedInTown = false;
@@ -981,11 +1009,33 @@ function stepArenaNavigator() {
         // Unlike the damage fields, an ATTRIBUTE is a genuine battlevalues
         // input rather than one of its outputs, so staging it is not writing
         // over a formula the game will recompute.
-        if (!heroStagedInTown && (stageHeroFields.length > 0)) {
+        // ONLY the attributes the shop gate reads, and only when shopping.
+        //
+        // An earlier revision applied the WHOLE -StageHero list here, and root
+        // frame 150's save_character then persisted every one of them - so a
+        // battle-scoped staging string permanently rewrote the saved
+        // gladiator's stats. Observed live: `staged-hero-town
+        // hero.strength=80,hero.speed=80` followed by a flush, leaving the
+        // licensed save 691 bytes against the snapshot's 687.
+        //
+        // Battle-scoped fields (hitpoints, min_damage, the armour pieces) belong
+        // to stepStaging, which runs past the last save site and is reverted
+        // with the snapshot. Only strength, speed and charisma are gate
+        // operands, and only those are written here.
+        if (!heroStagedInTown && shopWeaponTop > 0 && stageHeroFields.length > 0) {
             heroStagedInTown = true;
-            applyStageSide("hero", stageHeroFields);
-            root.constructDNA();
-            arenaLog("staged-hero-town", "\"applied\":\"" + stagedSummary() + "\"");
+            var wrote = "";
+            for (var sf = 0; sf < stageHeroFields.length; sf++) {
+                var name = stageHeroFields[sf].field;
+                if (name != "strength" && name != "speed" && name != "charisma") continue;
+                root.game.hero[name] = stageHeroFields[sf].value;
+                wrote += name + "=" + String(root.game.hero[name]) + " ";
+            }
+            if (wrote != "") {
+                root.constructDNA();
+                arenaLog("staged-hero-town",
+                    "\"applied\":\"" + wrote + "\",\"note\":\"shop-gate-operands-only\"");
+            }
         }
         if (!shopDone) {
             if (shopKind == "weapon" && shopWeaponTop > 0) {
@@ -1068,7 +1118,7 @@ function stepArenaNavigator() {
                     "\"kind\":\"" + shopKind + "\",\"topItem\":" + jnum(shopItem) +
                     ",\"shopFrame\":" + jnum(shop._currentframe) +
                     ",\"ticks\":" + shopScanTicks +
-                    ",\"props\":\"" + names + "\"}");
+                    ",\"props\":\"" + names + "\"");
             }
             if (shopScanTicks > 900) {
                 arenaLog("shop-unreachable", "\"kind\":\"" + shopKind + "\"");
@@ -1078,8 +1128,21 @@ function stepArenaNavigator() {
         }
         shopItem = offered;
         shopTries++;
-        // A REAL script-assigned handler, not a replicated button body.
-        shop["item" + shopItem].onRelease();
+        var chosen = shop["item" + shopItem];
+        // THE ROLLOVER IS NOT OPTIONAL. `itemnumber`, `itemcost` and `itemtype`
+        // are set by getweaponinfo, which weaponbuttons binds as onRollOver
+        // (+0x08a0) - NOT by onRelease (+0x08cb) and NOT by buyweapon, whose
+        // body begins at +0x0c17 with `goldpieces = hero.goldpieces` and a jump
+        // to getitem. getweaponinfo derives the id from the clip's own name
+        // (`item39` -> 39, +0x09ac) and computes the whole quote at +0x0a42.
+        //
+        // Calling onRelease alone therefore buys whatever `itemnumber` happens
+        // to hold - and weaponbuttons leaves it at 20, because it assigns
+        // `itemnumber = weap_i` at +0x07f6 on the common path of its 1..80 loop.
+        // That is exactly what happened live: item 39 was asked for, hero.weapon
+        // became 20, and itemcost was undefined.
+        if (typeof chosen.onRollOver == "function") chosen.onRollOver();
+        chosen.onRelease();
         arenaPhase = "shop-answer"; arenaCooldown = 8; return;
     }
     if (arenaPhase == "shop-answer") {
@@ -1440,8 +1503,10 @@ function arenaPolicyStep(controller) {
     if (gladiators != undefined) {
         var heroX = Number(gladiators.hero._x);
         var villainX = Number(gladiators.villain._x);
-        if (heroX == heroX && villainX == villainX) {
-            var toward = (villainX >= heroX) ? "walkright" : "walkleft";
+        // isNum, not `x == x`: this file states at the isNum definition that a
+        // self-inequality NaN test does not work in AVM1, and then used one here.
+        if (isNum(gladiators.hero._x) && isNum(gladiators.villain._x)) {
+            var toward = (heroX < villainX) ? "walkright" : "walkleft";
             if (controller.actions[toward] == true) return toward;
         }
     }
@@ -1785,6 +1850,26 @@ function shadowMathScopes() {
  * DNA, which is the one reproducible armoured opponent in the build.
  */
 function captureAllowedNow() {
+    // A run that has already aborted must not then produce a trace. arenaAbort
+    // stops the navigator, but the hooks keep running, so without this an
+    // aborted run could arm afterwards and be reported as a successful capture.
+    if (arenaStopped) return false;
+    // THE SIDE MUST BE OBSERVED, NOT ASSERTED. attack_chances is called for
+    // BOTH combatants, and on the arena route the villain fights back - so the
+    // first call with a numeric attack_direction is not guaranteed to be the
+    // hero's. `attackerSide` is a launcher FlashVar the game never sees, so
+    // arming on the villain's swing would file a trace labelled "hero" that
+    // ingest has no way to contradict: a false observation, which is worse than
+    // no observation.
+    var attacker = gameRoot().game_attacker;
+    if (attacker != undefined) {
+        var isHero = (attacker == gameRoot().game.hero);
+        var claimed = (config.attackerSide == "hero");
+        if (isHero != claimed) {
+            dbg("capture-refused-wrong-side");
+            return false;
+        }
+    }
     if (!arenaMode) return true;
     if (arenaCaptureMode == "always") return true;
     if (arenaCaptureMode == "champion") {
@@ -1884,7 +1969,26 @@ function parseStageList(raw) {
     for (var i = 0; i < parts.length; i++) {
         var pair = parts[i].split(":");
         if (pair.length < 2 || pair[0] == "") continue;
-        out.push({ field: pair[0], value: Number(pair[1]) });
+        // A VALUE THAT IS NOT A NUMBER IS REFUSED, not written. constructDNA is
+        // not a serialiser - it calls check_for_nan, which jumps the ROOT
+        // TIMELINE to "bugs" when herolevel is NaN or outside 0..60, silently
+        // repairs NaN gold to herolevel * 1000, and resets a bad statpoints to
+        // 4. So a typo in a staging string is not a no-op: it is a jump to an
+        // error screen or a silent rewrite of the saved gladiator.
+        if (!isNum(pair[1])) {
+            trace("{\"t\":\"dbg\",\"at\":\"stage-refused\",\"field\":\"" + pair[0] +
+                "\",\"raw\":\"" + String(pair[1]) + "\",\"why\":\"not-a-number\"}");
+            continue;
+        }
+        var value = Number(pair[1]);
+        // check_for_nan's own bounds, enforced before the write rather than
+        // after the jump.
+        if (pair[0] == "herolevel" && (value < 1 || !(value < 61))) {
+            trace("{\"t\":\"dbg\",\"at\":\"stage-refused\",\"field\":\"herolevel\"" +
+                ",\"raw\":\"" + String(pair[1]) + "\",\"why\":\"outside-1-60\"}");
+            continue;
+        }
+        out.push({ field: pair[0], value: value });
     }
     return out;
 }
@@ -1892,6 +1996,8 @@ var stageHeroFields = parseStageList(rawStageHero);
 var stageVillainFields = parseStageList(rawStageVillain);
 var stageTicks = 0;
 var stageReported = false;
+// Read back at ARMING time, not at write time. See stagedSummary.
+var stagedAtArming = "";
 
 function applyStageSide(side, fields) {
     if (fields.length == 0) return;
@@ -1900,7 +2006,22 @@ function applyStageSide(side, fields) {
     for (var i = 0; i < fields.length; i++) target[fields[i].field] = fields[i].value;
 }
 
-/** What actually stuck, read back from the game rather than echoed. */
+/**
+ * The staged fields as the game holds them AT THE MOMENT OF THE CALL.
+ *
+ * Read this before trusting it. When called on the same tick as the write it is
+ * a TAUTOLOGY - it reads back what was just assigned, and can never report an
+ * overwrite. An earlier revision called it exactly that way and its output was
+ * recorded in the handoff as "eleven fields all stuck", which the same run's
+ * own later lines contradict: `staged … hero.herolevel=5` was followed seconds
+ * later by `battle-ready level 4` and by `capture-refused-unstaged
+ * staminaleft:106 staminamax:110 herolevel:4`.
+ *
+ * That is this project's named worst failure mode - evidence fitted to the
+ * design rather than a prediction that could falsify it - committed by the
+ * instrument meant to detect it. The end-line declaration now calls this at
+ * ARMING time, one whole action after the writes, so an overwrite is visible.
+ */
 function stagedSummary() {
     var parts = [];
     for (var h = 0; h < stageHeroFields.length; h++) {
@@ -1914,6 +2035,13 @@ function stagedSummary() {
     return parts.join(",");
 }
 
+/** True once this bout's staging window has closed. Arming waits for it. */
+function stagingComplete() {
+    if (stageHeroFields.length == 0 && stageVillainFields.length == 0) return true;
+    if (_global.battle_started != true) return false;
+    return stageTicks >= STAGE_APPLY_TICKS;
+}
+
 function stepStaging() {
     if (stageHeroFields.length == 0 && stageVillainFields.length == 0) return;
     if (_global.battle_started != true) return;
@@ -1924,9 +2052,8 @@ function stepStaging() {
     applyStageSide("villain", stageVillainFields);
     if (stageTicks == STAGE_APPLY_TICKS && !stageReported) {
         stageReported = true;
-        // Logged as well as reported on the end line, because a field the game
-        // overwrote anyway is a finding, and the end line records only the
-        // final value - not that it differs from what was asked for.
+        // NOT a verification - see stagedSummary. This line says what was
+        // written; whether it SURVIVED is answered at arming time.
         trace("{\"t\":\"dbg\",\"at\":\"staged\",\"applied\":\"" + stagedSummary() + "\"}");
     }
 }
@@ -1936,6 +2063,14 @@ function beginAction() {
     // Checked before the latch, deliberately: a bout that is not the capture
     // target must leave the wrapper able to arm on a LATER bout.
     if (!captureAllowedNow()) return;
+    // A partially staged scenario is not the scenario anyone asked for. The
+    // autopilot can issue its first action at battle tick 8 while staging runs
+    // to tick 20, so without this the window could close mid-write and emit no
+    // `staged` line at all.
+    if (!stagingComplete()) { dbg("capture-deferred-staging-incomplete"); return; }
+    // Captured HERE - one whole action after the writes - so the declaration
+    // reports what survived rather than what was requested.
+    stagedAtArming = stagedSummary();
     actionCaptured = true;
     armed = true;
     dbg("action-armed");
@@ -1984,7 +2119,7 @@ function finishTrace() {
     // the signal. The values are read back from the game, not echoed from the
     // request, so a field the game overwrote reports what it really holds.
     if (stageHeroFields.length > 0 || stageVillainFields.length > 0) {
-        endLine.staged = stagedSummary();
+        endLine.staged = stagedAtArming;
     }
     emit(endLine);
     finalsDumped = true;
