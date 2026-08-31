@@ -15,9 +15,11 @@ See [`README.md`](README.md) for what a handoff is and is not.
 
 ## Where things stand
 
-- Branch `arena/champion-capture`. The first five commits are pushed; **the last
-  two (`7fd7691`, `236c55e`) are NOT** — I did not ask, and the rule is to ask.
-  Do not push to `main`.
+- Branch `arena/champion-capture`. **Check what is pushed with
+  `git log --oneline @{u}..HEAD` rather than trusting this line** — it has been
+  stale twice already as the session extended. The rule is to ask before pushing,
+  so a session's last commits are usually unpushed until Corey says so. Do not
+  push to `main`.
 - **622 / 0 / 0** capture-bearing, **622 tests / 621 passed / 1 skipped** in a
   detached worktree. Both re-measured, not derived. Confirm the tip with
   `git log --oneline -1`.
