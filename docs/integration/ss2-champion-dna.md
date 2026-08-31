@@ -1,7 +1,8 @@
 # SS2 tournament champion DNA decode
 
-Status: read-only static map, recorded 2026-08-30. Interoperability research for
-the locally licensed Steam build identified in
+Status: read-only static map, recorded 2026-08-30; revised 2026-08-31 to
+reconcile with an independent re-derivation and to correct §7. Interoperability
+research for the locally licensed Steam build identified in
 [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json). It contains no game
 code, artwork, audio, exported scripts, or game binaries — only frame labels,
 symbol names, character ids, instruction offsets, and numbers derived from them.
@@ -9,6 +10,34 @@ symbol names, character ids, instruction offsets, and numbers derived from them.
 Read with [the battle map](ss2-battle-map.md); this document only adds the one
 thing that map left as a parameter: **where a tournament opponent's combat
 values come from, and what they are for tournament rank 1.**
+
+## Status after independent audit (2026-08-31)
+
+A write-nothing auditor re-derived this decode from the installed SWF without
+using the arithmetic on this page, and reached a split verdict that the rest of
+this document is written to reflect.
+
+**The arithmetic holds, completely.** `hitpointsmax` 110 and `armourclass` 86
+were both reproduced independently, offset for offset, with no free parameter
+anywhere in the chain. The fifty-index map in §1 was re-parsed mechanically from
+`initcharacter`'s opcode stream and came back byte-for-byte identical to the
+published table. Nothing in §1–§5 is under-determined or back-fitted, and §5.1
+below now records the arithmetic explicitly enough to re-check without
+re-deriving from bytes.
+
+**The framing does not hold, and it is corrected here.** This decode is a
+*postdiction*: the twelve live draws that agree with it were recorded 42 to 72
+minutes **before** this document's only commit. It was never a forward
+prediction, and any summary that says the champion was "decoded before it was
+ever seen" is wrong. §5 states the actual chronology, and states the stronger
+argument that replaces it — the formulas were effectively pre-registered a full
+day earlier, in a document containing no champion.
+
+> **If you are carrying this claim into another document, carry the corrected
+> form:** *the champion's numbers were derived with no free parameter, using
+> formulas committed to the repository 21h39m before the champion was first met;
+> twelve live draws then recorded exactly those numbers.* That is checkable and
+> true. "Predicted before it was seen" is neither.
 
 ## Why this decode is possible at all
 
@@ -69,6 +98,31 @@ field, so the chain that decides the champion's numbers is exactly
 
 Root frame 221 sets `_global.battle_started = true` *after* the `skincharacter`
 call, which is what selects the refill branch of `battlevalues` (§4 below).
+
+### The earlier construction site — the one the live evidence actually reads
+
+Root frame 221 is not the first site to run this chain, and it is **not** the
+site the twelve draws in §5 measured. The frame labels are
+`arena_intro` spanning root frames **214–220** and `arena` spanning **221–226**,
+and the wrapper emits its `versus` diagnostic at `arena_intro`'s Stop on root
+frame **220** — one frame before frame 221's `DoAction` has executed at all.
+
+The champion's derived fields have already materialised by then, at
+
+```text
+sprite:721[arena_champ]/frame:1/DoAction@0x223c61  +0x0105  CallMethod
+```
+
+which calls `skincharacter` with `_root.game.villain` (the `CallMethod` pops the
+name, with `object` = `_root` and `numArgs` = 2, so argument 1 is
+`_root.game.villain`). That runs the identical `initcharacter` → `battlevalues`
+chain to the identical values, while `battle_started` is still `false` from root
+frame 150 — so the refill branch of §4.3 runs there too.
+
+No number in this document changes. The distinction matters only for
+verification: a reader checking §5's live figures against the capture logs is
+looking at values produced by `sprite:721`, not by root frame 221, and citing
+only frame 221 would send them to a block that had not run yet.
 
 ## 1. The DNA index-to-field map
 
@@ -273,14 +327,48 @@ Each piece writes `<piece>_defence = round(piece * <piece>_dval)`:
 | `shield_defence` | `+0x35f7` / `+0x3623` | `round(0 * 12)` | 0 |
 
 The helmet is the exception, and it is the single most consequential number in
-this decode. The test at `+0x34a7`–`+0x34ba` is `helmet > 25`; the `If` jumps
-**to** the special arm at `+0x34eb`, and the ordinary
-`round(helmet * helmet_dval)` arm is the fall-through at `+0x34bf`:
+this decode — the one constant an adversary would most suspect of having been
+fitted, because without the cap `helmet` 102 yields `helmet_defence` 1020 and
+`armourclass` 1081 instead of 25 and 86. So the branch polarity is settled by
+**jump arithmetic, not by reading style**:
+
+```text
++0x34a7  Push register:3, "helmet"; GetMember
++0x34af  Push 25
++0x34b7  Greater        ; helmet > 25
++0x34b8  Not
++0x34b9  Not            ; Not,Not = normalise to boolean; the test is unchanged
++0x34ba  If   {"delta":44,  "target":4185805}
++0x34bf  <ordinary arm>  helmet_defence = round(helmet * helmet_dval)
++0x34e6  Jump {"delta":52, "target":4185857}
++0x34eb  <special arm>   helmet_defence = round(herolevel * 0.5 * helmet_dval)
++0x351f  shinguard_defence = ...          ; the join
+```
+
+Recover the block base from the unconditional `Jump`, whose destination is
+visibly the join at `+0x351f`:
+
+```text
+base       = 4185857 - 0x351f = 4185857 - 13599 = 4172258
+If target  = 4185805 - 4172258 = 13547 = 0x34EB
+```
+
+So the `If` at `+0x34ba` jumps **to** `+0x34eb`. The taken arm — taken when
+`helmet > 25` is true — is the capped one, and the ordinary
+`round(helmet * helmet_dval)` arm is the fall-through at `+0x34bf`, which ends
+by jumping over the special arm to the join. Therefore:
 
 ```text
 helmet 102 > 25   ->  helmet_defence = round(herolevel * 0.5 * helmet_dval)
                    =  round(5 * 0.5 * 10)  =  25
 ```
+
+Two further checks pin this from outside the bytes. The formula and the cap were
+already written down in the battle map a day before this champion was met (§5),
+so neither can have been chosen to produce 25. And the `herolevel` this arm
+reads at `+0x34f6` is `whichcharacter.herolevel` — the **villain's** DNA index
+24 = 5, not the hero's — which the live draws independently confirm (§5,
+Check 1b).
 
 So the champion's headgear — `hat_name` is written alongside the DNA at
 `+0x1946` — contributes **25**, not 1020. Its raw value 102 is nonetheless the
@@ -329,7 +417,7 @@ only fully determined bout reward in the build, since every other opponent's
 independently the corrected level-1 requirement recorded in the transfer
 handoff, and is the third check on this decode.
 
-## 5. The champion's derived state, and the two live checks
+## 5. The champion's derived state, and the checks against it
 
 | Field | Value | Source |
 | --- | ---: | --- |
@@ -361,12 +449,136 @@ handoff, and is the third check on this decode.
 | `ammo_left` / `maximum_ammo` | 5 / 5 | `+0x3b75` / `+0x364b` |
 | `character_xp` | 2142 | `+0x3b82` |
 
-**Check 1 — the live numbers.** A runtime log recorded the champion at
-`hitpointsmax` 110 and `armourclass` 86, identical across eight independent
-draws. The decode above produces 110 at `+0x378e` and 86 at `+0x3ac3` with no
-free parameter anywhere in the chain. It agrees.
+### 5.1 The two headline numbers, re-checkable without touching the bytes
 
-**Check 2 — the tutorial prisoner, decoded by the same map.** The prisoner is
+An independent auditor reproduced both numbers from the SWF without using this
+document's arithmetic. What follows is that chain written out in full, so the
+next reader can re-check it from the table in §2 and the multipliers in §4
+alone. Every input is a literal in the opcode stream; there is no step at which
+a decoder had latitude.
+
+**`hitpointsmax` — one unconditional statement at `+0x378e`:**
+
+```text
+hitpointsmax = herolevel * 10 + vitality * 20
+             = 5 * 10 + 3 * 20          ; DNA index 24 = 5, index 20 = 3
+             = 50 + 60
+             = 110
+```
+
+No branch guards it, and nothing after `+0x3c0d` rewrites the field.
+
+**`armourclass` — an eight-term sum at `+0x3ac3`–`+0x3b0e`, then a copy at
+`+0x3b0f`:**
+
+| Piece | DNA index | DNA value | `_dval` | Arm | `<piece>_defence` |
+| --- | ---: | ---: | ---: | --- | ---: |
+| `breastplate` | 8 | 1 | 16 | `round(1 * 16)` | 16 |
+| `helmet` | 9 | **102** | 10 | **capped** `round(5 * 0.5 * 10)` | **25** |
+| `shinguard` | 11 | 4 | 6 | `round(4 * 6)` | 24 |
+| `greaves` | 10 | 2 | 3 | `round(2 * 3)` | 6 |
+| `shoulderguard` | 6 | 1 | 8 | `round(1 * 8)` | 8 |
+| `gauntlet` | 7 | 1 | 5 | `round(1 * 5)` | 5 |
+| `boot` | 12 | 1 | 2 | `round(1 * 2)` | 2 |
+| `shield` | 14 | 0 | 12 | `round(0 * 12)` | 0 |
+
+```text
+armourclass_max = 16 + 25 + 24 + 6 + 8 + 5 + 2 + 0  =  86
+armourclass     = armourclass_max                    =  86
+```
+
+The sum is in the summands' opcode order, which is the table's row order. The
+only term that is not a plain multiply is the helmet, and §4.2 settles its arm
+by jump arithmetic.
+
+The refill block holding those last two statements is gated at
+`+0x3a90`–`+0x3aa0` on `battle_started == true`, whose `If` jumps 360 bytes
+**past** the block. Root frame 150 writes `battle_started = false`; root frame
+221 writes `true` as its *last* statement, after all four `skincharacter` calls.
+So at every construction site — including `sprite:721` — the flag is still
+false, the jump is not taken, and the block runs.
+
+### 5.2 Check 1 — the live numbers, and what they are and are not
+
+Across four capture sessions — `arena-tourn-2` (5 draws), `arena-staged-1` (3),
+`arena-staged-2` (3) and `arena-champ-1` (1) — **twelve** `versus` lines record
+`"villainName":"John the Butcher"` with `villainHitpointsmax` 110 and
+`villainArmourclass` 86. Twelve for twelve, no other pair. The decode produces
+110 at `+0x378e` and 86 at `+0x3ac3` with no free parameter. It agrees.
+
+**This is a postdiction, not a prediction, and it must not be described as one.**
+The chronology is checkable and runs the other way:
+
+| When (EDT) | What |
+| --- | --- |
+| 2026-08-29 23:57:47 | `6dc750e` commits **every formula constant** to [`ss2-battle-map.md`](ss2-battle-map.md) — the HP formula, the eight multipliers, and the `helmet > 25` cap with its exact special arm — in a document containing no champion |
+| 2026-08-30 21:36 | first champion draw recorded |
+| 2026-08-30 22:06 | twelfth and last champion draw recorded |
+| 2026-08-30 22:48:51 | `5d3d777`, this document's **only** commit, and the commit that authored all five fixtures |
+
+The last draw precedes this document's existence by 42 minutes; the first by 72.
+So 110 and 86 were known in the repository before the decode was written down,
+and this check was available at authoring time. §8 already said as much — these
+are a check on the decode, not its source — and that wording stands.
+
+**The stronger argument, which does not depend on chronology at all.** The
+fitting hypothesis fails on its own terms, because the derivation has no free
+parameter to fit *with*: every constant it consumes was committed 21 hours 39
+minutes before the champion was first met, in `6dc750e`, in a document that
+contains no champion. The formulas were effectively pre-registered. What would
+have broken this — a shifted index map, a helmet cap invented to fit, or a
+formula postdating the observation — fails on all three counts: the index map is
+50 sequential opcodes with no shift that works (shifting by −1 gives 70/669, by
++1 gives 40/1731), the cap predates the observation, and so does the formula.
+
+**And the pair is discriminating**, which is what makes agreement worth
+anything. Against a randomised DNA index map the joint probability of landing on
+both 110 and 86 is roughly **1 in 10,000** — about twelve times sharper than the
+same null applied to the prisoner check below. Applying this document's index map
+to all eighteen hard-coded boss literals, `which_boss == 1` is the *only* one
+that gives (110, 86); the nearest neighbours are boss 0 at (10, 0) and boss 2 at
+(170, 256). And across the roughly forty distinct `(hitpointsmax, armourclass)`
+pairs this project has actually met from generated opponents — which include
+(110, 52), (100, 87) and (60, 90) — the pair (110, 86) occurs on John the
+Butcher's lines and nowhere else.
+
+*Honest caveat on the null:* permuting just the eight multipliers among the
+eight pieces lands on 86 in about 2 % of cases, and 86 is not even the modal
+outcome of that permutation. But the multipliers were not free — see `6dc750e`
+above — so that particular null does not apply here.
+
+**Check 1b — the live draws falsify a rival reading of the helmet arm.** The
+capped arm at `+0x34eb` reads `whichcharacter.herolevel`, i.e. the *villain's*
+DNA index 24 = 5. A reading that took the **hero's** `herolevel` instead would
+give `round(4 * 0.5 * 10)` = 20 and `armourclass` 81 on any draw taken at hero
+level 4. The twelve draws span two hero levels — **two at level 4** (in
+`arena-tourn-2` and `arena-champ-1`) and ten at level 5 — and `armourclass`
+reads 86 in all twelve. The recorded value is therefore *invariant under hero
+level*, which is consistent only with the villain's own `herolevel` feeding the
+capped arm. This is a real falsification test the live data passed, and it is
+worth considerably more than the twelvefold repetition of an identical literal —
+which is trivially expected once you know the source is a string constant.
+
+**What the twelve draws are NOT.** They are `{"t":"dbg", ...}` diagnostic lines
+in gitignored operator logs under `captures/` (`.gitignore` admits only
+`captures/README.md`). They carry no launch nonce, they are cited by no golden,
+`delog` strips every `dbg` line before ingest ever sees them, and all five
+`candidate-champion-*` fixtures still declare `runtimeVerified: false`. They are
+twelve launches, not the two-session independence the promotion gate means by
+"independent". **The champion bout has not been captured.** Nothing in §5 is
+promoted evidence.
+
+One forgery vector was checked and is closed: the wrapper *can* stage villain
+fields, but none of the twelve logs contains a single `villain.<field>=` staging
+token — every `"at":"staged"` line in them is hero-only — and staging cannot
+reach these values in principle, because `stepStaging` returns early unless
+`battle_started == true` while the `versus` line is emitted at root frame 220,
+before frame 221 sets it.
+
+### 5.3 Check 2 — the tutorial prisoner, decoded by the same map
+
+**This is the genuinely prior and independent check**, and none of §5.2's
+qualifications touch it. The prisoner is
 `which_boss == 0` in the same `unleash_hell` chain, `charDNA` at `+0x1872`, and
 the same two functions build him. Applying this document's index map to that
 literal gives `herolevel` 1, `vitality` 0, `stamina` 0, `strength` 0,
@@ -378,6 +590,14 @@ exactly the villain values carried by the twenty-two promoted goldens — which
 were measured, not authored, and which this track did not use to derive
 anything. The index map, the `>25` helmet branch aside, and the weapon-row slot
 order are all confirmed by a set of numbers produced by the running game.
+
+Its independence is of a different and better kind than Check 1's: those
+twenty-two goldens were promoted long before this decode existed, through the
+two-session gate, from committed observation records — so the load-bearing
+confirmation language belongs here rather than on the champion's own 110 and 86.
+Its null is looser (roughly 1 in 887 against a randomised index map, against
+Check 1's 1 in 10,000, because the prisoner's literal is nearly all zeroes), but
+its evidence is retained, promoted and citable, which Check 1's is not.
 
 ## 6. What a capture of this bout can and cannot be
 
@@ -459,7 +679,16 @@ What each group is for:
 - `attack:3` against the champion's `defence` 3 makes the `attack_chances`
   ratio `(3 + 9) / (3 + 9)` exactly **1**, so the three melee chances reduce to
   the three band factors themselves: 33, 50, 66, and `rollneeded` 67, 50, 34.
-  No previously captured fight has this ratio.
+  No previously captured fight has this ratio. The function is
+  `attack_chances(game_attacker, game_defender)` at
+  `sprite:862[overlay]/frame:1/DoAction@0x236941`, and the three band factors
+  are literals in it at `+0x041f` (0.33), `+0x046e` (0.5) and `+0x04bd` (0.66),
+  with the `+9` on each of `attack` and `defence` pushed just above each one.
+  **This block is cited by none of the five fixtures' `sourceRefs`**, which name
+  `unleash_hell`, `initcharacter`, `battlevalues` and the two overlay frame 52
+  blocks only — so a reader auditing `chance` and `rollNeeded` from a fixture
+  alone cannot reach the bytes that produce them. Cite it here until the
+  fixtures carry it.
 - `vitality:10` gives `hitpointsmax` 250 — comfortably above the champion's
   `max_damage` 44, so the hero cannot be killed inside the one captured action.
 - The eight armour zeroes and the two enchantment zeroes remove the save's
@@ -510,22 +739,67 @@ failure, not a silent one.
 Five `candidate-champion-*` fixtures under `test/fixtures/ss2-1v1/`. All five
 share the hero and champion blocks above and `attackerSide` `"hero"`.
 
-**They omit `scenario.fightMode`, and that is a compromise, not a preference.**
-Absent means tournament to both the validator and the resolver, so the modelled
-defeat gate is the right one either way. But ingest projects `fight_mode` only
-when a fixture stages it, so omitting the key gives up the one channel a capture
-reads straight from `_global` — and the battle map records the live `fight_mode`
-of a tournament bout as still unobserved, which makes this bout the first place
-it could have been asserted. The key was removed because
-`test/ss2-post-tutorial-fixtures.test.js` — a repository guard, not a game rule
-— asserts that **no fixture outside its two hard-coded family lists stages
-tournament mode**, and that assertion fails on any new tournament family by
-construction. It is the same hand-kept-roster shape that
-`test/ss2-fixture-files.js` was refactored away from: the guard should derive
-its families from a declared rule, or scope its "no others" clause to the
-families it names. Until it does, restoring `"fightMode": "tournament"` to these
-five fixtures is a one-line change per file and turns the mode back into
-evidence.
+**All five stage `"fightMode": "tournament"`.** This section previously said they
+omitted the key; that was wrong when it was written, and it is corrected here.
+
+The history is worth one paragraph, because it is the reason the key is
+load-bearing. `test/ss2-post-tutorial-fixtures.test.js` once asserted that **no**
+fixture outside its two hard-coded family lists staged tournament mode — a
+hand-kept roster that failed on any new tournament family by construction. The
+champion family hit it and dropped the key, forfeiting one of the few channels a
+capture genuinely reads from the game. The guard has since been restated
+positively: a fixture may stage tournament mode only if it belongs to a family
+*declared* capable of it, and `candidate-champion-` is now one of the three
+declared prefixes. The key is back in all five files, verified in the tree:
+
+```text
+test/fixtures/ss2-1v1/candidate-champion-deflection-threshold-discriminator.json:32
+test/fixtures/ss2-1v1/candidate-champion-normal-armour-absorbed.json:31
+test/fixtures/ss2-1v1/candidate-champion-power-armour-overflow.json:32
+test/fixtures/ss2-1v1/candidate-champion-power-hat-removal.json:32
+test/fixtures/ss2-1v1/candidate-champion-quick-armour-absorbed.json:31
+```
+
+Staging the key changes what ingest does. `capture-ingest.js` projects
+`fight_mode` **only** when the fixture stages it: with the key present it
+*requires* the trace to carry a `fight_mode` var and refuses the trace outright
+if it does not (`The target fixture stages a fightMode, which was not
+recorded.`), then copies the recorded value into the comparison. So the mode is
+no longer an assumption the resolver makes on the fixture's behalf — it is a
+value the capture has to produce and agree on.
+
+### A mode mismatch on the first champion run is a FINDING, not a failed run
+
+**Read this before running the family.** `campaign.mjs plan --family champion`
+carries a standing note on every one of the five members:
+
+> `note (unobserved-fight-mode)`: no runtime observation records `fight_mode`
+> "tournament" yet (67 runtime observations carry "duel", "misc"). A mode
+> mismatch on the first such run is a finding, not a failed run.
+
+This bout is the first place `fight_mode` "tournament" could ever be asserted
+from a record. If the first champion capture comes back with a mode that is not
+"tournament", the correct response is to **write the observed mode down as a
+discovery about the build** — and to re-examine the defeat-gate modelling that
+§6 and the post-tutorial family both rest on — rather than to re-run until it
+matches or to edit the fixtures to fit. Editing five candidates to agree with one
+trace is precisely the fit-to-observation failure this pipeline exists to
+prevent.
+
+Two supporting facts, so the next operator can weigh a mismatch correctly rather
+than assuming the worst:
+
+- **The planner's note is about observation records, and it is accurate.** No
+  committed record under `test/observations/` carries `fight_mode` "tournament";
+  the 67 that exist carry "duel" and "misc".
+- **The operator logs nevertheless already read "tournament" on this exact
+  bout.** The wrapper's `versus` diagnostic prints `_global.fight_mode` directly,
+  and it reads `"fightMode":"tournament"` on all twelve champion draws (and on 40
+  arena `versus` lines overall, against 13 "duel" and 1 "misc"). That is a `dbg`
+  line, stripped by `delog` before ingest, so it is **not** evidence and does not
+  discharge the note — but it does mean a mismatch would contradict the
+  wrapper's own live read of `_global`, and would therefore be a genuinely
+  surprising result rather than an expected one.
 
 | Fixture | Direction | What it discriminates |
 | --- | ---: | --- |
@@ -534,6 +808,20 @@ evidence.
 | `candidate-champion-power-armour-overflow` | 9 | the power band's 33/67, and the armour-overflow rewrite: 92 against 86 leaves `armourclass` at −6 until the clamp, carries 6 into hitpoints, and knocks back with **the 6, not the 92** (`force` = 6 + 30·6 = 186) |
 | `candidate-champion-deflection-threshold-discriminator` | 5 | the critical-deflection threshold's operand mix — see below |
 | `candidate-champion-power-hat-removal` | 9 | the `> 66` removal gate, the top-group selector, and that removing the champion's hat costs **25** armour (the capped `helmet_defence`) while zeroing a `helmet` field of 102 |
+
+**Direction 9 is forced for the hat-removal fixture, not chosen.** `remove_armour`
+selects its piece group by direction, and the group that can reach the helmet is
+`{1, 5, 8, 9}` (battle map, *The direction-to-piece mapping inside
+`remove_armour`*). Of the power band's four directions 9–12, only **9** is in
+that group. A later edit that "tidies" this to 10 or 11 to avoid the duplicate
+with `candidate-champion-power-armour-overflow` would silently destroy the
+fixture's whole purpose.
+
+The other band choices are map-derived at band level and free within it:
+`power_attack` draws `randomBetween(9,12)`, `normal_attack` `randomBetween(5,8)`,
+`quick_attack` `randomBetween(1,4)`. The two within-band duplicates (5, 5 and
+9, 9) are arbitrary but cost nothing, because the five members already need
+five distinct injectable tapes and must be captured one at a time regardless.
 
 ### The deflection discriminator
 
@@ -574,6 +862,20 @@ absorbed the hit.
   `runtimeVerified: false` and `synthetic-static-map` provenance. The 110 and 86
   in §5 are a *check* on the decode, not its source, and they leave every other
   number in the table unmeasured.
+- **The check is a postdiction.** The twelve draws were recorded 42–72 minutes
+  before this document's only commit (§5.2). The decode is not thereby weakened —
+  the auditor reproduced both numbers from the bytes independently, and every
+  formula constant predates the champion by 21h39m — but the *order* is the
+  opposite of the one a summary would naturally assume, and it should not be
+  restated as a forward prediction.
+- **The twelve draws are not retained evidence.** They live in gitignored
+  operator logs, carry no launch nonce, are cited by no golden, and are stripped
+  before ingest. Two of the five headline numbers being corroborated by
+  uncommitted logs is materially weaker than it sounds; the champion bout still
+  has to be captured.
+- The `attack_chances` block that produces every `chance` and `rollNeeded` in
+  the five fixtures is cited in §6.2 of this document and in **none** of the
+  fixtures' own `sourceRefs` (§6.2).
 - `attack_type` and `attack_speed` are left `undefined` for a DNA-built villain
   and this decode does not say what writes `whichweapon`.
 - Whether `is_that_virtuous` runs at all is still unsettled; §6.1 only shows
@@ -593,9 +895,37 @@ node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --func
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --function '^battlevalues$' --max-actions 6000
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --function '^unleash_hell$' --max-actions 4000
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references '"value":"weapon24"' --around 6
+
+# The frame spans behind the construction-site note in "Where the DNA string is
+# consumed": arena_intro 214-220, arena 221-226.
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels
+
+# The earlier construction site, and the attack_chances block cited in 6.2.
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references '"value":"skincharacter"' --around 10
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --function-names '^attack_chances$'
 ```
 
 `--references` matches the rendered `<opcode> <operand-json>` text, so a bare
 identifier such as `^weapon24$` matches nothing; quote the JSON form as above.
 These commands print analysis only. Do not redirect decompiled game code or
 assets into the repository.
+
+### Re-checking the claims in §5 and §7 without the SWF
+
+```powershell
+# Section 7: all five fixtures stage tournament mode.
+Select-String -Path 'test/fixtures/ss2-1v1/candidate-champion-*.json' -Pattern 'fightMode'
+
+# Section 7: the planner's standing unobserved-fight-mode note.
+node tools/runtime-capture/campaign.mjs plan --family champion
+
+# Section 5.2: the twelve draws, their spread over four capture sessions, and
+# the two hero levels behind Check 1b. captures/ is gitignored operator data.
+Select-String -Path 'captures/*/*.rufflelog' -Pattern 'John the Butcher' |
+  ForEach-Object { $_.Path } | Split-Path -Parent | Group-Object
+
+# Section 5.2: the chronology. The decode has exactly one commit, and 6dc750e is
+# where every formula constant was pre-registered.
+git log --format='%H|%ad|%s' --date=iso -- docs/integration/ss2-champion-dna.md
+git log -S 'herolevel * 10' --all --format='%H|%ad|%s' --date=iso
+```

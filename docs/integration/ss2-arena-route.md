@@ -1,8 +1,10 @@
 # SS2 leveled-gladiator arena route
 
-Status: **executed map**, recorded 2026-08-30 as a static read and revised
+Status: **executed map**, recorded 2026-08-30 as a static read, revised
 2026-08-30 against the real build after the route had been run end to end many
-times. Companion to [the battle map](ss2-battle-map.md); same licensed build,
+times, and revised again 2026-08-31 (§9 `-WatchFields`; §12's staging
+subsection, which was wrong about `armourclass` and rested on a bout that was
+never staged). Companion to [the battle map](ss2-battle-map.md); same licensed build,
 same [fingerprint](ss2-build-fingerprint.json), same inspection boundary. It
 contains no game code, artwork, audio, exported scripts, or game binaries —
 only frame labels, symbol names, character ids, instruction offsets and derived
@@ -27,7 +29,10 @@ that makes it safe.
 A first revision of this document was written before anything had been run.
 Six of its claims were wrong and two hazards were missing entirely; each
 correction is marked **Corrected** in place rather than silently rewritten, so
-a reader who remembers the old text can see what changed and why.
+a reader who remembers the old text can see what changed and why. A seventh
+correction was added on 2026-08-31 to §12: the claim that `armourclass` is
+re-derived mid-battle is false, and the run cited as showing that staging
+changes nothing never staged the bout in question.
 
 ## Why this document exists
 
@@ -1474,7 +1479,11 @@ the frame-214 full heal, past frame 221's forced `equipped_weapon = 1`, past
 `initbattle` — and repeats for 20 frames because the game re-derives values
 during battle construction. It stops before the action arms, so **no staged
 write can ever appear in the mutation trace**. Every field is reported on the
-trace's `end` line, read back from the game rather than echoed.
+trace's `end` line, read back from the game **at arming time** rather than
+echoed — which is the only read-back worth anything, and one **no arena run has
+produced yet**: the eighteen `captures/arena-*` directories contain zero `end`
+lines between them. The `staged` diagnostic line is not a substitute for it;
+see §12.
 
 Two placements are deliberate:
 
@@ -1488,8 +1497,110 @@ Two placements are deliberate:
   weapon is refused — observed live as twenty-five successive refusals from
   item 40 down to 14.
 
-The distinction that makes staging honest is in §12: an **attribute** is a
-genuine `battlevalues` input, but `min_damage` is one of its **outputs**.
+The distinction that makes staging honest is in §12, and it is a three-way one,
+not a two-way one: an **attribute** is a genuine `battlevalues` input;
+`min_damage` is an output it recomputes at every phase transition; and
+`armourclass` is an output it writes **only at battle construction**, so a
+staged value survives the fight.
+
+### Watch fields (`-WatchFields`) — new
+
+`run-arena.ps1` now takes `-WatchFields`, a comma-separated list of extra
+`Object.watch` field names **added to** the wrapper's default list rather than
+replacing it, forwarded verbatim to `launch-capture.ps1` the same way
+`run-capture.ps1` forwards it — except that `run-arena.ps1` wraps the value in
+quotes, which `run-capture.ps1` does not. The difference is inert for a
+well-formed field list (`Start-Process -ArgumentList` joins with plain spaces
+and `powershell -File` passes each argument through as a literal string) and
+matters only if a value ever contains a space; neither script validates the
+grammar. It is appended to the launcher argument
+array **only when non-empty**, so an empty `-WatchFields` leaves the launcher
+invocation byte-identical to what it was before the flag existed — a run that
+matched a golden before cannot be perturbed by the flag's addition.
+
+It is needed because ingest projects `Object.keys(fixture.scenario.<side>)` out
+of the staged dump and refuses a trace that omits a field the fixture declares,
+while `dumpSide` writes exactly the watched fields. So a fixture naming a
+`<piece>_defence` needs that name watched or it cannot be captured at all.
+`campaign.mjs plan` derives the list per fixture: the five
+`candidate-champion-*` need eleven names, the two
+`candidate-armoured-removal-destroys-*` need `helmet_defence,shoulderguard_defence`.
+
+**Why the flag lives here.** Read from each script's own `param(...)` block:
+
+| Launcher | `-WatchFields` | `-StageHero` / `-StageVillain` | snapshot guard |
+| --- | --- | --- | --- |
+| `run-campaign.ps1` | no | no | no |
+| `run-capture.ps1` | **yes** | no | no |
+| `run-arena.ps1` | **yes** | **yes** | **yes** — takes it itself |
+| `launch-capture.ps1` | **yes** | **yes** | no |
+
+`run-arena.ps1` is now the only vehicle carrying all three, and it is the only
+script in the repository that *invokes* `save-state.ps1` at all. Before the
+flag, a fixture needing both watch fields and a staged opponent had to go
+through `launch-capture.ps1` and be snapshotted by hand.
+
+**The gap narrowed rather than closed.** `run-arena.ps1` exposes no
+`-Autopilot`, hard-codes `-Navigate arena`, and forwards no step list; and
+`arenaPolicyStep` returns `normal_attack` whenever the close-range controller
+offers it **whatever string `-ArenaPolicy` carries** — the policy name is only
+ever tested against `""` (`ss2-capture-wrapper.as`, `arenaPolicyStep` and
+`stepAutopilot`). So the arena route as `run-arena.ps1` drives it presses the
+**normal** attack and nothing else. Of the five champion members, the two at
+attack direction 5 are reachable through it; the quick (direction 1) and power
+(direction 9) members still need `launch-capture.ps1` with a hand-taken
+snapshot, because the band is chosen by which button is pressed, not by the
+injected roll. [`ss2-staging-runbook.md`](ss2-staging-runbook.md) §1.0 carries
+the per-fixture consequences and the commands.
+
+**Why the guard was not moved onto `launch-capture.ps1` instead.**
+`launch-capture.ps1` is the shared bottom layer, and `run-campaign.ps1` drives
+it at `-Concurrency 3` with per-session `-SaveDirectory` stores that provably do
+not touch the licensed save — three concurrent sessions completed and the master
+`ss2_data.sol` was byte-identical afterwards. A snapshot guard there would be
+demanding a fresh restore point from runs that mutate nothing, so it would have
+to be **opt-out** — and an opt-out gate is precisely the defect class this
+project already closed once, when the launch-nonce gate turned out to be
+opt-out and two forgeries walked straight through it. Keeping the guard in
+`run-arena.ps1` alone also keeps the invariant worth having: *the only
+save-mutating script is the one that snapshots, and it snapshots itself rather
+than trusting an operator to remember.*
+
+**No second edit was needed to keep the tooling honest.** `campaign.mjs`'s
+`captureVehicles` reads each launcher's capabilities out of its own `param(...)`
+declarations — `/\[string\]\s*\$WatchFields\b/` and
+`/\[string\]\s*\$Stage(?:Hero|Villain)\b/` — rather than from a table in
+`campaign.mjs`, "because a table of capabilities kept in this file is a table
+that goes stale the first time a launcher gains a flag". So
+`campaign.mjs plan --family champion` reported the change the moment the
+parameter existed:
+
+```text
+5 member(s) need -WatchFields. Exposed by: tools/runtime-capture/run-capture.ps1,
+  tools/runtime-capture/run-arena.ps1, tools/runtime-capture/launch-capture.ps1.
+  also exposing -StageHero/-StageVillain: tools/runtime-capture/run-arena.ps1,
+  tools/runtime-capture/launch-capture.ps1.
+```
+
+Two cautions that come with the flag:
+
+- **A watched field can add a line to the mutation trace.** The watch callbacks
+  emit on every assignment while armed, and ingest keeps any entry whose
+  `before` differs from its `after`, so a fixture's `mutationTrace` gains an
+  entry if the game writes a newly watched field inside the armed window. This
+  is why `campaign.mjs` refuses to run the armoured family as one family. For
+  the champion's eleven names the byte reading in §12 predicts **no** extra
+  entries: the only writers of a `<piece>_defence` in the build sit inside
+  `battlevalues`, `damagecharacter` carries no `battlevalues` reference at all,
+  and `death` **deletes** `nextphase` (`+0x2049`, `Delete2`) rather than calling
+  it — so no phase transition can land inside the armed window. Treat any
+  `/hero|villain/<piece>_defence` line in a champion trace as a finding about
+  the build rather than a failed run: it would falsify that reading.
+- **`run-arena.ps1` has no `PositionalBinding = $false`.** The parameter was
+  inserted mid-`param(...)`, so the script's own positional map shifted by one
+  from `-FixturePath` onward. Every invocation in this repository and in the
+  runbook is by name, so nothing is broken; a command typed from memory
+  positionally is the only way to hit it.
 
 ### Still uncertain
 
@@ -1542,7 +1653,9 @@ genuine `battlevalues` input, but `min_damage` is one of its **outputs**.
 | A non-ranged secondary weapon still produces sane `bombard`/`snipe` | **unverified** — `swap_weapons` never checks the type | one round with a cheap non-ranged secondary and `swap_weapons,bombardright` |
 | The `combatwonitem` / `combat_wonitem` label mismatch is inert | **inferred** — the failed `gotoAndPlay` leaves the playhead at 88, which advances into 94 anyway | a tournament-final win capture logging `_root.arena._currentframe` across frames 88–95. No run has won a tournament yet |
 | The 2 % special-event draw ends runs at the predicted rate | **byte-verified but never observed firing** — no `ABORT:special-event-screen` line exists in the retained captures | enough runs to see it; the abort path itself is shared with `battle-lost`, which has fired 22 times |
-| Why staged combat stats did not change a fight outcome | **explained but not proved** — §12 gives the `battlevalues` recompute as the mechanism | a targeted probe that reads `min_damage` back *during* the bout rather than at battle construction |
+| Why staged combat stats did not change a fight outcome | **not explained, and the evidence was misread** — §12 (Corrected) shows the champion bout in `arena-staged-2` was never staged at all (bout 1 consumed the then-global 20-tick budget) and that no arena run has ever produced an `end` line, so nothing has ever read a staged field back at arming time | one staged duel bout through `run-arena.ps1` with `-WatchFields "min_damage,armourclass,armourclass_max"`. Prediction to falsify: staged `min_damage` reverts to `round(strength * 2) + weapon[3]`; staged `armourclass` moves only by absorption or removal |
+| Which staged fields survive a phase transition | **byte-verified, never measured** — the `battle_started` gate at `battlevalues` `+0x3a90` splits the function into an unconditional prefix and a construction-only block; §12 (Corrected) lists both sides field by field | the same probe; the split predicts an exact, checkable set of survivors |
+| The armoured family's staged `hitpointsmax` 80 / `staminamax` 110 | **at risk if reached by staging** — those two ceilings are recomputed from `herolevel`/`vitality`/`stamina`, which those five fixtures do not declare (§12) | either an opponent the ladder generates with matching attributes, or a re-derivation by whoever owns the fixtures. Fails loudly as a DIVERGE, so no run can accept it silently |
 | The magic shop / church `buyitem` routes | **not mapped** | out of scope here; needed only for the spell-ingress fixture group |
 
 ## 11. Changes this track asked for elsewhere
@@ -1601,6 +1714,37 @@ struck here rather than deleted so the ask and the answer stay together.
    exists at all; only the formula is misquoted.
    [`ss2-capture-staging.md`](ss2-capture-staging.md) already records the
    correct `round(strength * 2) + weapon_min/max`.
+
+### New, from the 2026-08-31 `battlevalues` re-derivation
+
+9. **[`ss2-capture-staging.md`](ss2-capture-staging.md), the launcher-capability
+   table.** Its table (§"Which script carries which flag") still records
+   `run-arena.ps1 | -WatchFields | no` and tells the reader that a fixture
+   staging a `<piece>_defence` and needing a staged opponent "has to go through
+   `launch-capture.ps1`, which has no snapshot guard — take the snapshot by hand
+   first". That is now false, and the stale advice points at the unguarded
+   vehicle, which is the one thing the flag exists to avoid.
+   [`ss2-staging-runbook.md`](ss2-staging-runbook.md) §1 has already been
+   corrected and is the model; `campaign.mjs` derives the same columns from the
+   scripts and was never wrong.
+10. **The five `candidate-armoured-*` fixtures.** They declare a villain
+    `hitpointsmax 80` / `staminamax 110` with no `herolevel`, `vitality` or
+    `stamina`. Those two ceilings are recomputed at every phase transition
+    (§12), so they hold only if the opponent actually generated has the
+    matching attributes; staging them onto an opponent that does not is a
+    guaranteed DIVERGE. Not an edit to make here — candidates are re-derived
+    from the map, never patched to fit — but it should be settled before a
+    supervised session is spent on that family.
+11. **[`HANDOFF.md`](../../HANDOFF.md), "Docs known stale".** Its entry for
+    this file — "§12 on `armourclass` being re-derived mid-battle (it is not —
+    that is the whole basis of the armoured family)" — is correct and is now
+    acted on; the entry can be struck. Its adjacent summary, "staged
+    `hitpoints` is NOT [honoured] (`check_stats` clamps it every phase
+    transition)", is right in effect but imprecise in mechanism: `check_stats`
+    clamps `hitpoints` to `hitpointsmax`, and it is `battlevalues` recomputing
+    `hitpointsmax` from `herolevel * 10 + vitality * 20` that makes the clamp
+    bite. Stage `herolevel` and `vitality` to reproduce the same ceiling and
+    staged `hitpoints` does survive.
 
 ## 12. What running the route established
 
@@ -1662,7 +1806,10 @@ has to refuse rather than assume.
   first win's reward line reads `"63 % TO NEXT LEVEL"` at `"ranking":3`.
 - **`staminaleft` carries across bouts.** `battlevalues` resets it **only when
   it is already `<= 0`** — `+0x3b1c`–`+0x3b44` reads
-  `if (!(staminaleft > 0)) staminaleft = staminamax`. Arena `initbattle` resets
+  `if (!(staminaleft > 0)) staminaleft = staminamax`. That test sits **inside**
+  the `battle_started` gate (below), so it is consulted only between bouts;
+  during a bout `battlevalues` does not look at `staminaleft` at all and only
+  `check_stats` bounds it. Arena `initbattle` resets
   the villain's only, `restore_char` does not carry it, and root frame 214
   resets `hitpoints` alone. Observed: the capture gate refused a champion bout
   reporting `"staminaleft":106,"staminamax":110`.
@@ -1681,9 +1828,15 @@ counters that were never flushed. This is what makes `-Attempts N` sound:
 `run-arena.ps1` relaunches after a loss deliberately *without* restoring the
 snapshot, because the save already holds every completed bout.
 
-### Why staging eleven combat fields changed nothing
+### Why staging eleven combat fields changed nothing — Corrected
 
-The single most useful negative result of the session. The `staged` line in
+The first revision of this subsection got the headline right and the mechanism
+half wrong, and the half it got wrong is the half the **armoured** and
+**champion** fixture families are built on. It is re-derived here from the
+bytes rather than patched, because "which staged fields survive a bout" is the
+single question those eight fixtures depend on.
+
+The run itself is not in dispute. The `staged` line in
 `captures/arena-staged-2` records exactly eleven fields applied:
 
 ```text
@@ -1692,13 +1845,86 @@ hero.defence=100,hero.speed=60,hero.min_damage=300,hero.max_damage=400,
 hero.hitpoints=999,hero.hitpointsmax=999,hero.staminaleft=100,hero.staminamax=100"
 ```
 
-**All eleven read back correctly** at battle construction — the wrapper reports
-every staged field on the trace's `end` line read back from the game rather than
-echoed. The bout was still lost to a 110-hitpoint, 86-armour opponent, in about
-the same wall clock as an unstaged run, three times out of three.
+and the champion bout was lost in all three attempts, in about the same wall
+clock as an unstaged run.
 
-The mechanism is in `battlevalues`, which **derives** the damage fields rather
-than storing them:
+#### Three claims the first revision made that the record does not support
+
+**1. "All eleven read back correctly at battle construction — the wrapper
+reports every staged field on the trace's `end` line."** There is no `end`
+line. `grep -c '"t":"end"'` over all eighteen `captures/arena-*` directories
+returns **0 for every one of them**: no arena run has ever closed a trace, so
+the arming-time read-back the wrapper performs has never once run on this
+route. The only read-back that exists is the `staged` diagnostic line above,
+and the wrapper's own doc comment says what that line is worth:
+
+> When called on the same tick as the write it is a TAUTOLOGY — it reads back
+> what was just assigned, and can never report an overwrite.
+> — `ss2-capture-wrapper.as`, `stagedSummary`
+
+`stepStaging` emits it inside the same tick as the twentieth write, and labels
+it "NOT a verification — whether it SURVIVED is answered at arming time".
+
+Worse, the runs contradict it on the **next log line**. In
+`arena-staged-2-obs-a2` and `-a3`, the `staged` line claiming
+`hero.herolevel=5` is followed 66 ms later by
+`{"step":"battle-ready",…,"level":4}` — and `arenaLog`'s `level` field is
+`root.game.hero.herolevel`, the identical object `applyStageSide` had just
+written. Two of three attempts lost the staged `herolevel` inside the bout it
+was written in. (Only `-a1` read back 5, and its *next* bout read 4.)
+
+**2. "The bout was still lost … three times out of three."** The bout that was
+lost three times out of three was **never staged**. Each of the three attempts
+emits exactly **one** `staged` line, during bout 1; the champion is bout 3.
+`stageTicks` was process-global at the time, so bout 1 consumed the whole
+20-tick budget. The wrapper has since been fixed and says so in
+`arenaResetAutopilot`: *"Staging is PER BOUT, not per process. It was global,
+so on a tournament run bout 1 consumed the whole 20-tick budget and the
+champion bout — the only one that is ever evidence — was never staged at all."*
+So the session's "most useful negative result" is a negative result about an
+unstaged bout, and the staging question it was taken to settle is still open.
+
+**3. "`armourclass` … [is a `battlevalues` output], and staging [it] is writing
+on water."** `armourclass` is **not** re-derived during a battle. Neither is
+`hitpoints`, nor `armourclass_max`, nor `character_xp`. This is the correction
+that matters, and it is why the armoured family is capturable at all.
+
+#### `battlevalues` has two halves, and only the first runs during a fight
+
+Byte-verified, `battlevalues` at root frame 35 `DoAction@0x3fa9dc` (body base
+`0x3fa9e2`). Everything it writes falls on one side or the other of a single
+gate at `+0x3a90`:
+
+```text
++0x3a90  Push  register:2 /* _global */, "battle_started" ; GetMember
++0x3a98  Push  true ; Equals2 ; Not ; Not
++0x3aa0  If    {delta 360, target 4187631}      // 4187631 - 0x3fa9e2 = +0x3c0d
+```
+
+`If` branches when the test is true, so **`battle_started == true` jumps the
+whole block `+0x3aa5`–`+0x3c0c` and lands on `+0x3c0d`.**
+
+| Runs on **every** call, `+0x3089`–`+0x3a8f` | Runs **only while `battle_started != true`**, `+0x3aa5`–`+0x3c0c` |
+| --- | --- |
+| the eight `<piece>_dval` multipliers, on `_global` rather than the character (`+0x3089`–`+0x30f0`) | `hitpoints = round(hitpointsmax)` (`+0x3aa5`) |
+| every `weapon_*` and `secondary_weapon_*` field (`+0x30f1`–`+0x3325`) | `armourclass_max` = the sum of the eight `<piece>_defence` (`+0x3ac3`) |
+| `min_damage`, `max_damage`, `secondary_min/max_damage` (`+0x3356`–`+0x3415`) | `armourclass = armourclass_max` (`+0x3b0f`) |
+| the `using_bow` override of `min_damage`/`max_damage`/`weapon_range` (`+0x3424`–`+0x344a`) | `if (!(staminaleft > 0)) staminaleft = staminamax` (`+0x3b1c`–`+0x3b44`) |
+| `attack_type`, `attack_speed` (`+0x3450`–`+0x347f`) | `ammo_left = maximum_ammo`, conditionally (`+0x3b45`–`+0x3b81`) |
+| **all eight `<piece>_defence`** (`+0x3480`–`+0x3633`) | `character_xp` (`+0x3b82`–`+0x3c0c`) |
+| `maximum_ammo` (`+0x3646`–`+0x378d`) | |
+| `hitpointsmax = herolevel * 10 + vitality * 20` (`+0x378e`) | |
+| `staminamax = 100 + stamina * 10` (`+0x37b6`) | |
+| `movement_speed` (`+0x37d2`–`+0x3844`) | |
+| the `char*` cosmetics (`+0x39c8`–`+0x3a8f`) | |
+
+`hitpointsdisplay` (`+0x3c0d`) is the join and runs either way. `attack`,
+`defence`, `strength`, `speed`, `vitality`, `stamina`, `charisma`, `magicka`,
+`herolevel`, `weapon` and the eight armour **piece ids** appear only as reads:
+`battlevalues` never writes them.
+
+The damage half of the unconditional prefix, unchanged from the first revision
+and still the reason the navigator grew a shop:
 
 ```text
 weapon_min_damage = _root["weapon" + char.weapon][3];       // +0x31be
@@ -1709,30 +1935,205 @@ secondary_min_damage = round(strength * 1) + secondary_weapon_min_damage;  // +0
 secondary_max_damage = round(strength * 1) + secondary_weapon_max_damage;  // +0x33e6
 ```
 
-So **staging `min_damage` writes the output of a formula the game recomputes**,
-and it is recomputed often: `battlevalues` is called from `skincharacter`
-(`+0x1ad9`), from `save_character` (`+0x0231`), from button 775 (`+0x0581`),
-from five `charsheet` frames — and, decisively, from **four sites inside the
-combat overlay itself**, `sprite:862/frame:52` `+0x35f1`, `+0x3605`, `+0x4ea1`
-and `+0x4fab`. A value staged at battle construction does not survive the
-fight.
+`battlevalues` has **16 references** in the build: the definition, four inside
+the combat overlay, and eleven outside it — `skincharacter` (`+0x1ad9`),
+`save_character` (`+0x0231`), button 775 (`+0x0581`), five `sprite:1332`
+`charsheet` frames and three `sprite:2218` frames. Which half of the function a
+call runs is decided by `battle_started` **at the moment of the call**, not by
+the call site — so the split above is a property of when a call happens, not of
+where it is written.
 
-The rule this produces, and the reason the arena navigator grew a shop:
+That the gate reads the same `battle_started` the timeline writes is settled
+behaviourally as well as structurally. The flag has **13 references** in the
+build and exactly four writers — root frame 150 `+0x0470` (`false`), root frame
+221 `+0x0bd2` (`true`, the last statement of the frame, after all four
+`skincharacter` calls), `sprite:2249/frame:88` `+0x0419` (`false`, the win
+settlement) and `sprite:2249/frame:315` `+0x0367` (`false`, the loss) — all
+four on `_global`. If `battlevalues` were reading the flag off anything else it
+would always be `undefined`, the gate would never be taken, and
+`hitpoints = round(hitpointsmax)` at `+0x3aa5` would fire at every phase
+transition. No combatant could ever lose a hitpoint. Every bout ever recorded
+refutes that, and so does every hitpoint entry in all 22 promoted goldens.
 
-> **Stage inputs, never outputs.** `strength`, `speed`, `vitality` and
-> `hero.weapon` are genuine `battlevalues` inputs. `min_damage`, `max_damage`,
-> `hitpointsmax`, `armourclass` and `character_xp` are its outputs, and staging
-> them is writing on water.
+The register numbering agrees. `battlevalues` uses exactly three registers:
+`register:3` is the `whichcharacter` parameter (every character field hangs off
+it); `register:1` is `_root`, because `weapon_min_damage` at `+0x31be` is
+`register:1["weapon" + whichcharacter.weapon][3]` and the ninety weapon rows are
+root variables; and `register:2` is the only other one, carrying the eight
+`_dval` writes and this one `battle_started` read. `_root` then `_global` is the
+`DefineFunction2` preload order, and it is the only assignment of the three that
+makes the build behave as it does. `inspect-swf.mjs` does not print preload
+flags, so this is argued rather than read; the behavioural half above is what
+makes it safe to rely on.
 
-Buying a weapon changes an input. `hero.weapon` is persistent, survives every
-`battlevalues` call, every save and every relaunch — and the only field the
-wrapper then has to write is **gold**, which no site in `attack_chances`, the
-damage roll, the deflection threshold or the controller selector reads. That is
-the least invasive intervention available.
+#### The four in-battle calls, and what each of them actually re-derives
 
-**Caveat, and it is why §10 still lists this as open**: the *mechanism* above is
-byte-verified, but nothing has yet measured a staged `min_damage` being
-overwritten mid-bout. The targeted probe that would close it is in §10.
+The four combat-overlay call sites named by the first revision are real, and
+two of them are unconditional. In `nextphase`
+(`sprite:862[overlay]/frame:52/DoAction@0x240c7f`, body base `0x240c85`):
+
+```text
++0x35bb  check_stats(game_attacker)
++0x35c7  if (phase_decision == "psyche_up") goto +0x35eb   // If target 2376304 = +0x35eb
++0x35da  game_attacker.psyche_up = 1
++0x35eb  battlevalues(game_attacker)          // the branch join — unconditional
++0x35ff  battlevalues(game_defender)          // unconditional
+```
+
+The `If` target computes to exactly `+0x35eb`, so both `battlevalues` calls sit
+at the join of that `if`/`else` and run on **every** phase transition, for
+**both** combatants. The other two sites (`+0x4ea1`, `+0x4fab`) are on the
+`swap_weapons` arms. `nextphase` is called from 49 sites.
+
+So a phase transition **does** overwrite `min_damage`, `max_damage`,
+`hitpointsmax`, `staminamax`, `movement_speed` and every `<piece>_defence` —
+and **does not** touch `hitpoints`, `armourclass`, `armourclass_max` or
+`character_xp`.
+
+`check_stats` (`+0x10e4`) is not a second re-derivation; it is a pure clamp,
+three fields, two comparisons each:
+
+```text
+if (!(staminaleft < staminamax))      staminaleft = staminamax;      // +0x110a
+if (!(staminaleft > 0))               staminaleft = 0;               // +0x112f
+if (!(hitpoints   < hitpointsmax))    hitpoints   = hitpointsmax;    // +0x115c
+if (!(hitpoints   > 0))               hitpoints   = 0;               // +0x1181
+if (!(armourclass < armourclass_max)) armourclass = armourclass_max; // +0x11ae
+if (!(armourclass > 0))               armourclass = 0;               // +0x11d3
+```
+
+It is called on `game_attacker` at `+0x334d`, `+0x33b1`, `+0x346a`, `+0x3523`,
+`+0x3535` and `+0x35bb` inside `nextphase`, and — decisively — on the character
+just damaged, at `damagecharacter` `+0x193c`. It never computes a ceiling; it
+only enforces one. So `check_stats` cannot pull `armourclass` back up unless
+`armourclass_max` moved, and nothing moves `armourclass_max` during a fight
+except `remove_armour`.
+
+#### `armourclass` is read live at roll time, and has five writers in the build
+
+`damagecharacter` (`DoAction@0x240c7f` `+0x17cd`) reads the defender's **live**
+`armourclass` off the character reference it was handed, and absorbs into it:
+
+```text
+if (defender.armourclass > 0) {                        // +0x17cd
+  defender.armourclass_temp = defender.armourclass;    // +0x17e8
+  defender.armourclass     -= damage;                  // +0x17f5
+  if (defender.armourclass < 0) {                      // +0x1809
+    damage -= defender.armourclass_temp;               // +0x1841  (the overflow)
+    defender.armourclass_temp = 0;                     // +0x1853
+  }
+}
+```
+
+Across the whole build `armourclass` has 49 references and only five writers:
+`battlevalues` `+0x3b0f` (inside the gate — construction only), `check_stats`
+`+0x11c6`/`+0x11ef` (the clamp above), `damagecharacter` `+0x17f5` (absorption),
+`remove_armour` (`DoAction@0x23d7fe`, eight per-piece subtractions plus a `= 0`
+at `+0x0d68`), and the `Rejuvinate` spell arm at `+0x8e32`
+(`armourclass = armourclass_max`, alongside a full `hitpoints` and
+`staminaleft` restore). `armourclass_max` has 24 references and two writers:
+`battlevalues` `+0x3b0e` and `remove_armour`. `villain_cast_spells`' three
+`armourclass` references (`+0x0970`, `+0x09e5`, `+0x0e79`) are all `GetMember`
+reads feeding the villain's decision heuristics.
+
+`remove_armour` subtracts the **recomputed** piece value from both totals — for
+the helmet arm:
+
+```text
+armourclass     = armourclass     - helmet_defence;   // +0x033c..+0x0351
+armourclass_max = armourclass_max - helmet_defence;   // +0x0352..+0x0367
+```
+
+which is why the removal fixtures have to stage the piece **id** and the
+`<piece>_defence` consistently with the staged totals, and why they need
+`-WatchFields` (§9). Both do: `candidate-armoured-removal-destroys-helmet`
+carries `helmet 6` / `helmet_defence 60` = `round(6 × 10)` against
+`armourclass 79 → 19`, and `candidate-champion-power-hat-removal` carries
+`helmet 102` / `helmet_defence 25` = `round(herolevel 5 × 0.5 × 10)` — the
+capped arm at `battlevalues` `+0x34eb` — against `armourclass 86 → 61`.
+
+#### The rule, restated
+
+> **Stage what `battlevalues` reads, or what it only writes at construction.**
+>
+> **Writing on water** — recomputed at every phase transition: `min_damage`,
+> `max_damage`, `secondary_min/max_damage`, `hitpointsmax`, `staminamax`,
+> `movement_speed`, every `weapon_*` field and every `<piece>_defence`.
+>
+> **Genuine inputs** — never written by `battlevalues` at all: `strength`,
+> `speed`, `vitality`, `stamina`, `attack`, `defence`, `charisma`, `magicka`,
+> `herolevel`, `weapon` and the eight armour **piece ids**.
+>
+> **Survives a fight once written** — `battlevalues` writes these only while
+> `battle_started != true`: `armourclass`, `armourclass_max`, `hitpoints`,
+> `staminaleft`, `character_xp`. They are bounded, not re-derived:
+> `check_stats` clamps `hitpoints` into `[0, hitpointsmax]`, `armourclass` into
+> `[0, armourclass_max]` and `staminaleft` into `[0, staminamax]` — so a staged
+> value holds **provided its own ceiling holds**.
+
+The three lists compose into the operational rule the two capture families need:
+
+- **Staged armour is honoured.** `armourclass` and `armourclass_max` are
+  written by `battlevalues` only at construction and are read live by
+  `damagecharacter` at roll time. Stage the pair together and the clamp is a
+  no-op (`armourclass == armourclass_max`). This is the whole basis of the
+  armoured family, and of the champion family's armour-absorption and
+  armour-overflow members.
+- **Staged `hitpoints` is not honoured on its own.** `hitpoints` itself
+  survives `battlevalues`, but its ceiling does not: `hitpointsmax` is
+  recomputed from `herolevel * 10 + vitality * 20` at `+0x378e` on every call,
+  and `check_stats` then pulls `hitpoints` down to it. Staging
+  `hitpoints`/`hitpointsmax` therefore holds **only** if `herolevel` and
+  `vitality` are staged to reproduce the same `hitpointsmax`. The same applies
+  to `staminaleft`/`staminamax` through `stamina`.
+- **Staged `<piece>_defence` is not honoured**, and does not need to be: it is
+  recomputed from the piece id and the `_dval`, and the only thing that reads
+  it during a fight is `remove_armour`.
+
+`hero.weapon` remains the cleanest intervention for damage, which is why the
+navigator grew a shop: it is an input, it is persistent, it survives every
+`battlevalues` call, every save and every relaunch, and buying it needs only
+**gold**, which no site in `attack_chances`, the damage roll, the deflection
+threshold or the controller selector reads.
+
+#### A consequence the armoured family has to plan around
+
+All five `candidate-armoured-*` fixtures declare a villain carrying
+`hitpointsmax 80` and `staminamax 110` but no `herolevel`, `vitality` or
+`stamina`. Their `armourclass` / `armourclass_max` pair is safe by the rule
+above; those two **ceilings are not**, and the difference decides how the bout
+has to be set up:
+
+- Reached **naturally** — an opponent the ladder generated with
+  `herolevel * 10 + vitality * 20 == 80` and `100 + stamina * 10 == 110` — they
+  hold, because every recompute lands on the same number.
+- Reached by **`-StageVillain`** on an opponent whose attributes say otherwise,
+  they do not: the first phase transition rewrites both from `+0x378e` and
+  `+0x37b6`, and `check_stats` then pulls `hitpoints` down to whatever
+  `hitpointsmax` became.
+
+The champion family has no such exposure: its `hitpointsmax 110` and
+`staminamax 150` are exactly what the hard-coded champion DNA yields
+(`herolevel 5`, `vitality 3`, `stamina 5`), so the recompute is a fixed point
+and nothing about that villain needs staging at all.
+
+Either way the failure is **loud** — a projected field that disagrees with the
+staged dump is a DIVERGE at ingest, not a silent accept. Recorded here and in
+§10 rather than acted on; those fixtures are owned elsewhere and are re-derived
+from the map, never edited to fit.
+
+#### What is still not proved
+
+The byte reading above is complete and self-consistent, but **no run has yet
+measured any of it mid-bout**, because no arena run has produced a closed trace
+and the one staged tournament run never staged the bout it was reasoned about.
+§10 keeps this open. It is now cheap to close: `-WatchFields` on
+`run-arena.ps1` (§9) can watch `min_damage`, `armourclass` and
+`armourclass_max` on a single staged duel bout, and the arming-time `end`-line
+read-back then reports what survived rather than what was written. The
+prediction to falsify is exact — staged `min_damage` reverts to
+`round(strength * 2) + weapon[3]`, staged `armourclass` does not move except by
+absorption or removal.
 
 ## Reproduce the read-only inventory
 
