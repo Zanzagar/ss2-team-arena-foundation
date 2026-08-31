@@ -104,5 +104,6 @@ Keep this shape; it is what worked:
 
 | Handoff | Session | One line |
 | --- | --- | --- |
+| [2026-08-31 18:20 — the pairwise gate, measured](2026-08-31-1820--pairwise-gate-measured.md) | `a87c4347` | The gate HAS teeth (407 leaves at callSite) and on committed evidence refuses nothing, because the nonce check fires forty lines earlier; "162" reproduces exactly; the fresh-nonce hole also unlocks the authored-from gate |
 | [2026-08-31 14:43 — nonce gate, stat arithmetic, toolchain](2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain.md) | `e386f047` | A record’s own copy stopped counting as the second session; the stat-vector arithmetic settled the 22 written-off fixtures; one shared AGENTS.md for both agents |
 | [2026-08-31 12:38 — corpus audit and provenance repair](2026-08-31-1238--corpus-audit-provenance-repair.md) | `4a79fa7f` | 5 transcriptions found (not 23), provenance made honest, pairwise gate decoupled from the matcher; levelling reopens 22 fixtures |

@@ -6,7 +6,7 @@ session lives in [`docs/handoffs/`](docs/handoffs/README.md), stamped
 the latest handoff in `docs/handoffs/` and proceed" — with this file as the state
 it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session. Latest:
-[2026-08-31 14:43 — nonce gate, stat arithmetic, toolchain](docs/handoffs/2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain.md).
+[2026-08-31 18:20 — the pairwise gate, measured](docs/handoffs/2026-08-31-1820--pairwise-gate-measured.md).
 
 ## READ THIS FIRST — corrections from the 2026-08-31 audit pass
 
@@ -16,7 +16,7 @@ cleanly with no free parameter; 60 do not.** The corpus is about 98% sound, and
 four claims below this line are now WRONG. They are corrected here rather than
 edited away, because each was load-bearing.
 
-**Baseline is 620 tests, 0 failed, 0 skipped** (614 at the end of the audit pass,
+**Baseline is 622 tests, 0 failed, 0 skipped** (614 at the end of the audit pass,
 617 by the end of that session — a number this file was never updated with, so
 every "614" below it was stale on the day it was written; 620 after `2b123b9`.
 Was 603 before the audit pass; the "602" written below was already stale when
@@ -146,7 +146,7 @@ written 16 lines before the game is loaded.
 ## State at the end of the 2026-08-31 session
 
 22 promoted goldens and **no runtime evidence yet for the champion, armoured or
-tournament families**. **620 tests, all passing, 0 skipped** (this paragraph said 602, then 614; see the corrections block above) in a capture-bearing
+tournament families**. **622 tests, all passing, 0 skipped** (this paragraph said 602, then 614; see the corrections block above) in a capture-bearing
 worktree.
 
 The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
@@ -157,20 +157,23 @@ history includes `ecf4510` — and the 2026-08-31 session added the commits on
 ### Expected test profiles
 
 - A capture-bearing operator worktree with the complete ignored raw-trace
-  archive runs all **620 tests: 620 passed, 0 skipped, 0 failed**.
-- A fresh clone or worktree with none of those ignored traces runs **620 tests:
-  619 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  archive runs all **622 tests: 622 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **622 tests:
+  621 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
   existence check; the committed observation and divergence integrity checks
   still run.
 - A partial raw-trace archive does **not** skip: it fails and names every
   missing expected trace.
 
-**Both profiles were MEASURED at `2b123b9`, not derived from the previous
-numbers** — the second one in a detached worktree holding only committed content,
-which is the fresh-clone condition. Worth doing rather than adding 3 to the old
-figures: the last four sessions each carried the previous session's count forward
-untouched, which is how "614" survived in three places after the suite had reached
-617.
+**Both profiles were MEASURED AGAIN at `ce5699f`, not derived by adding 2** —
+622 passed / 0 skipped in the capture-bearing tree, and 622 tests / 621 passed /
+1 skipped in a detached worktree holding only committed content, which is the
+fresh-clone condition. The two tests added that session run in both. They were
+first measured the same way at `2b123b9` (620/0/0 and 619/1/0).
+
+Doing this every time is worth the minute: the four sessions before `2b123b9`
+each carried the previous session's count forward untouched, which is how "614"
+survived in three places after the suite had reached 617.
 
 **The skip is now anchored, and this is the part that changed.** It used to skip
 whenever zero expected traces resolved, and a count of successful lookups cannot
