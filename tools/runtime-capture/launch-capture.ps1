@@ -51,21 +51,30 @@ param(
     # frame-based - cooldowns, idle ticks, the autopilot wait limit - so it
     # scales with this automatically. 0 leaves the movie own rate.
     [int] $FrameRate = 0,
-    # Isolated SharedObject store for this session. Ruffle shares one save
-    # location by default, and a window that loaded older state flushes it
-    # back on exit, clobbering a newer session - which is the only reason
-    # sessions must be serialised.
+    # Isolated SharedObject store for this session, seeded from the real save.
+    # Ruffle shares one save location by default, and a window that loaded
+    # older state flushes it back on exit, clobbering a newer session - which
+    # is the only reason sessions had to be serialised.
     #
-    # NOT YET USABLE, and left opt-in and empty by default for that reason.
-    # The protective half works: a session given its own directory provably
-    # cannot touch the real save (checked by hashing the master before and
-    # after a run, and against a snapshot). The seeding half does not: Ruffle
-    # wrote a fresh empty store into the isolated directory rather than
-    # reading the seeded copy placed at the same relative path, so the game
-    # found no saved gladiator and the navigator stalled on the slot screen
-    # with max_gladiators unset. Until that is understood, a session started
-    # this way cannot reach a battle, and parallel capture stays blocked on
-    # it.
+    # THIS WORKS, and it is what makes concurrent capture possible. It was
+    # recorded for a session as broken - "Ruffle wrote a fresh empty store
+    # instead of reading the seeded copy" - and that diagnosis was wrong twice
+    # over. Ruffle never ignored anything: tools/ffdec.ps1 redirects
+    # LOCALAPPDATA to .tools/ffdec-profile for the whole PROCESS, this script
+    # called it for the wrapper compile, and the seed copy below then read a
+    # master store path inside .tools/ that does not exist and was skipped
+    # behind a Test-Path. Ruffle was handed an empty directory and did the only
+    # thing it could. The Ruffle-side log lines that would have said so were
+    # suppressed by RUST_LOG=avm_trace=info, which sets the global level to off.
+    #
+    # Both causes are fixed, and the seed is now ASSERTED byte-identical rather
+    # than attempted. Measured: three concurrent isolated sessions completed in
+    # 22s against ~45s serial, all matched promoted goldens, and the master
+    # ss2_data.sol was byte-identical afterwards.
+    #
+    # Use it for capture families only. Per-session stores FORK the save, which
+    # is right for a route that reads a staged gladiator and wrong for the
+    # arena route, which must ACCUMULATE level and gold across bouts.
     [string] $SaveDirectory = "",
     # Extra Object.watch fields, comma separated, ADDED to the wrapper default
     # list rather than replacing it. Needed by fixtures that stage the
@@ -91,6 +100,12 @@ param(
     # is staging, not evidence), 'champion' (the tournament rank-1 bout only),
     # or 'always'.
     [string] $ArenaCapture = "",
+    # The herolevel a champion capture is staged for. The rank-1 BOUT is not
+    # reproducible unless the hero enters it in exactly the staged state:
+    # staminaleft carries across bouts (battlevalues resets it only when it is
+    # already <= 0) and a mid-ladder level-up is decided by a generated
+    # opponent's character_xp. The wrapper refuses to arm when either differs.
+    [int] $ArenaStagedLevel = 0,
     # GATE A bounds. time_of_day advances on a 1.5s WALL-CLOCK interval outside
     # the battle; at 200 the game takes a special event that permanently
     # mutates charisma, magicka or gold and then saves it. 0 leaves the
@@ -108,6 +123,13 @@ Set-StrictMode -Version Latest
 
 $projectRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 Set-Location $projectRoot
+
+# Captured BEFORE anything can redirect it. tools/ffdec.ps1 points APPDATA and
+# LOCALAPPDATA at .tools/ffdec-profile so FFDec keeps its state out of the real
+# profile; it now restores them, but this script depends on the real value for
+# the Ruffle SharedObject store and must not be one edit away from reading a
+# wrapper build's leftovers. Belt and braces on a bug that cost a session.
+$realLocalAppData = $env:LOCALAPPDATA
 
 $node = Get-Command node -ErrorAction SilentlyContinue
 $nodeExe = if ($node) { $node.Source } else {
@@ -166,18 +188,44 @@ $builtStamp = "$cacheRelative\built.sha256"
 if ((-not $NoWrapperCache) -and (Test-Path $builtStamp) -and (Test-Path $wrapperSwf)) {
     Write-Host "Reusing the compiled wrapper for source $wrapperKey."
 } else {
+    # Built into a private directory and PUBLISHED by rename, never in place.
+    # Concurrent sessions share this cache, and a half-written SWF that another
+    # process picked up would be the worst possible cache bug on this project -
+    # a capture running instrumentation that never existed in any source file.
+    # The rename is the only step other processes can observe, and the loser of
+    # the race simply uses the winner's build.
     Write-Host 'Building the wrapper from source...'
-    New-Item -ItemType Directory -Path $cacheRelative -Force | Out-Null
-    $shell = "$cacheRelative\wrapper-shell.swf"
+    $stagingRelative = "captures\wrapper-cache\.build-$wrapperKey-$PID"
+    Remove-Item -Recurse -Force $stagingRelative -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $stagingRelative -Force | Out-Null
+    $shell = "$stagingRelative\wrapper-shell.swf"
+    $stagedSwf = "$stagingRelative\ss2-capture-wrapper.swf"
     & $nodeExe tools/runtime-capture/make-wrapper-shell.mjs $shell | Out-Null
-    $scripts = "$wrapperSwf-scripts"
+    $scripts = "$stagedSwf-scripts"
     New-Item -ItemType Directory -Path (Join-Path $scripts 'scripts\frame_1') -Force | Out-Null
     Copy-Item $wrapperSource (Join-Path $scripts 'scripts\frame_1\DoAction.as') -Force
-    & (Join-Path $projectRoot 'tools\ffdec.ps1') -importScript $shell $wrapperSwf $scripts | Out-Null
+    & (Join-Path $projectRoot 'tools\ffdec.ps1') -importScript $shell $stagedSwf $scripts | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "FFDec wrapper compilation failed (exit $LASTEXITCODE)." }
-    Set-Content -LiteralPath $builtStamp -Value $wrapperSourceHash -Encoding utf8
-    Write-Host "Compiled the wrapper for source $wrapperKey."
+    Set-Content -LiteralPath "$stagingRelative\built.sha256" -Value $wrapperSourceHash -Encoding utf8
+
+    if (Test-Path $cacheRelative) {
+        # Another session published first, or -NoWrapperCache is rebuilding a
+        # directory that already exists. Either way its contents are keyed on
+        # the same source hash, so they are the same build.
+        Remove-Item -Recurse -Force $stagingRelative -ErrorAction SilentlyContinue
+        Write-Host "Another session published the wrapper for source $wrapperKey first; using it."
+    } else {
+        try {
+            Move-Item -LiteralPath $stagingRelative -Destination $cacheRelative -ErrorAction Stop
+            Write-Host "Compiled and published the wrapper for source $wrapperKey."
+        } catch {
+            Remove-Item -Recurse -Force $stagingRelative -ErrorAction SilentlyContinue
+            if (-not (Test-Path $wrapperSwf)) { throw }
+            Write-Host "Lost the publish race for source $wrapperKey; using the winner's build."
+        }
+    }
 }
+if (-not (Test-Path $wrapperSwf)) { throw "The compiled wrapper is missing at $wrapperSwf." }
 
 $tape = & $nodeExe tools/capture-session.mjs tape --fixture $FixturePath
 if ($LASTEXITCODE -ne 0) { throw 'Reading the fixture tape failed.' }
@@ -228,6 +276,7 @@ $ruffleArgs = @(
     "-ParenaTarget=$ArenaTarget",
     "-ParenaPolicy=$ArenaPolicy",
     "-ParenaCapture=$ArenaCapture",
+    "-ParenaStagedLevel=$ArenaStagedLevel",
     $wrapperSwf
 )
 # Passed only when set: an empty FlashVar reads as "" in the wrapper, which is
@@ -253,7 +302,7 @@ if ($SaveDirectory) {
         throw "-SaveDirectory must not contain '..': Ruffle silently refuses every read and write for such a path."
     }
     New-Item -ItemType Directory -Path $SaveDirectory -Force | Out-Null
-    $masterSave = Join-Path $env:LOCALAPPDATA 'ruffle\SharedObjects'
+    $masterSave = Join-Path $realLocalAppData 'ruffle\SharedObjects'
     if (Test-Path $masterSave) {
         Copy-Item -Path (Join-Path $masterSave '*') -Destination $SaveDirectory -Recurse -Force
     }
