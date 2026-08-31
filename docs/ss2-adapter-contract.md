@@ -21,7 +21,16 @@ before the adapter work can begin.
 
 Items 1 and 4 are implemented asset-free in `src/adapter/` and specified in
 [The SS2 adapter](#the-ss2-adapter-srcadapter) below. Item 3 is the rule-set
-seam, item 2 is Stage 5, and item 5 is not started.
+seam and no verified rule set exists yet. Item 5 is implemented asset-free in
+`src/campaign/` — see [campaign persistence](campaign-persistence.md) — with
+one shortfall worth stating plainly: the record carries the roster, seats,
+per-combatant survival, health, statuses, the initiative order, the seed and
+the RNG cursor, but **not the event log**. Only the event sequence at which
+each combatant was defeated survives (`src/campaign/from-battle.js`). Item 5's
+second sentence — existing SS2 saves must remain readable — is met structurally
+rather than carefully: `src/campaign/` contains no read path, no write path and
+no field mapping for the vanilla save at all, so there is no function there to
+call that could damage one. Item 2 is Stage 5 and is not started.
 
 ## What to locate in the SWF
 
@@ -45,6 +54,7 @@ is a thin compatibility façade over it.
 | `src/team/rule-set.js` | the injection contract, and the gate on claiming runtime verification |
 | `src/team/placeholder-rules.js` | the only formulas in the tree — all placeholder |
 | `src/team/rng.js` | the ordered authoritative RNG channel (seeded or tape-backed) |
+| `src/team/resources.js` | the open, clamped, projected per-combatant numeric bag |
 | `src/team/roster.js` | teams, slots, combatant identity, AI fill |
 | `src/team/controllers.js` | seat → controller identity, independent of combatants |
 | `src/team/elimination.js` | knockouts, combatant-defeated, team-eliminated |
@@ -76,20 +86,74 @@ client submits, plus `actorId`.
 
 `view` is `{ turnNumber, actor, allies, foes }`. `request` is that view plus
 `{ actorId, teamId, type, targetId, spellKind, target }`. Everything in both is
-a frozen clone: a rule set can read the battle but cannot reach into it.
+a frozen clone: a rule set can read the battle but cannot reach into it. Each
+combatant view is `{ id, name, teamId, seatId, slotIndex, aiFilled, stats,
+loadout, resources, maxHealth, health, alive, status }` — every field of which
+also appears in `combatantProjection`, and therefore inside `combatStateHash`.
 
 `ActionOutcome` is `{ effects, events }`:
 
 - `effects` are declarative and applied in order by the resolver:
   `{ kind: "damage" | "heal", targetId, amount }` with a non-negative finite
-  amount, or `{ kind: "status", targetId, status, active }`. The resolver does
-  the clamping to `[0, maxHealth]` and recomputes `alive`.
+  amount; `{ kind: "status", targetId, status, active }`; or
+  `{ kind: "resource", targetId, resource, to }`, an **absolute** write to one
+  already-declared entry of the target's resource bag. The resolver clamps
+  health to `[0, maxHealth]`, clamps a resource to its declared `[min, max]`,
+  and recomputes `alive` — from `health` alone. A resource reaching zero means
+  nothing to the resolver, deliberately: making a pool lethal is a combat rule.
 - `events` are ordered semantic records with a `type`. The resolver stamps
   `sequence` and `turn`; a rule set that supplies either is rejected.
 
 The action vocabulary is owned by the rule set precisely because the licensed
 build's vocabulary (power, normal, quick, bash, taunt, bombard, snipe,
 grievous) differs from the placeholder's (melee, ranged, spell, rest).
+
+## Canonical resources
+
+`src/team/resources.js` is the resolver's one open numeric bag, and it is what
+lets a rule set read a per-combatant number the resolver does not itself
+define — `armourclass`, `staminaleft`, `ammo_left`, `charisma`, an armour
+piece's rating. Four constraints keep it from becoming an untyped grab-bag, and
+each is enforced in code rather than asked for:
+
+1. **numbers only** — a resource is a finite scalar; flags are `status`;
+2. **declared at construction** — `normaliseResourceBag` fixes the *names* when
+   the roster builds the combatant, and `writeResource` refuses a name nobody
+   declared rather than creating one mid-battle;
+3. **sorted** — the hash is `JSON.stringify` of the projection and JSON key
+   order is insertion order, so two peers building the same bag from
+   differently-ordered literals must not hash differently;
+4. **written only through effects** — the rule set returns
+   `{ kind: "resource", targetId, resource, to }` and the resolver performs and
+   clamps the write.
+
+`min` defaults to `0` and `max` to `null` (unbounded); both must be finite or
+`null`. Bounds are a structural rail, not a game rule — a maximum that itself
+moves during a battle is modelled as its own resource, exactly as vanilla
+models `armourclass_max`, `staminamax` and `maximum_ammo` alongside the pools
+they bound.
+
+`health` is deliberately **not** a resource. It is the one number the resolver
+interprets, it already has effects and clamping of its own, and two ways to
+write it would be two ways to disagree about it. Its name is one of the twelve
+in `RESERVED_RESOURCE_NAMES`, alongside every other combatant field the
+resolver owns.
+
+The resolver learns no SS2 noun from any of this. It learns one concept —
+"clamped numeric pool" — and every name is supplied by the blueprint, the same
+way the *values* of `stats` already are. That is the argument for a generic
+`resource` effect over a bespoke `armour` one: a bespoke kind would put an SS2
+noun inside the resolver and would need a sibling for stamina, another for
+ammunition, and another for whatever a future rule set invents. An armour-first
+damage split is therefore two ordered effects and no new concept: write the
+pool down, then apply the overflow as damage.
+
+The soundness property this exists to restore, and which
+`test/team-resolver.test.js` pins: **everything a rule set can see, the
+projection carries, and therefore the hash covers.** A value read through a
+side channel is a value the hash cannot see, and two peers who disagree about
+it would hash identically right up to the moment they diverge — which is the
+one thing the hash exists to prevent.
 
 ## What the resolver guarantees
 
@@ -104,6 +168,19 @@ grievous) differs from the placeholder's (melee, ranged, spell, rest).
   computed by the resolver afterwards, never by the rule set.
 - Determinism: same blueprint + same ordered action stream ⇒ identical
   `combatStateHash`, for every team size.
+- The resolver surfaces what it just applied. `lastResolvedAction(battle)`
+  returns a frozen deep copy of `{ action, actorId, turn, firstEventSequence,
+  effects, events, knockouts }` for the most recent action, and
+  `applyActionWithOutcome(battle, action)` returns it in one call. It is
+  *recorded, not projected*: `toTeamWireState` does not carry it and
+  `combatStateHash` does not cover it, because the state those effects produced
+  is already in the projection and hashing the derivation too would make a rule
+  set's internal bookkeeping look like a desync. An integration that needs the
+  declared effect order — the adapter does, to order its vanilla writes — can
+  read it straight off the battle. `battle-host.js` does not yet: it still
+  wraps the injected rule set in a pass-through recorder
+  (`createEffectRecordingRuleSet`, on by default), which predates
+  `lastResolvedAction` and is now redundant.
 
 ## The verified/placeholder gate
 
@@ -137,7 +214,12 @@ editing one.
 Sources are `randomBetween` (inclusive) and `randomNumber(n)` (recorded as
 `0..n-1`) — the two the licensed AVM1 build actually exposes — plus `unit`,
 which is **placeholder-only** and has no AVM1 counterpart. A runtime-verified
-rule set must not use it.
+rule set must not use it. That last rule is a **convention the seam does not
+enforce**: `observableRollSources()` names the two observable sources but
+nothing calls it, and neither `assertTeamRuleSet` nor the channel refuses a
+`unit` draw from a rule set claiming `runtime-verified`. The first verified
+rule set should come with a test that closes this, or the gate should learn to
+reject a `unit` draw at the channel.
 
 `state` and `cursor` (the number of draws consumed) are both authoritative: a
 host and a client that agree on both have consumed the same ordered stream.
@@ -284,6 +366,18 @@ That is enforced by module shape, not by convention:
 | `src/adapter/clip-registry.js` | `clipByCombatantId`, structurally outside deterministic state |
 | `src/adapter/presentation.js` | resolved events -> ordered presentation commands, and the animation binding tables |
 | `src/adapter/acknowledgement.js` | the animation surface -> once-only campaign settlement |
+| `src/adapter/battle-host.js` | the reference host loop that drives both seams together |
+| `src/adapter/index.js` | barrel; re-exports the seven modules above |
+
+`battle-host.js` is not a fifth responsibility — it is the two seams driven
+as one thing, which is what a real mod would be: read vanilla combat objects,
+build a team battle, submit one action, mirror the resolved action back into
+vanilla field writes and presentation commands, acknowledge the result
+animation. Its ordered pipeline is exported as `HOST_PIPELINE` and is
+**identical for 1v1, 2v2 and 3v3**: one resolver call and one adapter
+conversion per action whatever the team size, with only the number of
+combatants the conversion covers changing. It decides no combat; its own
+arithmetic is array indices.
 
 The split follows the four things the adapter is responsible for. The
 catalogue is separate from the bridge because it is *evidence* — a table of
@@ -311,8 +405,8 @@ sections of [the battle map](integration/ss2-battle-map.md).
 | `status[]` | `burning`, `frozen`, `poison`, `life_stolen`, `taunted1`, `taunted2` | Combatant state objects (runtime-observed 2026-08-30) | Canonical status tokens are the vanilla flag names **verbatim**; there is deliberately no translation table. |
 | `name` | `character_name` | Identity/progression | |
 | `loadout.*` | `min_damage`, `secondary_min_damage`, `using_bow`, `maximum_ammo`, `inventory1..6` | Derived combat; Spell and vanilla AI surface | **Placeholder-vocabulary bridge only.** See below. |
-| — | `charisma` | Base stats | No canonical slot. Carried in the vanilla record. |
-| — | `armourclass`, `armourclass_max` | Live resources; Hit and damage path | Deliberately **not** folded into `health`: the armour-first split is a formula (`damagecharacter` subtracts from `armourclass` first and carries only overflow into `hitpoints`). |
+| a declared resource — *not emitted yet* | `charisma` | Base stats | There is no canonical *stat* named charisma and there should not be. Since `src/team/resources.js` landed there **is** a canonical home for it: a declared resource, projected and hashed. `toCanonicalCombatantSource` does not emit one, so today it survives only in the vanilla record. |
+| a declared resource — *not emitted yet* | `armourclass`, `armourclass_max` | Live resources; Hit and damage path | Still deliberately **not** folded into `health`: the armour-first split is a formula (`damagecharacter` subtracts from `armourclass` first and carries only overflow into `hitpoints`). It now has a canonical home — a declared resource moved by an absolute `resource` effect — but `toCanonicalCombatantSource` emits no `resources` bag and `vanillaWritesForResolvedAction` has no `RESOURCE` branch, so `battle-host.js` refuses to write `armourclass` at all. |
 | — | everything else | Observed data fields | Passed through unchanged. |
 
 Three fields get special treatment, each because the map says so.
@@ -382,7 +476,7 @@ Around that, the layout:
 | clip instance | `hero` / `villain` — the vanilla names | `hero_ally_2`, `hero_ally_3`, `villain_ally_2`, `villain_ally_3` |
 | depth | 301 / 300, shadows 298 / 299 — the vanilla depths | reserved band from 320, two depths per ally; asserted clear of every depth the map records (298-301, 25005, 40000, 40001) |
 | position | `(-250, 200)` / `(250, 200)` — the vanilla placement, hero facing right, villain facing left | stepped outward by 130 and up-stage by 18 per slot, clamped to `nextphase`'s own `[-2100, 2100]` |
-| panel | the six mapped `combat_panel` instances | authored per-slot widgets |
+| panel | under `arena.combat_panel`: the three map-named instances per side (`<side>_armour`, `<side>_potion`, `<side>_stamina_potion`, six in total). The health and stamina widgets are addressed by **role** with `instanceName: null`, because the map's UI table names no instance for them and a guessed name is worse than none | authored per-slot widgets, `mapNamed: false` throughout |
 | campaign record | `_root.game.hero` / `_root.game.villain` | none — allies never multiply `_root.game.*` |
 
 So 1v1 is byte-for-byte the vanilla arrangement and remains the parity gate,
@@ -390,11 +484,21 @@ and every combatant id maps to a distinct clip instance, depth, screen
 position, and state path (tested for 1v1, 2v2, 3v3, and 1v3).
 
 **Where combat state lives.** Every combatant, slot 0 included, is served from
-the adapter's mirror under `_root.arena.team_arena.state.<side>_<n>`, and
-`game_attacker` / `game_defender` bind there. The vanilla campaign objects are
-read once when the battle is built and written back only at settlement, which
-is what the roadmap's "campaign saves ... do not overwrite vanilla save fields
-while the adapter is experimental" constraint requires. The mapped call sites
+the adapter's mirror under `_root.arena.team_arena.state.<side>_<n>`
+(`ADAPTER_STATE_ROOT`, an authored scratch root, not a vanilla path), and
+`game_attacker` / `game_defender` bind there. The intent is that the vanilla
+campaign objects are read once when the battle is built and written back only
+at settlement, which is what the roadmap's "campaign saves ... do not overwrite
+vanilla save fields while the adapter is experimental" constraint requires.
+**Only the first half of that is implemented.** A placement carries
+`vanillaCampaignObjectPath` (`_root.game.<side>` for slot 0, `null` for every
+ally, because the map warns against multiplying those objects), but nothing in
+`src/adapter/` reads or writes it: `battle-host.js` takes the vanilla combat
+objects from its caller and never names `_root.game.*`, and there is no
+settlement write-back path anywhere in the tree. So no vanilla save field is
+written mid-battle — which is the property that matters — but the write-back
+that would eventually pay a campaign out is a declared path and nothing more.
+The mapped call sites
 that read `_root.game.*` *directly* rather than through the globals are
 construction (root frame 221 calls `skincharacter` with `_root.game.hero` and
 `_root.game.villain`) and the reward path (arena frame 315 restores the hero) —
@@ -452,19 +556,32 @@ Two things make it more than a pass-through, and both are multi-slot concerns:
    way is a desync and is refused, not settled.
 
 Refusals and repeats: reporting anything before elimination throws; an unknown
-combatant id throws; a mismatched completion token throws; a repeated arena
-label or death report returns `settled: false` with `alreadySettled: true`. The
+combatant id throws; a mismatched completion token throws; a repeat is answered
+with `counted: false` and `duplicate: true`, and once the bridge has settled
+every further report returns `settled: false` with `alreadySettled: true`. The
 bridge latches *before* submitting, mirroring `CampaignSettlement`, so a
-throwing campaign callback cannot leave it able to fire again. A draw has no
-vanilla transition (`death()` dispatches only `combatwon` or `combatlost`), so
-it is reported as unmapped rather than guessed.
+throwing campaign callback cannot leave it able to fire again.
+
+**A drawn battle cannot settle through this bridge today.** The resolver
+produces draws and settles them on its own two gates — `battleStanding` reports
+`reason: "draw"` with `winnerTeamId: null` when both teams go down on the same
+action, `checkResult` arms the settlement, and `acknowledgeResultAnimation`
+accepts the matching token. The bridge is the gap: `resultLabelsFor(layout,
+null)` returns `{ overlayLabel: null, arenaLabel: null, unmapped: "vanilla has
+no draw transition: death() dispatches only combatwon or combatlost" }`, and
+`reportArenaLabel` is the only thing that arms the final gate, so on a draw it
+throws instead. Reporting the missing transition as unmapped rather than
+guessing at a label is right; leaving the bridge with no way to acknowledge a
+draw is not. The acknowledgement a draw should carry is the completed death
+animations with no arena transition, and the resolver side is already pinned as
+a contract to code against.
 
 ## Verified, static, assumed
 
 | Claim | Status |
 | --- | --- |
 | the undefined-until-set status flags and clip-resident facing | **runtime-observed** 2026-08-30 (battle map, "Combatant state objects") |
-| the promoted goldens in `test/fixtures/ss2-1v1-golden/` | **runtime-verified** — and they verify the ordered rolls, the mutation order, and the result transition, not any adapter mapping |
+| the 22 promoted goldens in `test/fixtures/ss2-1v1-golden/` | **runtime-verified** — and they verify the ordered rolls, the mutation order, and the result transition, not any adapter mapping. No golden observes anything the adapter does. |
 | field names, groups, clip names, depths, positions, panel instances, overlay/arena result labels, the four binding globals | **static map only** for the fingerprinted build |
 | every clip *label* the adapter dispatches | **static map at best**; the ranged `hurtN` adjustment and the death-variant label names are `assumed` |
 | the loadout bridge, the spell/heal inventory id sets | **assumption**, placeholder vocabulary only |
@@ -477,30 +594,52 @@ every entry is complete and uniquely identified.
 
 ## Canonical-shape gaps this exposes
 
-These are limits of `src/team/`, not of the adapter, and the adapter does not
-work around them by inventing state:
+This section used to list five limits of `src/team/`. **Four of them are
+closed**, and the honest statement today is that the canonical shape is no
+longer the binding constraint — the adapter is. What follows separates the two,
+because conflating them is how a document keeps apologising for a gap that was
+fixed.
 
-1. **No SS2 field bag on a canonical combatant.** `normaliseCombatant` builds a
-   fixed shape and `combatantProjection` projects a fixed key list, so armour,
-   stamina, ammunition, equipment, charisma, the chance cache, and the
-   inventory cannot enter the combat state hash. The adapter therefore keeps
-   them in its mirror, and only `hitpoints`, `hitpointsmax`, and the six status
-   flags are hash-covered today. This is the same gap the battle map's
-   "Foundation gaps" section records.
-2. **No `charisma` canonical stat**, which the whole taunt path reads.
-3. **`normaliseCombatant` drops `source.status`**, so a gladiator who enters a
-   battle already burning cannot express that through the roster.
-   `initialStatusEffects` returns the declarative effects a future roster would
-   need; applying them is resolver work.
-4. **No armour effect kind.** `EffectKind` is `damage | heal | status`, so a
-   verified rule set cannot express "this hit consumed 22 points of armour and
-   spilled 3 into hitpoints" as effects. It would have to fold the split into a
-   single `damage` amount and let the armour bookkeeping live outside
-   deterministic state — which is exactly what should not happen.
-5. **Facing is read but not carried.** `gladiator_dir` affects the knockback
-   sign and the debris direction in the 1v1 candidate. It lives in the
-   adapter's mirror, so a rule set that reads it would be reading something
-   outside the state hash.
+### Closed in `src/team/`
+
+| Was | What closed it |
+| --- | --- |
+| **No SS2 field bag on a canonical combatant** — armour, stamina, ammunition, charisma and the chance cache could not enter the combat state hash | `src/team/resources.js`. A combatant declares a named, bounded numeric bag at construction; `combatantView` exposes it and `combatantProjection` carries it, so it is inside `combatStateHash`. Names are the blueprint's, not the resolver's. |
+| **No `charisma` canonical stat**, which the whole taunt path reads | the same module. `charisma` is a resource, not a stat — which is the right shape for it: `DEFAULT_STATS` is the placeholder vocabulary's seven, and a verified rule set has no reason to grow it. |
+| **`normaliseCombatant` drops `source.status`**, so a gladiator entering already burning could not express it | `normaliseStatus` in `src/team/roster.js`, which carries `source.status` through in declaration order, deduplicated, and refuses a malformed list. The adapter's `initialStatusEffects` is now redundant for this purpose: `toCanonicalCombatantSource` already emits `status`, and the roster now honours it. **`battle-host.js` has not caught up** — it still reports the same list as `diagnostics.unappliedInitialStatusEffects`, and that name is now wrong: the roster applied them. |
+| **No armour effect kind** — a verified rule set could not express "this hit consumed 22 points of armour and spilled 3 into hitpoints" | `EffectKind.RESOURCE`. An armour-first split is two ordered effects — write the pool down absolutely, then apply the overflow as damage — and the resolver applies exactly that, in exactly that order, without knowing what "armour" is. |
+
+### Still open
+
+1. **The adapter does not use any of it yet.** As of `1a05ce1`,
+   `toCanonicalCombatantSource` emits no `resources` bag and
+   `vanillaWritesForResolvedAction` has no `RESOURCE` branch, so `armourclass`,
+   `staminaleft`, `ammo_left`, `charisma` and the eight per-piece armour
+   ratings still live only in the adapter's vanilla mirror, outside the hash.
+   `battle-host.js` refuses to write `armourclass` for exactly this reason. The
+   resolver refuses a write to an undeclared resource by design, so the two
+   halves have to land together: emit the bag **on both sides**, then add the
+   branch.
+2. **Resources are numbers, so not everything vanilla carries has a home.**
+   `normaliseResourceBag` accepts finite scalars only. Numeric pools fit;
+   equipment identity, the six numbered inventory slots read as *ids* rather
+   than pools, and the placeholder `loadout` shape do not. That is a deliberate
+   line — anything needing structure is the rule set's own static configuration
+   and is not per-combatant battle state — but it means the loadout bridge
+   stays an assumption until a verified rule set reads the vanilla record
+   directly.
+3. **Facing is read but not carried.** `gladiator_dir` affects the knockback
+   sign and the debris direction in the 1v1 candidate. It is a string
+   (`"right"` / `"left"`), so the numeric resource bag is not its home either.
+   It lives in the adapter's clip record, and a rule set that read it would be
+   reading something outside the state hash.
+4. **A campaign record cannot carry a resource bag named after vanilla
+   fields.** `src/campaign/vanilla-boundary.js` screens every key in a record
+   against the vanilla field catalogue and refuses the record if any matches —
+   which is the correct boundary, and which also means `armourclass` and
+   `staminaleft` cannot appear as keys in a persisted outcome. Today this is
+   moot (`from-battle.js` projects no `resources` block at all), but it is the
+   constraint any future attempt will hit.
 
 ## Networking boundary
 
@@ -528,9 +667,23 @@ The isolated [golden harness](integration/ss2-golden-harness.md) now enforces
 the build identity, candidate-versus-observed provenance, and exact named roll
 order. The longer delivery sequence is tracked in [the roadmap](roadmap.md).
 
-The state conversion, slot layout, event binding, and acknowledgement bridge
-that checkpoint needs are implemented asset-free in `src/adapter/` and
-specified in [The SS2 adapter](#the-ss2-adapter-srcadapter) above. What is
-still missing before a playable mod is the runtime-verified rule set, the
-campaign roster/save/reward integration, and the launcher route — none of which
-the adapter may substitute for.
+The state conversion, slot layout, event binding, acknowledgement bridge, and
+the reference host loop that drives them together are implemented asset-free in
+`src/adapter/` and specified in [The SS2 adapter](#the-ss2-adapter-srcadapter)
+above. The separate campaign save record is implemented asset-free in
+`src/campaign/` and specified in
+[campaign persistence](campaign-persistence.md).
+
+What is still missing before a playable mod:
+
+- **the runtime-verified rule set** — the seam and its gate exist and nothing
+  measured has been dropped into them yet. `classicStyleRules` is the only rule
+  set anywhere under `src/`, and it is a declared placeholder; the others in the
+  repository exist only inside `test/`, to exercise the seam;
+- **the resource emission on both sides of the adapter**, without which no
+  verified rule set can express the armour-first split (see *Still open* above);
+- **campaign roster and reward integration** — the record layer stores an
+  outcome, but nothing reads a record back into a roster or pays a reward;
+- **the launcher route** into the Collection's mods folder.
+
+None of these may be substituted for by the adapter.
