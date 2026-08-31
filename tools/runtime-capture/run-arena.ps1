@@ -32,12 +32,31 @@ powershell -File tools\runtime-capture\run-arena.ps1 `
 
 .EXAMPLE
 # Capture the tournament rank-1 bout. Requires a level-4 gladiator with
-# current_tournament == 1.
+# current_tournament == 1 (snapshot 'level4-vitality-tournament-gate').
+#
+# The five candidate-champion-* fixtures each stage the per-piece <piece>_defence
+# fields, which the wrapper's default watch list omits, and ingest refuses a
+# trace whose staged dump omits a field the fixture stages. Hence -WatchFields.
+# Run ONE member per session: campaign.mjs reports 2 fixtures claiming attack
+# direction 5 and 2 claiming direction 9, so a family run cannot serve them all.
+#
+# -ArenaStagedLevel is not optional here. Both herolevel and staminaleft carry
+# across the two RNG-generated bouts that must be won to reach rank 1, so
+# without it a run can silently produce a trace no second session reproduces.
 powershell -File tools\runtime-capture\run-arena.ps1 `
-  -SessionId arena-champ-1 -Snapshot pre-arena-champ-1 `
-  -ArenaTarget tournament -ArenaCapture champion `
+  -SessionId arena-champ-2 -Snapshot pre-arena-champ-2 `
+  -ArenaTarget tournament -ArenaCapture champion -ArenaStagedLevel 4 `
+  -FixturePath test\fixtures\ss2-1v1\candidate-champion-normal-armour-absorbed.json `
+  -ObservationId obs-champ-2 `
+  -WatchFields "boot_defence,breastplate_defence,equipped_weapon,gauntlet_defence,greaves_defence,helmet_defence,shield_defence,shinguard_defence,shoulderguard_defence,weapon_enchantment_potency,weapon_enchantment_type"
+
+.EXAMPLE
+# The tournament family needs no extra watch fields: the default list covers it.
+powershell -File tools\runtime-capture\run-arena.ps1 `
+  -SessionId arena-tourn-3 -Snapshot pre-arena-tourn-3 `
+  -ArenaTarget tournament -ArenaCapture champion -ArenaStagedLevel 4 `
   -FixturePath test\fixtures\ss2-1v1\candidate-tournament-nonlethal-normal-hit.json `
-  -ObservationId obs-champ-1
+  -ObservationId obs-tourn-3
 #>
 [CmdletBinding()]
 param(
@@ -73,6 +92,33 @@ param(
     # Only read when $ArenaCapture is not 'never'; a tape is still required by
     # the launcher, and a non-capturing run is launched passive so the tape can
     # never reach a fight nobody staged.
+    # Extra Object.watch fields, comma separated, ADDED to the wrapper's
+    # default list rather than replacing it. Forwarded verbatim to
+    # launch-capture.ps1, exactly as run-capture.ps1 already forwards it.
+    #
+    # Five candidate-champion-* fixtures need eleven of these, and until now the
+    # only script exposing both -WatchFields and -Stage* was launch-capture.ps1,
+    # which has no snapshot guard. The alternative was to put run-arena's guard
+    # onto launch-capture.ps1 instead. This flag lives HERE, for two reasons.
+    #
+    # launch-capture.ps1 is the shared bottom layer. run-campaign.ps1 drives it
+    # at -Concurrency 3 with per-session -SaveDirectory stores that provably do
+    # not touch the licensed save (three concurrent sessions completed and the
+    # master ss2_data.sol was byte-identical afterwards). A snapshot guard there
+    # would demand a fresh restore point from runs that mutate nothing, so it
+    # would have to be opt-out - and an opt-out guard is precisely the defect
+    # class this project already closed once, when the launch-nonce gate turned
+    # out to be opt-out and two forgeries walked straight through it.
+    #
+    # Keeping the guard in run-arena.ps1 alone also keeps the invariant worth
+    # having: the only save-mutating script is the one that snapshots, and it
+    # snapshots itself rather than trusting an operator to remember.
+    #
+    # run-arena.ps1 is already in campaign.mjs's VEHICLE_SCRIPTS, and that file
+    # reads each launcher's capabilities out of its own param() block rather
+    # than from a table, so `campaign.mjs plan` reports this the moment it
+    # exists here. No second edit keeps it honest.
+    [string] $WatchFields = '',
     [string] $FixturePath = 'test\fixtures\ss2-1v1\candidate-lethal-result.json',
     [string] $ObservationId = '',
     [string] $ArenaPolicy = 'aggressive',
@@ -187,6 +233,14 @@ $launcherArgs = @(
 # consumes one while armed, and a non-capturing run never arms - but passive is
 # the belt to that braces, and it costs nothing.
 if ($ArenaCapture -eq 'never') { $launcherArgs += '-Passive' }
+
+# Only appended when set, so an empty -WatchFields leaves the launcher
+# invocation byte-identical to what it was before this flag existed. A run that
+# matches an existing golden therefore cannot be perturbed by the flag's
+# addition - which matters, because a watched field CAN add a mutation line to
+# a trace (campaign.mjs refuses to run the armoured family as one family for
+# exactly that reason).
+if ($WatchFields) { $launcherArgs += @('-WatchFields', "`"$WatchFields`"") }
 
 # Recoverable aborts get another launch; everything else is a stop. A run that
 # hit GATE A, GATE D or an unstaged capture has told us something, and relaunching

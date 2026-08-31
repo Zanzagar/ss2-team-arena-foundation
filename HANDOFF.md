@@ -2,7 +2,7 @@
 
 ## State at the end of the 2026-08-30 session
 
-22 promoted goldens. 584 tests, all passing. 36 commits this session, across a
+22 promoted goldens. 584 tests, all passing. 38 commits this session, across a
 day of parallel work and one overnight run of twelve agents.
 
 ### Expected test profiles after PR #1

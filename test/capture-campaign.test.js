@@ -1243,7 +1243,7 @@ test("captureVehicles reads each launcher's staging and watch-field support from
   const byName = new Map(vehicles.map((vehicle) => [path.posix.basename(vehicle.script), vehicle]));
 
   assert.deepEqual(byName.get("run-arena.ps1"), {
-    script: "tools/runtime-capture/run-arena.ps1", watchFields: false, staging: true
+    script: "tools/runtime-capture/run-arena.ps1", watchFields: true, staging: true
   });
   assert.deepEqual(byName.get("run-capture.ps1"), {
     script: "tools/runtime-capture/run-capture.ps1", watchFields: true, staging: false
@@ -1255,11 +1255,24 @@ test("captureVehicles reads each launcher's staging and watch-field support from
     script: "tools/runtime-capture/launch-capture.ps1", watchFields: true, staging: true
   });
 
-  // The operational consequence, derived rather than asserted from prose:
-  // exactly one script exposes both, so a fixture that needs a staged opponent
-  // AND extra watch fields has exactly one vehicle.
+  // The operational consequence, derived rather than asserted from prose. TWO
+  // scripts now expose both, and which two is the whole point: the champion
+  // family needs a staged opponent AND eleven extra watch fields, and until
+  // run-arena.ps1 gained -WatchFields the only vehicle that could serve it was
+  // launch-capture.ps1 — which has NO snapshot guard, on a route that mutates
+  // the licensed save on every town-square entry.
+  //
+  // The guard was deliberately not moved onto launch-capture.ps1 instead:
+  // run-campaign.ps1 drives that script at -Concurrency 3 with isolated
+  // -SaveDirectory stores that mutate nothing, so a guard there would have to
+  // be opt-out — and an opt-out gate is the defect class this project already
+  // closed once, when the launch-nonce gate turned out to be opt-out and two
+  // forgeries walked through it.
   const both = vehicles.filter((vehicle) => vehicle.watchFields && vehicle.staging);
-  assert.deepEqual(both.map((vehicle) => vehicle.script), ["tools/runtime-capture/launch-capture.ps1"]);
+  assert.deepEqual(both.map((vehicle) => vehicle.script), [
+    "tools/runtime-capture/run-arena.ps1",
+    "tools/runtime-capture/launch-capture.ps1"
+  ]);
   // And run-campaign.ps1 — the driver's own wrapper — exposes neither, which
   // is why it cannot drive any of the staged families as it stands.
   assert.equal(byName.get("run-campaign.ps1").watchFields, false);
@@ -1366,10 +1379,13 @@ test("every candidate's extra watch fields recompute from its own scenario, and 
 });
 
 test("the five champion candidates each need eleven extra watch fields", () => {
-  // Load-bearing, and new: the champion bout is the handoff's next step, and
-  // the command it names goes through run-arena.ps1 — which exposes no
-  // -WatchFields at all. Every one of the five stages the full per-piece
-  // defence set plus the weapon fields, so ingest would refuse all five.
+  // Load-bearing: the champion bout is the handoff's next step, and every one
+  // of the five stages the full per-piece defence set plus the weapon fields,
+  // so ingest would refuse all five on the wrapper's default watch list.
+  //
+  // run-arena.ps1 now exposes -WatchFields, so the command that needs these is
+  // finally available from the one vehicle that also snapshots the save. The
+  // vehicle test above pins that; this one pins the eleven fields themselves.
   const championIds = candidateEntries
     .map((entry) => entry.value.fixtureId)
     .filter((id) => id.startsWith("candidate-champion-"))
