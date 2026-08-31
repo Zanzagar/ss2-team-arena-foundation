@@ -344,26 +344,42 @@ test("both attestations are optional, which is what keeps the committed evidence
   assert.deepEqual([...SS2_CAPTURE_ATTESTATION_KEYS].sort(), ["launchNonce", "overdraw"]);
   assert.ok(committedObservations.length > 0, "no committed observations to check");
 
-  let legacy = 0;
+  const legacy = [];
+  const attested = [];
   for (const observation of committedObservations) {
-    // Every committed record predates both fields; each must still validate,
-    // and each must still digest to the value its goldens cite.
+    // The invariant, and the only one optionality exists to protect: EVERY
+    // committed record still validates and still digests to the value its
+    // goldens cite - whether or not it carries an attestation.
     assert.equal(validateSs2Observation(observation), observation, observation.observationId);
     assert.equal(
       computeSs2ObservationDigest(observation),
       observation.digest,
       observation.observationId
     );
-    if (!Object.hasOwn(observation.capture, "overdraw")) legacy += 1;
+    if (Object.hasOwn(observation.capture, "overdraw")) attested.push(observation);
+    else legacy.push(observation);
   }
-  assert.equal(legacy, committedObservations.length, "a committed record already carries an attestation");
+  // Both populations have to be represented, and neither count is pinned.
+  //
+  // An earlier revision of this test asserted that NO committed record carried
+  // an attestation - true when it was written, and false the moment the next
+  // live session filed one, which is the intended future. It was a snapshot of
+  // a moment mistaken for an invariant, and it broke on the first two real
+  // captures taken after it landed. What actually matters is that records
+  // WITHOUT the fields keep working, so that is what is asserted.
+  assert.ok(legacy.length > 0, "no legacy record left to prove the fields are optional");
+  assert.ok(
+    attested.length > 0,
+    "no committed record carries an attestation, so nothing proves the wrapper's " +
+    "end line reaches capture.overdraw through a real session"
+  );
 
   // And the reason they had to stay optional: the digest covers the record, so
-  // a field added to one of these would change it and invalidate the provenance
-  // of every golden citing it.
-  const withAttestation = cloneJson(committedObservations[0]);
+  // adding a field to one that lacks it changes the digest and would invalidate
+  // the provenance of every golden citing it.
+  const withAttestation = cloneJson(legacy[0]);
   withAttestation.capture.overdraw = 0;
-  assert.notEqual(computeSs2ObservationDigest(withAttestation), committedObservations[0].digest);
+  assert.notEqual(computeSs2ObservationDigest(withAttestation), legacy[0].digest);
 });
 
 test("a record may claim a zero over-draw and nothing else", () => {
