@@ -19,6 +19,7 @@ import {
   deriveExpectedEventsFromSs2Fixture,
   matchSs2ObservationToFixture,
   projectSs2ObservationForComparison,
+  projectSs2ObservationForPairwiseComparison,
   sha256OfCanonicalJson,
   ss2ObservationsMatch,
   validateSs2Observation
@@ -1488,4 +1489,87 @@ test("a record with no staging declaration promotes exactly as it always did", (
   assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
   assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN);
   assert.equal(validateSs2OneVsOneFixture(promotion.golden), promotion.golden);
+});
+
+// ---------------------------------------------------------------------------
+// The pairwise gate must not share a projection with the matcher
+// ---------------------------------------------------------------------------
+
+test("the pairwise projection keeps the samples the matcher drops", () => {
+  // THE HAZARD THIS PINS. `projectSs2ObservationForComparison` routes samples
+  // through `comparableSamples`, and so does `matchSs2ObservationToFixture`. If
+  // the pairwise gate shared that projection, an exclusion added to make the
+  // MATCHER tolerant of a field would silently make the gate blind to the same
+  // field - and the gate exists precisely to catch two records disagreeing about
+  // it. That is measured, not feared: with the prescribed `staminaleft`
+  // exclusion patched in, an auditor promoted a golden from two records
+  // disagreeing by 99,992 stamina with this gate installed and silent.
+  //
+  // So the pairwise projection is built by enumerating the record's own keys.
+  // This asserts the observable consequence: it carries `samples` untouched,
+  // including the `callSite` and `injected` fields the matcher's projection
+  // strips. Point `ss2ObservationsMatch` back at the matcher's projection and
+  // this goes red.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const record = observationFromFixture(fixture, { observationId: "obs-pw-a" });
+  const pairwise = projectSs2ObservationForPairwiseComparison(record);
+  const matcherSide = projectSs2ObservationForComparison(record);
+
+  assert.deepEqual(pairwise.samples, record.samples, "pairwise dropped or rewrote a sample field");
+  assert.ok(record.samples.length > 0, "fixture carries no samples, so this test would be vacuous");
+  for (const sample of pairwise.samples) {
+    assert.equal(typeof sample.callSite, "string", "callSite did not survive the pairwise projection");
+    assert.equal(typeof sample.injected, "boolean", "injected did not survive the pairwise projection");
+  }
+  // And the two projections genuinely differ, which is the whole point.
+  assert.notDeepEqual(
+    pairwise.samples,
+    matcherSide.samples,
+    "the two projections agree on samples, so nothing here would detect them being merged"
+  );
+});
+
+test("two records that agree for the matcher can still disagree for each other", () => {
+  // The concrete decoupling. `callSite` is dropped by `comparableSamples`, so
+  // both records match the fixture. They must NOT corroborate each other: two
+  // captures disagreeing about where a roll came from are not two observations
+  // of one thing, and before this change the gate could not see the difference.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const left = observationFromFixture(fixture, { observationId: "obs-cs-a", sessionId: "session-a" });
+  const right = observationFromFixture(fixture, {
+    observationId: "obs-cs-b",
+    sessionId: "session-b",
+    mutate: (record) => {
+      record.samples[0].callSite = "root:frame:1/DoAction@0x000000";
+    }
+  });
+
+  assert.ok(matchSs2ObservationToFixture(fixture, left).match, "left should match the fixture");
+  assert.ok(matchSs2ObservationToFixture(fixture, right).match, "right should match the fixture too");
+
+  const pairwise = ss2ObservationsMatch(left, right);
+  assert.equal(pairwise.match, false, "the pairwise gate did not see a callSite disagreement");
+  assert.ok(
+    pairwise.differences.some((difference) => difference.path.includes("callSite")),
+    `expected a callSite difference, got ${JSON.stringify(pairwise.differences.slice(0, 3))}`
+  );
+});
+
+test("the pairwise gate compares every record field except identity and capture", () => {
+  // Fail-closed: the projection drops a NAMED few and keeps whatever else the
+  // schema carries, so a field added later is compared by default. Widening the
+  // exclusion list turns this red, which is the only way this gate should ever
+  // narrow.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const record = observationFromFixture(fixture, { observationId: "obs-keys" });
+  const pairwise = projectSs2ObservationForPairwiseComparison(record);
+  const excluded = ["capture", "observationId", "digest"];
+
+  for (const key of excluded) {
+    assert.ok(key in record, `${key} is missing from the record, so this test proves nothing`);
+    assert.ok(!(key in pairwise), `${key} must not be compared between two independent records`);
+  }
+  const expected = Object.keys(record).filter((key) => !excluded.includes(key)).sort();
+  assert.deepEqual(Object.keys(pairwise).sort(), expected, "a record field silently stopped being compared");
+  assert.ok(expected.length >= 9, `only ${expected.length} fields compared; the schema shrank unexpectedly`);
 });

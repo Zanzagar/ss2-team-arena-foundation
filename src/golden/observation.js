@@ -744,6 +744,51 @@ export function projectSs2ObservationForComparison(record) {
   });
 }
 
+/**
+ * Fields two records of the same action MUST be free to differ on: identity and
+ * the capture metadata (`launchNonce` emphatically — two records agreeing on it
+ * are one launch, which the promotion gate refuses separately), plus the digest,
+ * which is a function of everything else.
+ */
+const SS2_PAIRWISE_EXCLUDED_KEYS = Object.freeze(["capture", "observationId", "digest"]);
+
+/**
+ * The surface two observations must agree on when compared TO EACH OTHER.
+ *
+ * WHY THIS DOES NOT REUSE `projectSs2ObservationForComparison`, which is the
+ * whole point of the function existing:
+ *
+ * That projection is shared with `matchSs2ObservationToFixture` — both route
+ * their samples through `comparableSamples`. So an exclusion added there to make
+ * the MATCHER tolerant silently makes the PAIRWISE GATE blind to the same field,
+ * and the gate whose job is to catch two records disagreeing about a field is
+ * switched off by the very edit that stops the field being compared. That is not
+ * hypothetical: with the prescribed `staminaleft` exclusion patched in, an
+ * auditor promoted a golden from two records disagreeing by 99,992 stamina — one
+ * negative, one 10^13 above `staminamax` — with this gate installed and silent.
+ *
+ * So this projection is built by ENUMERATING the record's own keys and dropping
+ * a named few, rather than by listing the channels to keep. It fails closed: a
+ * field added to the schema later is compared by default and has to be
+ * deliberately exempted here to stop being compared. Nothing the matcher does to
+ * its own projection can reach it.
+ *
+ * It is also strictly wider than the matcher's view, which closes a blind spot
+ * the audit named: `callSite` and `injected` survive here, so two records that
+ * disagree about where a roll came from no longer corroborate each other.
+ *
+ * Measured before landing: all 29 cited observation pairs across the 22 promoted
+ * goldens agree under this surface, so it refuses no legitimate promotion.
+ */
+export function projectSs2ObservationForPairwiseComparison(record) {
+  const projected = {};
+  for (const key of Object.keys(record).sort()) {
+    if (SS2_PAIRWISE_EXCLUDED_KEYS.includes(key)) continue;
+    projected[key] = record[key];
+  }
+  return cloneJson(projected);
+}
+
 const MAX_DIFFERENCES = 200;
 
 function pushDifference(differences, difference) {
@@ -796,14 +841,20 @@ function collectDifferences(expected, actual, path, differences) {
   }
 }
 
-/** Compare two validated observations; match means equal comparison projections. */
+/**
+ * Compare two validated observations to EACH OTHER.
+ *
+ * Uses `projectSs2ObservationForPairwiseComparison`, deliberately NOT the
+ * matcher's projection — see that function for why sharing one would let a
+ * matcher-side exclusion switch this gate off.
+ */
 export function ss2ObservationsMatch(left, right) {
   validateSs2Observation(left);
   validateSs2Observation(right);
   const differences = [];
   collectDifferences(
-    projectSs2ObservationForComparison(left),
-    projectSs2ObservationForComparison(right),
+    projectSs2ObservationForPairwiseComparison(left),
+    projectSs2ObservationForPairwiseComparison(right),
     "",
     differences
   );
