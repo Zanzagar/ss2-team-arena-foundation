@@ -1,20 +1,30 @@
 /**
- * The two capture attestations the wrapper mints on the trace's `end` line:
- * `overdraw` (draws the armed window made after the injected tape ran out) and
+ * The three capture attestations the wrapper mints on the trace's `end` line:
+ * `overdraw` (draws the armed window made after the injected tape ran out),
  * `launchNonce` (an identity minted inside the player, which the operator did
- * not choose).
+ * not choose), and `staged` (the combatant fields the wrapper itself wrote
+ * before the observed action).
  *
- * Both used to be validated at ingest and then thrown away, so no committed
- * record carried either and a reviewer holding only the repository could not
- * check that the over-draw guard had ever been satisfied. `overdraw` was also
- * optional, which meant a trace without it silently carried no assurance at all
- * rather than failing loudly.
+ * The first two used to be validated at ingest and then thrown away, so no
+ * committed record carried either and a reviewer holding only the repository
+ * could not check that the over-draw guard had ever been satisfied. `overdraw`
+ * was also optional, which meant a trace without it silently carried no
+ * assurance at all rather than failing loudly.
+ *
+ * `staged` answers a different question: not "was the capture sound" but "whose
+ * scenario is this". All 22 promoted goldens rest on scenarios the game itself
+ * produced; the armoured and tournament families cannot be reached that way, so
+ * the wrapper will write combatant state directly. That is a legitimate
+ * experimental input — the game still resolves the action — but it is a
+ * materially different kind of evidence, and nothing in the repository
+ * distinguished the two.
  *
  * This suite pins the whole chain: the fields are carried into the record, the
  * count is mandatory for `injected-tape-runtime` captures with exactly one
- * documented escape hatch, the nonce is a promotion-gate independence check —
- * and none of it disturbs the committed evidence, whose records predate both
- * fields and must stay byte-identical.
+ * documented escape hatch, the nonce is a promotion-gate independence check,
+ * staging must agree across the evidence for one fixture and must reach the
+ * golden — and none of it disturbs the committed evidence, whose records
+ * predate all three fields and must stay byte-identical.
  */
 
 import assert from "node:assert/strict";
@@ -38,7 +48,7 @@ import {
   PromotionError,
   promoteSs2CandidateToGolden
 } from "../src/golden/promote-1v1-golden.js";
-import { GoldenClassification } from "../src/golden/run-1v1-fixture.js";
+import { GoldenClassification, validateSs2OneVsOneFixture } from "../src/golden/run-1v1-fixture.js";
 import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 
 import { loadSs2Fixtures } from "./ss2-fixture-files.js";
@@ -340,8 +350,8 @@ test("the live capture path never passes the escape hatch", async () => {
 // The record schema: optional by necessity, strict where it is present
 // ---------------------------------------------------------------------------
 
-test("both attestations are optional, which is what keeps the committed evidence intact", () => {
-  assert.deepEqual([...SS2_CAPTURE_ATTESTATION_KEYS].sort(), ["launchNonce", "overdraw"]);
+test("all three attestations are optional, which is what keeps the committed evidence intact", () => {
+  assert.deepEqual([...SS2_CAPTURE_ATTESTATION_KEYS].sort(), ["launchNonce", "overdraw", "staged"]);
   assert.ok(committedObservations.length > 0, "no committed observations to check");
 
   const legacy = [];
@@ -380,6 +390,24 @@ test("both attestations are optional, which is what keeps the committed evidence
   const withAttestation = cloneJson(legacy[0]);
   withAttestation.capture.overdraw = 0;
   assert.notEqual(computeSs2ObservationDigest(withAttestation), legacy[0].digest);
+
+  // `staged` is the same story told once more, and at the moment its whole
+  // population is the legacy one: no wrapper has staged anything yet, so every
+  // committed record is evidence the game produced unaided. Asserted as an
+  // observation about today, not as an invariant — the armoured and tournament
+  // families are expected to file staged records, and this line is then the one
+  // to update, exactly as the attested/legacy split above already had to be.
+  for (const observation of committedObservations) {
+    assert.equal(
+      Object.hasOwn(observation.capture, "staged"),
+      false,
+      `${observation.observationId} claims staging; if that is intentional, update this assertion ` +
+      "and check the goldens citing it record the staging too"
+    );
+  }
+  const withStaging = cloneJson(legacy[0]);
+  withStaging.capture.staged = "hero.strength=40";
+  assert.notEqual(computeSs2ObservationDigest(withStaging), legacy[0].digest);
 });
 
 test("a record may claim a zero over-draw and nothing else", () => {
@@ -528,5 +556,366 @@ test("the committed evidence still promotes untouched under the nonce gate", asy
 
   const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
   assert.equal(promotion.captureManifestSha256, golden.provenance.captureManifestSha256);
+  assert.deepEqual(promotion.golden, golden);
+});
+
+// ---------------------------------------------------------------------------
+// The staging declaration
+//
+// `end.staged` names every combatant field the WRAPPER wrote and the value that
+// stuck after the game's own construction finished, in application order,
+// `side.field=value` comma separated. Absent means the wrapper staged nothing,
+// which is true of every trace and every golden that existed before it.
+// ---------------------------------------------------------------------------
+
+/** A declaration that agrees with the base fixture's staged dump. */
+const STAGED_DECLARATION =
+  `hero.strength=${baseFixture.scenario.hero.strength},` +
+  `villain.hitpoints=${baseFixture.scenario.villain.hitpoints}`;
+
+/**
+ * One staged observation, and one the game produced unaided.
+ *
+ * Each mints its own `launchNonce` from its observation id. Without that the
+ * nonce gate fires first on every multi-observation test below and masks the
+ * staging gate under test — these are meant to be distinct player launches, so
+ * they say so.
+ */
+const stagedRecord = ({ observationId, sessionId, staged = STAGED_DECLARATION }) =>
+  injectedTapeRecord({
+    observationId,
+    sessionId,
+    end: wrapperEnd({ launchNonce: `nonce-${observationId}`, staged })
+  });
+
+const producedRecord = ({ observationId, sessionId }) =>
+  injectedTapeRecord({
+    observationId,
+    sessionId,
+    end: wrapperEnd({ launchNonce: `nonce-${observationId}` })
+  });
+
+test("ingest carries the staging declaration into capture.staged, and its absence is a claim too", () => {
+  const staged = stagedRecord({ observationId: "obs-staged", sessionId: "session-staged" });
+  assert.equal(staged.capture.staged, STAGED_DECLARATION);
+  assert.equal(validateSs2Observation(staged), staged);
+  // The digest covers it, so the claim cannot be added to or removed from a
+  // committed record after the fact.
+  assert.equal(staged.digest, computeSs2ObservationDigest(staged));
+
+  // Staging is a scenario INPUT: the game still resolved the action, so the
+  // observation is still evidence for the same fixture.
+  assert.equal(matchSs2ObservationToFixture(baseFixture, staged).match, true);
+
+  const unstaged = injectedTapeRecord({ observationId: "obs-unstaged", sessionId: "session-unstaged" });
+  assert.equal(Object.hasOwn(unstaged.capture, "staged"), false);
+  assert.equal(validateSs2Observation(unstaged), unstaged);
+  assert.equal(unstaged.digest, computeSs2ObservationDigest(unstaged));
+  assert.equal(matchSs2ObservationToFixture(baseFixture, unstaged).match, true);
+});
+
+test("a malformed staging declaration is refused at the trace line that carried it", () => {
+  const malformed = [
+    // Absence is how "staged nothing" is spelled; the empty string would be a
+    // second spelling of the same fact and would digest differently.
+    "",
+    17,
+    null,
+    true,
+    ["hero.strength=5"],
+    "hero.strength",                     // no value
+    "hero.strength=",                    // empty value
+    "=5",                                // no field
+    "hero.strength=5,",                  // trailing separator leaves an empty entry
+    ",hero.strength=5",                  // leading separator
+    "hero.strength=5, villain.helmet=6", // whitespace is not part of the grammar
+    "wizard.strength=5",                 // only hero and villain exist
+    "hero.Strength=5",                   // field tokens are lowercase, as set paths are
+    "hero.strength=abc",                 // values are numeric or boolean, never free text
+    "hero.strength=\"5\"",
+    "hero.strength=5,hero.strength=5",   // one entry per field, carrying what stuck
+    `hero.strength=${"5".repeat(600)}`   // past the length cap
+  ];
+  for (const staged of malformed) {
+    assert.throws(
+      () => stagedRecord({ observationId: "obs-bad-staged", sessionId: "session-bad-staged", staged }),
+      (error) =>
+        error instanceof CaptureTraceError &&
+        /end\.staged must be a non-empty/.test(error.message) &&
+        /^Capture trace line \d+:/.test(error.message),
+      `staged ${JSON.stringify(staged)} was accepted`
+    );
+  }
+});
+
+test("a staging declaration accepts every value a watched combatant field can hold", () => {
+  // Integers, negative and fractional numbers, and booleans — exactly the range
+  // of the projected combatant keys, and nothing wider. The two watched fields
+  // here are declared at the values the dump actually holds, because the
+  // cross-check below is real; the unwatched ones carry the odd shapes.
+  const staged = [
+    `hero.strength=${baseFixture.scenario.hero.strength}`,
+    "villain.burning=false",
+    "villain.helmet_defence=6",
+    "villain.greaves_defence=-1.5",
+    "villain.helmet_enchanted=true"
+  ].join(",");
+  const record = stagedRecord({ observationId: "obs-values", sessionId: "session-values", staged });
+  assert.equal(record.capture.staged, staged);
+  assert.equal(validateSs2Observation(record), record);
+});
+
+test("end.staged must report the value that stuck, not the value the wrapper attempted", () => {
+  // The point of "what stuck": the game's own construction runs after the write
+  // and may overwrite it. The staged state dump is that same moment read back
+  // off the live objects, so where it watches the field the two must agree.
+  assert.throws(
+    () => stagedRecord({
+      observationId: "obs-drift",
+      sessionId: "session-drift",
+      staged: "hero.strength=99"
+    }),
+    (error) =>
+      error instanceof CaptureTraceError &&
+      /end\.staged claims hero\.strength=99 stuck/.test(error.message) &&
+      new RegExp(`read back ${baseFixture.scenario.hero.strength}`).test(error.message)
+  );
+
+  // A field the dump does not watch cannot be cross-checked and is taken on the
+  // wrapper's word. This is not laxity: the armoured captures stage per-piece
+  // `*_defence` ratings that the default watch list omits, and refusing to let
+  // the declaration name them would make it lie by omission instead.
+  const unwatched = stagedRecord({
+    observationId: "obs-unwatched",
+    sessionId: "session-unwatched",
+    staged: "villain.helmet_defence=6,villain.greaves_defence=2"
+  });
+  assert.equal(unwatched.capture.staged, "villain.helmet_defence=6,villain.greaves_defence=2");
+});
+
+test("the record schema admits a staging declaration and refuses a malformed one", () => {
+  const record = stagedRecord({ observationId: "obs-schema-staged", sessionId: "session-schema-staged" });
+  const rewritten = (mutate) => {
+    const draft = cloneJson(record);
+    mutate(draft.capture);
+    draft.digest = computeSs2ObservationDigest(draft);
+    return draft;
+  };
+
+  const baseline = rewritten(() => {});
+  assert.equal(validateSs2Observation(baseline), baseline);
+
+  // The record is checked against the same grammar as the trace, so no record
+  // can carry a shape a trace could not have produced.
+  for (const staged of ["", 17, null, "hero.strength", "hero.strength=abc", "hero.strength=5,hero.strength=5"]) {
+    assert.throws(
+      () => validateSs2Observation(rewritten((capture) => { capture.staged = staged; })),
+      /capture\.staged must be a non-empty/,
+      `staged ${JSON.stringify(staged)} was accepted`
+    );
+  }
+  // Dropping the field is always legal — that is what an unstaged capture says.
+  const dropped = rewritten((capture) => { delete capture.staged; });
+  assert.equal(validateSs2Observation(dropped), dropped);
+});
+
+test("the simulator declares no staging, because it stages nothing", () => {
+  // Easy to get backwards: every value in a reference trace's state lines comes
+  // from the fixture, so the whole trace looks like one long staging. It is
+  // not. `staged` declares what the wrapper wrote into a RUNNING game, and the
+  // simulator runs no game — there is no construction for a write to survive
+  // and so no stuck value to report. Emitting one would invent the single fact
+  // the field exists to establish.
+  for (const fixture of fixtures) {
+    const end = parseTrace(simulateSs2CaptureTrace(fixture)).at(-1);
+    assert.equal(Object.hasOwn(end, "staged"), false, fixture.fixtureId);
+  }
+  const record = ingestSs2CaptureTrace(
+    simulateSs2CaptureTrace(baseFixture, { observationId: "sim-staged", sessionId: "sim-staged" }),
+    baseFixture
+  );
+  assert.equal(Object.hasOwn(record.capture, "staged"), false);
+});
+
+test("the end line's key set is still closed, so an unknown attestation cannot slip in", () => {
+  assert.throws(
+    () => injectedTapeRecord({
+      observationId: "obs-unknown-end",
+      sessionId: "session-unknown-end",
+      end: wrapperEnd({ stagedFields: "hero.strength=5" })
+    }),
+    /the end line carries an unexpected field stagedFields/
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Staging in the promotion gate
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether the shared fixture schema admits `provenance.staged` yet.
+ *
+ * `GOLDEN_PROVENANCE_KEYS` lives in src/golden/run-1v1-fixture.js, which this
+ * track does not own, and is a closed set that does not currently contain
+ * `staged`. Probed rather than hard-coded so the tests below assert the rule —
+ * a promoted golden must state that its scenario was wrapper-staged — and not a
+ * snapshot of which day the schema change landed.
+ */
+const goldenSchemaAdmitsStaged = (() => {
+  const observations = ["p1", "p2"].map((suffix) =>
+    producedRecord({ observationId: `obs-probe-${suffix}`, sessionId: `session-probe-${suffix}` })
+  );
+  const { golden } = promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
+  const probe = cloneJson(golden);
+  probe.provenance.staged = "hero.strength=40";
+  try {
+    validateSs2OneVsOneFixture(probe);
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test("the scenario comparison cannot see staging, which is why the gate has to", () => {
+  // The load-bearing demonstration. These two observations agree on every
+  // channel the pipeline compares — same scenario values, same tape, same
+  // mutation trace, same events, same final state — and differ only in who
+  // wrote the scenario. Neither comparison notices.
+  const staged = stagedRecord({ observationId: "obs-cmp-staged", sessionId: "session-cmp-staged" });
+  const produced = producedRecord({
+    observationId: "obs-cmp-produced",
+    sessionId: "session-cmp-produced"
+  });
+
+  assert.deepEqual(staged.scenario, produced.scenario);
+  // Observation-to-observation: the comparison projection excludes `capture`.
+  assert.deepEqual(ss2ObservationsMatch(staged, produced).differences, []);
+  // Observation-to-fixture: matching never reads the `capture` block at all.
+  assert.equal(matchSs2ObservationToFixture(baseFixture, staged).match, true);
+  assert.equal(matchSs2ObservationToFixture(baseFixture, produced).match, true);
+
+  // So the promotion gate is the only thing standing between a wrapper-written
+  // scenario and a golden that reads as game-produced.
+  const observations = [staged, produced];
+  assert.throws(
+    () => promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations)),
+    (error) =>
+      error instanceof PromotionError &&
+      /disagree about staging/.test(error.message) &&
+      /obs-cmp-staged/.test(error.message) &&
+      /obs-cmp-produced/.test(error.message) &&
+      /staged nothing/.test(error.message)
+  );
+});
+
+test("two differently staged observations are two scenarios, not two observations of one", () => {
+  const left = stagedRecord({
+    observationId: "obs-two-l",
+    sessionId: "session-two-l",
+    staged: "hero.strength=5"
+  });
+  const right = stagedRecord({
+    observationId: "obs-two-r",
+    sessionId: "session-two-r",
+    staged: "hero.strength=5,villain.helmet_defence=6"
+  });
+  const observations = [left, right];
+  assert.throws(
+    () => promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations)),
+    /disagree about staging/
+  );
+});
+
+test("a staging disagreement never discards divergence evidence", () => {
+  // Same deferral discipline as the manifest and nonce gates: an independence
+  // or provenance failure must not swallow an observation that actually
+  // disagreed with the candidate.
+  const matching = stagedRecord({ observationId: "obs-sdiv-ok", sessionId: "session-sdiv-ok" });
+  const divergent = cloneJson(matching);
+  divergent.observationId = "obs-sdiv-bad";
+  divergent.capture.sessionId = "session-sdiv-bad";
+  divergent.capture.launchNonce = "nonce-obs-sdiv-bad";
+  delete divergent.capture.staged;
+  divergent.finalState.villain.hitpoints -= 1;
+  divergent.mutationTrace[0] = {
+    ...divergent.mutationTrace[0],
+    after: divergent.mutationTrace[0].after - 1
+  };
+  divergent.digest = computeSs2ObservationDigest(divergent);
+  assert.equal(validateSs2Observation(divergent), divergent);
+
+  const observations = [divergent, matching];
+  let blocked;
+  try {
+    promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
+    assert.fail("a divergent observation must block promotion");
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof PromotionBlockedError);
+  assert.equal(blocked.divergences.length, 1);
+  assert.equal(blocked.divergences[0].observationId, "obs-sdiv-bad");
+});
+
+test("unstaged evidence promotes exactly as before, adding no key to the golden", () => {
+  const observations = ["u1", "u2"].map((suffix) =>
+    producedRecord({ observationId: `obs-unst-${suffix}`, sessionId: `session-unst-${suffix}` })
+  );
+  const promotion = promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
+
+  assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(promotion.staged, null);
+  // Not `staged: null`, not `staged: ""` — no key. That is what keeps all 22
+  // committed goldens byte-identical, and it is also the honest claim: no
+  // wrapper wrote this scenario.
+  assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
+});
+
+test("a golden promoted from staged evidence must say so on its own face", () => {
+  const observations = ["s1", "s2"].map((suffix) =>
+    stagedRecord({ observationId: `obs-gold-${suffix}`, sessionId: `session-gold-${suffix}` })
+  );
+  const promote = () =>
+    promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
+
+  if (goldenSchemaAdmitsStaged) {
+    const promotion = promote();
+    assert.equal(promotion.staged, STAGED_DECLARATION);
+    // A reader opening the golden sees the staging without chasing observation
+    // ids into test/observations/.
+    assert.equal(promotion.golden.provenance.staged, STAGED_DECLARATION);
+    assert.equal(validateSs2OneVsOneFixture(promotion.golden), promotion.golden);
+    return;
+  }
+
+  // The schema does not admit the field yet, and the gate refuses rather than
+  // dropping it. Emitting a golden that silently read as game-produced is the
+  // exact outcome `staged` exists to prevent, so failing loudly with the
+  // required change is the only honest option left to this track.
+  assert.throws(
+    promote,
+    (error) =>
+      error instanceof PromotionError &&
+      /must record that in provenance\.staged/.test(error.message) &&
+      /GOLDEN_PROVENANCE_KEYS in src\/golden\/run-1v1-fixture\.js/.test(error.message)
+  );
+});
+
+test("the committed evidence promotes untouched under the staging gate", async () => {
+  // The regression that matters most: real records, the real manifest, the real
+  // candidate, none of which mention staging, producing the committed golden
+  // byte for byte.
+  const golden = await loadJson(path.join(GOLDEN_DIR, "golden-prisoner-normal-kill-dir6.json"));
+  const candidate = await loadJson(path.join(FIXTURE_DIR, "candidate-prisoner-normal-kill-dir6.json"));
+  const manifest = await loadJson(path.join(MANIFEST_DIR, "prisoner-dir6.json"));
+  const observations = golden.provenance.observationIds.map((observationId) => {
+    const observation = committedById.get(observationId);
+    assert.ok(observation, `missing cited observation ${observationId}`);
+    assert.equal(Object.hasOwn(observation.capture, "staged"), false, observationId);
+    return observation;
+  });
+
+  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
+  assert.equal(promotion.staged, null);
   assert.deepEqual(promotion.golden, golden);
 });

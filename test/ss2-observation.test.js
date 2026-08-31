@@ -1109,3 +1109,60 @@ test("projected combatant keys stay aligned with the fixture state projection", 
     Object.keys(fixture.expected.state.villain).sort()
   );
 });
+
+test("end.staged rides the raw trace grammar into capture.staged", () => {
+  // Built from this file's hand-written trace lines rather than the reference
+  // simulator, so the grammar is exercised directly rather than through a
+  // generator that never stages anything.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const staged = `hero.strength=${fixture.scenario.hero.strength},villain.helmet_defence=6`;
+  const withStaging = thresholdTraceLines().map((line, index, all) =>
+    index === all.length - 1 ? { ...line, staged } : line
+  );
+  const record = ingestSs2CaptureTrace(traceText(withStaging), fixture);
+
+  assert.equal(record.capture.staged, staged);
+  assert.equal(validateSs2Observation(record), record);
+  // Staging is a scenario input, not a fabricated outcome — the game still
+  // resolved the action, so the observation still matches the fixture.
+  assert.equal(matchSs2ObservationToFixture(fixture, record).match, true);
+
+  // The same trace with no declaration: a record that carries no key at all,
+  // validates identically, matches identically, and digests DIFFERENTLY. That
+  // last point is why the field had to be optional rather than defaulted —
+  // stamping it onto the ~70 committed records would have rewritten every
+  // digest their goldens cite.
+  const unstaged = ingestSs2CaptureTrace(
+    traceText(thresholdTraceLines()),
+    fixture
+  );
+  assert.equal(Object.hasOwn(unstaged.capture, "staged"), false);
+  assert.equal(validateSs2Observation(unstaged), unstaged);
+  assert.equal(unstaged.digest, computeSs2ObservationDigest(unstaged));
+  assert.equal(matchSs2ObservationToFixture(fixture, unstaged).match, true);
+  assert.notEqual(record.digest, unstaged.digest);
+});
+
+test("a record with no staging declaration promotes exactly as it always did", () => {
+  // The compatibility guarantee, stated against the promotion gate rather than
+  // the schema: every committed record predates `staged`, and none of them may
+  // need re-ingesting for its golden to survive.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const observations = [
+    observationFromFixture(fixture, { observationId: "obs-nostage-a", sessionId: "session-nostage-a" }),
+    observationFromFixture(fixture, { observationId: "obs-nostage-b", sessionId: "session-nostage-b" })
+  ];
+  for (const observation of observations) {
+    assert.equal(Object.hasOwn(observation.capture, "staged"), false);
+  }
+
+  const promotion = promoteSs2CandidateToGolden(
+    fixture,
+    observations,
+    captureManifestFor(observations)
+  );
+  assert.equal(promotion.staged, null);
+  assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
+  assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(validateSs2OneVsOneFixture(promotion.golden), promotion.golden);
+});

@@ -124,6 +124,10 @@ var rawArenaTarget = _root.arenaTarget;
 var rawArenaPolicy = _root.arenaPolicy;
 var rawArenaCapture = _root.arenaCapture;
 var rawArenaStagedLevel = _root.arenaStagedLevel;
+// Combatant state to write before the first action, as `field:value` comma
+// lists. See stepStaging.
+var rawStageHero = _root.stageHero;
+var rawStageVillain = _root.stageVillain;
 var rawTimeOfDayCeiling = _root.timeOfDayCeiling;
 var rawSessionLimitSec = _root.sessionLimitSec;
 var config = {
@@ -1565,6 +1569,95 @@ function captureAllowedNow() {
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Scenario staging: writing combatant state before the first action.
+//
+// THIS IS THE FIRST THING THE WRAPPER DOES THAT AUTHORS GAME STATE, and it is a
+// deliberate, owner-approved departure from how all twenty-two promoted goldens
+// were captured. Until now the wrapper injected only the RNG tape and observed
+// whatever the game produced. Read this before using it.
+//
+// Why it exists. Two remaining capture targets are unreachable without it:
+//   - candidate-armoured-* stages exact per-piece values (helmet 6, greaves 2)
+//     that randomise_gladiator will never hand us by chance;
+//   - the tournament rank-1 opponent IS reproducible (verified live: "John the
+//     Butcher", 110 hitpointsmax, 86 armourclass, identical across five
+//     independent draws) but the HERO's state entering that bout is not -
+//     staminaleft carries across bouts, and a mid-ladder level-up is decided by
+//     a generated opponent's experience award. Both were observed varying.
+//
+// What it is and is not. A staged field is a scenario INPUT. The game still
+// resolves the entire action: every roll, every dispatch, every mutation. The
+// pipeline was already built expecting staged scenarios - ingest projects the
+// observed scenario onto the fixture's staged fields and reports a mis-staged
+// one as an explicit mismatch. So staging does not weaken a formula
+// measurement. What it does weaken is any claim that the SCENARIO is one the
+// game's own progression could reach, and that is why every staged field is
+// reported on the end line rather than left for a reader to infer.
+//
+// Timing. Writes are applied only once `battle_started` is true - past root
+// frame 214's full heal, past root frame 221's forced `equipped_weapon = 1`,
+// and past initbattle - and repeated for a few frames, because the game
+// re-derives values during battle construction and a single early write would
+// be silently overwritten. They stop before the action arms, so no staged write
+// can ever appear in the mutation trace: the watch callbacks emit only while
+// armed, and beginAction's state dump is what records the staged values.
+// ---------------------------------------------------------------------------
+var STAGE_APPLY_TICKS = 20;
+function parseStageList(raw) {
+    var out = [];
+    if (raw == undefined || raw == "") return out;
+    var parts = raw.split(",");
+    for (var i = 0; i < parts.length; i++) {
+        var pair = parts[i].split(":");
+        if (pair.length < 2 || pair[0] == "") continue;
+        out.push({ field: pair[0], value: Number(pair[1]) });
+    }
+    return out;
+}
+var stageHeroFields = parseStageList(rawStageHero);
+var stageVillainFields = parseStageList(rawStageVillain);
+var stageTicks = 0;
+var stageReported = false;
+
+function applyStageSide(side, fields) {
+    if (fields.length == 0) return;
+    var target = gameObject(side);
+    if (target == undefined) return;
+    for (var i = 0; i < fields.length; i++) target[fields[i].field] = fields[i].value;
+}
+
+/** What actually stuck, read back from the game rather than echoed. */
+function stagedSummary() {
+    var parts = [];
+    for (var h = 0; h < stageHeroFields.length; h++) {
+        parts.push("hero." + stageHeroFields[h].field + "=" +
+            String(gameObject("hero")[stageHeroFields[h].field]));
+    }
+    for (var v = 0; v < stageVillainFields.length; v++) {
+        parts.push("villain." + stageVillainFields[v].field + "=" +
+            String(gameObject("villain")[stageVillainFields[v].field]));
+    }
+    return parts.join(",");
+}
+
+function stepStaging() {
+    if (stageHeroFields.length == 0 && stageVillainFields.length == 0) return;
+    if (_global.battle_started != true) return;
+    if (actionCaptured) return;                  // never write into an armed window
+    if (stageTicks >= STAGE_APPLY_TICKS) return;
+    stageTicks++;
+    applyStageSide("hero", stageHeroFields);
+    applyStageSide("villain", stageVillainFields);
+    if (stageTicks == STAGE_APPLY_TICKS && !stageReported) {
+        stageReported = true;
+        // Logged as well as reported on the end line, because a field the game
+        // overwrote anyway is a finding, and the end line records only the
+        // final value - not that it differs from what was asked for.
+        trace("{\"t\":\"dbg\",\"at\":\"staged\",\"applied\":\"" + stagedSummary() + "\"}");
+    }
+}
+
 function beginAction() {
     if (actionCaptured) return;
     // Checked before the latch, deliberately: a bout that is not the capture
@@ -1607,12 +1700,20 @@ function finishTrace() {
     // would then be indistinguishable from one that matched it. launchNonce is
     // minted here rather than supplied, so a record carries one field the
     // operator did not choose.
-    emit({
+    var endLine = {
         t: "end",
         installHashVerifiedAfter: null,
         overdraw: overdrawCount,
         launchNonce: launchNonce
-    });
+    };
+    // Emitted ONLY when something was actually staged, so every unstaged trace
+    // stays byte-comparable with the archive and the field's presence is itself
+    // the signal. The values are read back from the game, not echoed from the
+    // request, so a field the game overwrote reports what it really holds.
+    if (stageHeroFields.length > 0 || stageVillainFields.length > 0) {
+        endLine.staged = stagedSummary();
+    }
+    emit(endLine);
     finalsDumped = true;
     traceClosed = true;
 }
@@ -1770,5 +1871,8 @@ this.onEnterFrame = function () {
     sweepFieldWatches();
     sweepWraps();
     shadowMathScopes();
+    // Before the autopilot: a staged scenario has to be complete before any
+    // action can be issued against it.
+    stepStaging();
     stepAutopilot();
 };

@@ -15,8 +15,8 @@
  *   event  semantic event (defender-hurt/defender-blocked/magic-damage/
  *          death/overlay-label)
  *   final  post-action dump, one per side
- *   end    last line: closing hash attestation, plus the over-draw count and
- *          the player-minted launch nonce
+ *   end    last line: closing hash attestation, the over-draw count, the
+ *          player-minted launch nonce, and the wrapper's staging declaration
  */
 
 import {
@@ -26,6 +26,7 @@ import {
   SS2_PROJECTED_COMBATANT_KEYS,
   canonicalJsonStringify,
   computeSs2ObservationDigest,
+  parseSs2StagedDeclaration,
   validateSs2Observation
 } from "./observation.js";
 import {
@@ -114,7 +115,7 @@ function readMeta(lines) {
 function readEnd(lines, meta, options) {
   const { lineNumber, entry } = lines[lines.length - 1];
   if (entry.t !== "end") fail(lineNumber, "the last line must be an end line.");
-  const allowed = new Set(["t", "installHashVerifiedAfter", "overdraw", "launchNonce"]);
+  const allowed = new Set(["t", "installHashVerifiedAfter", "overdraw", "launchNonce", "staged"]);
   for (const key of Object.keys(entry)) {
     if (!allowed.has(key)) fail(lineNumber, `the end line carries an unexpected field ${key}.`);
   }
@@ -178,6 +179,36 @@ function readEnd(lines, meta, options) {
   return entry;
 }
 
+/**
+ * `end.staged` — the wrapper's declaration of every combatant field IT wrote
+ * before the observed action, and the value that stuck once the game's own
+ * construction had finished, in application order.
+ *
+ * Staging is a scenario INPUT, not a fabricated outcome: the game still
+ * resolves the action, and the mutation trace, the events and the final state
+ * are still measured. But a scenario the wrapper wrote is a materially
+ * different kind of evidence from one the game produced unaided — nobody has
+ * shown the game's own progression can reach it — and the declaration is the
+ * only thing that lets a reviewer holding the repository tell them apart.
+ *
+ * Absent means nothing was staged, which is true of every trace and every
+ * golden that existed before this field. The grammar itself lives in
+ * observation.js so the trace and the record are checked against one
+ * definition; a malformed declaration is refused loudly rather than
+ * half-parsed, because a half-read declaration understates staging, and
+ * understated staging is the exact failure this field exists to prevent.
+ */
+function readStagedDeclaration(entry, lineNumber) {
+  if (!Object.hasOwn(entry, "staged")) return null;
+  let entries;
+  try {
+    entries = parseSs2StagedDeclaration(entry.staged, "end.staged");
+  } catch (error) {
+    fail(lineNumber, error.message);
+  }
+  return { text: entry.staged, entries };
+}
+
 function projectFields(fields, requiredKeys, context, lineNumber) {
   const projection = {};
   for (const key of requiredKeys) {
@@ -194,6 +225,12 @@ function projectFields(fields, requiredKeys, context, lineNumber) {
  * given target fixture. The fixture determines which staged fields become the
  * observation scenario; the recorded values are always the observed ones, so
  * a mis-staged scenario surfaces later as an explicit fixture mismatch.
+ *
+ * Two unrelated senses of "staged" meet here. The trace's `state` lines are the
+ * pre-action dump — the scenario as it stood, however it came to stand that
+ * way. `end.staged` is narrower and is about authorship: the fields the WRAPPER
+ * itself wrote. A trace can have a full staged dump and no `end.staged` at all,
+ * and every trace behind the 22 promoted goldens does.
  *
  * Options:
  * - `installHashVerifiedAfter` — supply the live post-session hash result when
@@ -213,6 +250,9 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
   const lines = parseLines(rawText);
   const meta = readMeta(lines);
   const end = readEnd(lines, meta, options);
+  // Parsed here rather than inside readEnd because the declared values are
+  // cross-checked against the staged state dumps further down, once they exist.
+  const stagedDeclaration = readStagedDeclaration(end, lines[lines.length - 1].lineNumber);
   const installHashVerifiedAfter =
     end.installHashVerifiedAfter === true || options.installHashVerifiedAfter === true;
   if (!installHashVerifiedAfter) {
@@ -404,6 +444,28 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
   if (deathEvent && !resultObject) {
     throw new CaptureTraceError("A death event was recorded without its overlay-label result transition.");
   }
+  // The declaration says what stuck; the staged dump is the same moment, read
+  // back off the live objects. Where the dump watches the field, the two must
+  // agree — a write the game overwrote during construction is precisely what
+  // "the value that stuck" is there to catch, and a declaration that reported
+  // the value the wrapper *attempted* would quietly overstate the staging.
+  // Fields the dump does not watch (the per-piece `*_defence` ratings, unless
+  // the operator passed -WatchFields) cannot be cross-checked and are taken on
+  // the wrapper's word.
+  if (stagedDeclaration) {
+    for (const write of stagedDeclaration.entries) {
+      const dump = staged[write.side].fields;
+      if (!Object.hasOwn(dump, write.field)) continue;
+      if (!sameJson(dump[write.field], write.value)) {
+        throw new CaptureTraceError(
+          `end.staged claims ${write.side}.${write.field}=${JSON.stringify(write.value)} stuck, but the ` +
+          `staged ${write.side} dump read back ${JSON.stringify(dump[write.field])}. The declaration must ` +
+          "record the value present after the game's own construction finished, not the value the " +
+          "wrapper attempted to write."
+        );
+      }
+    }
+  }
 
   const scenario = {
     attackerSide: meta.attackerSide,
@@ -490,16 +552,20 @@ export function ingestSs2CaptureTrace(rawText, fixture, options = {}) {
       installHashVerifiedBefore: meta.installHashVerifiedBefore,
       installHashVerifiedAfter,
       mutationGranularity: meta.mutationGranularity,
-      // Carried, not discarded. These two are the only evidence in a committed
-      // record that the over-draw guard ran and that the run was a distinct
-      // player launch, so a reviewer holding nothing but the repository can
-      // check them. Both are omitted when the trace did not carry them, which
-      // is what keeps every observation committed before the fields existed
-      // byte-identical: an observation's digest covers its own record, so a
-      // field present on legacy records would rewrite all of their digests and
-      // invalidate the provenance of every golden citing them.
+      // Carried, not discarded. These three are the only evidence in a
+      // committed record that the over-draw guard ran, that the run was a
+      // distinct player launch, and that the scenario was (or was not) written
+      // in by the wrapper — so a reviewer holding nothing but the repository
+      // can check them. All are omitted when the trace did not carry them,
+      // which is what keeps every observation committed before the fields
+      // existed byte-identical: an observation's digest covers its own record,
+      // so a field present on legacy records would rewrite all of their digests
+      // and invalidate the provenance of every golden citing them. For `staged`
+      // the omission is also the substantive claim rather than a compatibility
+      // convenience: absent means the game produced this scenario unaided.
       ...(Object.hasOwn(end, "overdraw") ? { overdraw: end.overdraw } : {}),
-      ...(Object.hasOwn(end, "launchNonce") ? { launchNonce: end.launchNonce } : {})
+      ...(Object.hasOwn(end, "launchNonce") ? { launchNonce: end.launchNonce } : {}),
+      ...(stagedDeclaration ? { staged: stagedDeclaration.text } : {})
     },
     target: { fixtureId: fixture.fixtureId },
     scenario,

@@ -200,6 +200,15 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
   // promotion gate's uniqueness check would then read two synthetic records as
   // two launches. Absent is the honest value, and simulated records are never
   // promotable in any case.
+  //
+  // `staged` is not emitted either, and for a reason that is easy to get
+  // backwards. Every value in the `state` lines above came from the fixture, so
+  // it is tempting to read the whole reference trace as one long staging. It is
+  // not: `staged` declares what the WRAPPER wrote into a running game, and this
+  // generator runs no game. There is no construction here for a write to
+  // survive, and so nothing whose stuck value could be reported. Emitting a
+  // declaration would invent the one fact the field exists to establish. A
+  // wrapper that stages must emit its own, from its own read-back.
   lines.push({ t: "end", installHashVerifiedAfter: true, overdraw: 0 });
   const trace = `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
 

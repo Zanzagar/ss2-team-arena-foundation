@@ -54,8 +54,8 @@ Module responsibilities:
 | File | Responsibility |
 | --- | --- |
 | `src/golden/observation.js` | observation schema/digests, comparison projection, observation-vs-observation and observation-vs-fixture matching |
-| `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks, the mandatory over-draw guard, and carrying the two `end`-line attestations into `capture.*` |
-| `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate (distinct sessions, no shared launch nonce), promotion, divergence reports |
+| `src/golden/capture-ingest.js` | raw JSONL trace normalization, mutation-chain and final-state integrity checks, the mandatory over-draw guard, and carrying the three `end`-line attestations into `capture.*` |
+| `src/golden/promote-1v1-golden.js` | capture-manifest validation/digest, independence gate (distinct sessions, no shared launch nonce), the staging-agreement gate, promotion, divergence reports |
 | `src/golden/simulate-capture-trace.js` | reference trace generator (`synthetic-simulator` method, never promotable) for pipeline dry runs and wrapper validation |
 | `tools/capture-session.mjs` | operator CLI: `verify-install`, `simulate`, `tape`, `delog`, `ingest`, `verify`, `promote`, `manifest-digest` |
 | `tools/runtime-capture/` | AS2 wrapper source, shell/stub builders, the `validate-vehicle.ps1` gate, the launchers (`launch-capture.ps1`, `run-capture.ps1`), the campaign driver (`run-campaign.ps1`, `campaign.mjs`), and the arena route (`run-arena.ps1`). Its README carries the validation status, how to run sessions concurrently, and the wrapper cache |
@@ -80,7 +80,7 @@ derivations, and open staging questions) are catalogued in
    post-session check fails. It also refuses an `injected-tape-runtime` trace
    whose end line carries no `overdraw`, and any trace whose `overdraw` is
    non-zero; both are described under
-   [the capture attestations](#the-two-capture-attestations-on-the-end-line).
+   [the capture attestations](#the-three-capture-attestations-on-the-end-line).
 5. `node tools/capture-session.mjs verify --fixture <candidate> --observation
    <record>`; a divergence is preserved automatically, never deleted.
 6. Repeat from step 1 in a fresh game launch (a new `sessionId`) until at
@@ -157,7 +157,7 @@ It instruments without patching:
   inside the player before the `Math` tap is installed, so it consumes nothing
   from the tape); both are carried into the observation record's `capture`
   block, and both are described under
-  [the capture attestations](#the-two-capture-attestations-on-the-end-line);
+  [the capture attestations](#the-three-capture-attestations-on-the-end-line);
 - emits only the JSONL trace grammar below (no screenshots, no assets).
 
 ### Reading divergent traces
@@ -182,7 +182,7 @@ non-zero count, and the zero is carried into `capture.overdraw` on the
 observation record, so a reviewer holding only the repository can see that the
 guard was satisfied. An `injected-tape-runtime` trace that carries no count at
 all is refused outright — see
-[the capture attestations](#the-two-capture-attestations-on-the-end-line). The
+[the capture attestations](#the-three-capture-attestations-on-the-end-line). The
 individual draws are still only in the raw log: `"at":"mrand"` lines under
 `captures/` are where you read *what* was drawn, and the count is what tells you
 whether you need to.
@@ -245,6 +245,51 @@ rediscovered as surprises:
   do, and none of those 9 is cited), so for every golden in the repository
   today independence remains exactly the two operator strings.
 
+**What a STAGED capture proves, and what it does not.** Until now the wrapper
+has never written combatant state: it injects the RNG tape and observes, and all
+22 promoted goldens rest on scenarios the game itself produced. The
+`candidate-armoured-*` fixtures need exact per-piece values (helmet 6, greaves
+2) the game will never produce by chance, and while the tournament rank-1
+opponent is reproducible (`unleash_hell` builds it from hard-coded DNA
+literals), the *hero's* state entering that bout is not — `staminaleft` carries
+across bouts and a mid-ladder level-up is decided by a generated opponent's
+experience award. Both were observed live. So the wrapper will write combatant
+state, declaring what it wrote in `end.staged`.
+
+Be precise about what changes:
+
+- **A staged capture measures the formulas exactly as well as an unstaged one.**
+  The formulas operate on whatever inputs they are given. The game still
+  resolves the action; the mutation trace, the hit/miss dispatch, the semantic
+  events and the final state are all still genuinely observed and can all still
+  contradict the candidate. Staging is a scenario **input**, of the same kind as
+  the injected tape, which every existing golden already relies on. A staged
+  deflection measurement at helmet 6 / greaves 2 is a real measurement of the
+  deflection formula at helmet 6 / greaves 2.
+- **What it does not establish is that the scenario is reachable.** Nobody has
+  shown the game's own progression can produce a gladiator in that state. An
+  unstaged golden carries that for free: the configuration existed because the
+  game made it. A staged golden does not, and no number of repetitions adds it —
+  every session stages the same way.
+- **Reachability matters where a formula's inputs are constrained by the game.**
+  If the build only ever equips helmets in a range the staging leaves, or only
+  ever pairs certain pieces, a staged capture can measure the formula at a point
+  the build never visits. That is still a correct measurement of the formula and
+  still a wrong prediction of play. Treat a staged golden as evidence about the
+  **formula**, not about the **distribution of situations** the formula is
+  applied to.
+- **Staging is not fabrication, and the distinction is the whole point of the
+  field.** Nothing about the outcome is authored: the wrapper writes inputs and
+  records what the build did with them. What would be fabrication is a staged
+  capture presented as an unaided one, which is exactly what `end.staged` and
+  the promotion gate's staging rules exist to make impossible.
+- **The declaration is only as honest as the wrapper.** It says what the wrapper
+  reports writing. A wrapper that wrote a field and omitted it from the
+  declaration would be undetectable from the record alone — the cross-check
+  against the staged dump catches a *wrong* value, not an *unmentioned* write.
+  That is the same class of weakness as the editable capture-method string
+  above, and it is recorded here for the same reason.
+
 **How to strengthen a match rather than repeat it.** Because three of the
 seven tape slots in the prisoner scenario write nothing observable (the
 defender has no armour, so the removal roll is inert, and the knockback and
@@ -297,7 +342,7 @@ fabricated independence token. Absent is the honest value.
 | `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` is the wrapper's attribution (`damagecharacter`, `magic-damage-character`, `remove-armour`, `death`, ...) |
 | `event` | action | `defender-hurt`/`defender-blocked`/`magic-damage`/`death`/`overlay-label` |
 | `final` | after the action, one per side | post-action field dump |
-| `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails; `overdraw`, the count of draws the armed window made after the injected tape ran out; `launchNonce`, minted inside the player. See [the capture attestations](#the-two-capture-attestations-on-the-end-line) |
+| `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails; `overdraw`, the count of draws the armed window made after the injected tape ran out; `launchNonce`, minted inside the player; `staged`, the optional `side.field=value` list of everything the wrapper itself wrote, absent when it wrote nothing. See [the capture attestations](#the-three-capture-attestations-on-the-end-line) |
 
 Ingestion (`src/golden/capture-ingest.js`) enforces integrity before a record
 exists: every `set` must chain from the staged value or the previous `after`
@@ -307,11 +352,12 @@ event must be followed by its matching overlay label, and the scenario is
 projected onto exactly the target fixture's staged fields — a mis-staged
 scenario is recorded as observed and surfaces as an explicit mismatch.
 
-### The two capture attestations on the end line
+### The three capture attestations on the end line
 
-The wrapper mints two fields on the `end` line that are neither observations of
-the game nor operator input. Both are carried into the observation record's
-`capture` block, so a reviewer holding only the repository can check them.
+The wrapper mints three fields on the `end` line that are neither observations
+of the game nor operator input. All three are carried into the observation
+record's `capture` block, so a reviewer holding only the repository can check
+them.
 
 **`overdraw`** is the count of draws the armed recording window made *after* the
 injected tape ran out. Those draws are otherwise invisible: they fall through to
@@ -352,21 +398,108 @@ two `sessionId`s look. It is not a security boundary — nothing in this chain i
 — and it does not bind an observation to a distinct *process*, only to a
 distinct player start.
 
-**Both fields are optional in the record schema, and must stay optional.** An
-observation's digest covers its own record, and every observation committed
-before the fields existed was ingested by a version that validated and then
-discarded them. Making either field required would change those records'
-digests and invalidate the provenance of every golden citing them. So a legacy
-record validates, matches and promotes exactly as before; it simply carries no
-assurance on these two points. What forces *new* evidence to carry them is the
-mandatory check at ingest, not the schema. For the same reason the nonce gate
-binds only observations that actually carry a nonce — absence is never read as
-a shared value.
+**`staged`** is the wrapper's declaration of every combatant field *it* wrote
+before the observed action, and the value that stuck once the game's own
+construction had finished. It is a string, comma separated, in application
+order:
 
-Neither field takes part in matching. `projectSs2ObservationForComparison` and
-`matchSs2ObservationToFixture` both exclude the whole `capture` block, so two
-observations that differ only in their nonce still match each other and the
-fixture.
+```json
+{"t":"end","installHashVerifiedAfter":null,"overdraw":0,"launchNonce":"417238-1900311477",
+ "staged":"hero.strength=40,hero.attack=40,villain.helmet=6"}
+```
+
+The accepted grammar, defined once in `parseSs2StagedDeclaration`
+(`src/golden/observation.js`) and applied to both the trace line and the record
+field, so no record can carry a shape a trace could not:
+
+- entries are `side.field=value`, joined by `,`, with **no whitespace anywhere**;
+- `side` is `hero` or `villain`;
+- `field` is `[a-z][a-z0-9_]*` — the same token shape the `set` paths use, not
+  the closed projected-key list, because the armoured captures stage per-piece
+  `*_defence` ratings the default watch list omits;
+- `value` is a decimal number (optionally negative or fractional) or `true` /
+  `false`, and nothing else. Every watched combatant field is numeric or
+  boolean, and admitting free strings would let a `,` or an `=` into a value and
+  make the list ambiguous to split;
+- each `side.field` appears **once**, carrying the value that stuck;
+- at most 512 characters.
+
+Anything else is refused loudly at the line that carried it. That strictness is
+deliberate: a half-parsed declaration *understates* staging, and understated
+staging is the one failure this field exists to prevent.
+
+**Absent means the wrapper staged nothing** — true of every trace and every one
+of the 22 promoted goldens. The empty string is refused rather than accepted as
+a synonym, so there is exactly one spelling of "staged nothing" and a reader can
+never confuse it with "forgot to say".
+
+Where the staged `state` dump watches a declared field, ingest cross-checks the
+two and refuses a disagreement. That is what "the value that stuck" means: the
+game's construction runs after the wrapper's write and may overwrite it, so a
+declaration reporting what the wrapper *attempted* would quietly overstate the
+staging. Fields the dump does not watch cannot be cross-checked and are taken on
+the wrapper's word.
+
+Note the two unrelated senses of "staged" that meet here. The `state` lines are
+the pre-action dump — the scenario as it stood, however it came to stand that
+way. `end.staged` is narrower and is about *authorship*: what the wrapper wrote.
+A trace can have a full staged dump and no `end.staged` at all, and every trace
+behind the 22 promoted goldens does.
+
+**All three fields are optional in the record schema, and must stay optional.**
+An observation's digest covers its own record, and every observation committed
+before the fields existed was ingested by a version that validated and then
+discarded them (or, for `staged`, by one that had no such field to discard).
+Making any of them required would change those records' digests and invalidate
+the provenance of every golden citing them. So a legacy record validates,
+matches and promotes exactly as before; it simply carries no assurance on those
+points. What forces *new* evidence to carry `overdraw` is the mandatory check at
+ingest, not the schema. For the same reason the nonce gate binds only
+observations that actually carry a nonce — absence is never read as a shared
+value.
+
+For `staged` the optionality is not only a compatibility measure: absence is the
+substantive claim. No `staged` key means no wrapper wrote this scenario.
+
+None of the three takes part in matching. `projectSs2ObservationForComparison`
+and `matchSs2ObservationToFixture` both exclude the whole `capture` block, so
+two observations that differ only in their nonce still match each other and the
+fixture — and, less comfortably, so do two that differ only in whether the
+wrapper wrote the scenario. That exclusion is why the promotion gate has to
+compare `staged` itself; see below.
+
+### Staging in the promotion gate
+
+Two rules, both in `promoteSs2CandidateToGolden`.
+
+**Every observation offered for one fixture must agree about staging.** The
+comparison key is the declaration string, or "absent" for a capture that staged
+nothing. This is **load-bearing, not a restatement of the scenario comparison.**
+Nothing else in the pipeline looks at the field:
+`matchSs2ObservationToFixture` compares scenario, samples, mutation trace,
+events, result and final state, and never reads the `capture` block;
+`projectSs2ObservationForComparison` excludes that block outright. So two
+observations can agree on every compared channel — identical scenario *values*,
+tape, mutations and final state — while one had those values written in by the
+wrapper and the other got them from the game's own progression. The comparison
+sees equal values; it cannot see unequal authorship. Offered together they would
+produce a golden whose staging claim is true of half its evidence, which is
+worse than either claim alone. A test pins exactly this: two such observations
+match each other and both match the fixture, and promotion still refuses them.
+
+**A golden promoted from staged evidence records it in `provenance.staged`**,
+so the fixture says so on its own face rather than making a reader chase
+observation ids into `test/observations/`. Unstaged promotions add no key at
+all, which is what keeps the 22 committed goldens byte-identical and is also the
+honest claim.
+
+> **Outstanding.** `GOLDEN_PROVENANCE_KEYS` in `src/golden/run-1v1-fixture.js`
+> is a closed set that does not yet admit `staged`, so promotion of staged
+> evidence currently **fails loudly** with the exact change required rather than
+> dropping the field — emitting a golden that silently read as game-produced is
+> the outcome this whole field exists to prevent. Until that one-line schema
+> change lands, a staged capture can be ingested, matched and inspected, but not
+> promoted. Nothing about unstaged promotion is affected.
 
 ## Observation records
 
@@ -382,7 +515,7 @@ The `capture` block's required members are `sessionId`, `captureToolVersion`,
 `method`, `observedAt`, `installHashVerifiedBefore`, `installHashVerifiedAfter`
 and `mutationGranularity`. It also admits exactly two optional members,
 `overdraw` and `launchNonce`, carried from the trace's `end` line and described
-under [the capture attestations](#the-two-capture-attestations-on-the-end-line);
+under [the capture attestations](#the-three-capture-attestations-on-the-end-line);
 `overdraw` may only be `0`, `launchNonce` must be a token, and no other key is
 accepted. **9 of the 67 committed records carry both** — `obs-cachecold`,
 `obs-cachewarm`, `obs-iso2`, `obs-par1`–`obs-par3` and `obs-pq1`–`obs-pq3`, all

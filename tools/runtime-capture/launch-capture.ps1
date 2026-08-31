@@ -106,6 +106,15 @@ param(
     # already <= 0) and a mid-ladder level-up is decided by a generated
     # opponent's character_xp. The wrapper refuses to arm when either differs.
     [int] $ArenaStagedLevel = 0,
+    # Combatant state to write before the first action, as field:value comma
+    # lists, e.g. -StageHero "strength:40,attack:40" -StageVillain "helmet:6".
+    # THIS IS THE ONLY THING THE WRAPPER DOES THAT AUTHORS GAME STATE. It is a
+    # scenario INPUT - the game still resolves the whole action - and every
+    # field written is reported on the trace end line so a staged capture can
+    # never be mistaken for one the game produced unaided. See stepStaging in
+    # ss2-capture-wrapper.as before using it.
+    [string] $StageHero = "",
+    [string] $StageVillain = "",
     # GATE A bounds. time_of_day advances on a 1.5s WALL-CLOCK interval outside
     # the battle; at 200 the game takes a special event that permanently
     # mutates charisma, magicka or gold and then saves it. 0 leaves the
@@ -277,6 +286,8 @@ $ruffleArgs = @(
     "-ParenaPolicy=$ArenaPolicy",
     "-ParenaCapture=$ArenaCapture",
     "-ParenaStagedLevel=$ArenaStagedLevel",
+    "-PstageHero=$StageHero",
+    "-PstageVillain=$StageVillain",
     $wrapperSwf
 )
 # Passed only when set: an empty FlashVar reads as "" in the wrapper, which is

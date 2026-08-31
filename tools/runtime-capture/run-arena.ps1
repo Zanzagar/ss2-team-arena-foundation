@@ -60,6 +60,10 @@ param(
     # a trace no second session can reproduce. Set it whenever -ArenaCapture is
     # 'champion'.
     [int] $ArenaStagedLevel = 0,
+    # Combatant state written before the first action, as field:value comma
+    # lists. The ONLY place the wrapper authors game state; see stepStaging.
+    [string] $StageHero = '',
+    [string] $StageVillain = '',
     # Only read when $ArenaCapture is not 'never'; a tape is still required by
     # the launcher, and a non-capturing run is launched passive so the tape can
     # never reach a fight nobody staged.
@@ -163,6 +167,8 @@ $launcherArgs = @(
     '-ArenaPolicy', "`"$ArenaPolicy`"",
     '-ArenaCapture', "`"$ArenaCapture`"",
     '-ArenaStagedLevel', "$ArenaStagedLevel",
+    '-StageHero', "`"$StageHero`"",
+    '-StageVillain', "`"$StageVillain`"",
     '-TimeOfDayCeiling', "$TimeOfDayCeiling",
     '-SessionLimitSec', "$SessionLimitSec",
     '-FrameRate', "$FrameRate",
@@ -211,6 +217,17 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     $routeDeadline = (Get-Date).AddSeconds($RouteTimeoutSec)
     while ((Get-Date) -lt $routeDeadline) {
         if (Test-Path $logPath) {
+            # A CAPTURE run is finished the moment the trace closes, and winning
+            # the bout is beside the point. The wrapper arms on the first
+            # checkattackroll and closes on that call's return, so the evidence
+            # is one action - what happens to the gladiator afterwards changes
+            # nothing about it. Waiting for the bout to be won instead would
+            # throw away good captures against an opponent nobody can beat,
+            # which is exactly the champion's case.
+            if ($ArenaCapture -ne 'never' -and
+                (Select-String -Path $logPath -Pattern '"t":"end"' -SimpleMatch -Quiet)) {
+                $outcome = 'CAPTURED'; break
+            }
             if (Select-String -Path $logPath -Pattern '"step":"TARGET-REACHED' -SimpleMatch -Quiet) {
                 $outcome = 'REACHED'; break
             }
@@ -234,7 +251,7 @@ for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
     Write-Host "--- arena route trail (attempt $attempt) ---"
     Show-ArenaTrail
 
-    if ($outcome -eq 'REACHED') { break }
+    if ($outcome -eq 'REACHED' -or $outcome -eq 'CAPTURED') { break }
     if ($outcome -ne 'ABORTED' -or $RECOVERABLE -notcontains $abortReason) { break }
 }
 
@@ -253,5 +270,5 @@ if ($saveBefore -eq $saveAfter) {
 Write-Host ''
 Write-Host "Route outcome: $outcome"
 Write-Host "Raw log: $logPath"
-if ($outcome -ne 'REACHED') { exit 1 }
+if ($outcome -ne 'REACHED' -and $outcome -ne 'CAPTURED') { exit 1 }
 exit 0

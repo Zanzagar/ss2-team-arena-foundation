@@ -72,16 +72,16 @@ const CAPTURE_KEYS = Object.freeze([
   "sessionId"
 ]);
 /**
- * The two capture attestations the wrapper mints on the trace's `end` line and
- * `capture-ingest.js` carries into the record.
+ * The three capture attestations the wrapper mints on the trace's `end` line
+ * and `capture-ingest.js` carries into the record.
  *
  * They are OPTIONAL, and deliberately so. Every observation committed before
  * the fields existed was ingested by a version that validated and then
  * discarded them, and an observation's digest covers its own record — adding a
  * required field would invalidate the digest of every one of those records and
  * with it the provenance of every golden that cites them. So a legacy record
- * that carries neither still validates, still matches, and still promotes; it
- * simply carries no assurance on these two points. What forces new evidence to
+ * that carries none of them still validates, still matches, and still promotes;
+ * it simply carries no assurance on those points. What forces new evidence to
  * carry them is the mandatory check at ingest (see capture-ingest.js), not this
  * schema.
  *
@@ -96,8 +96,17 @@ const CAPTURE_KEYS = Object.freeze([
  *   nonce is the one identity field on a record that the operator did not
  *   choose, which is why the promotion gate refuses two observations that
  *   share one.
+ * - `staged`: every combatant field the WRAPPER wrote before the observed
+ *   action, and the value that stuck once the game's own construction had
+ *   finished. Its absence means the scenario is one the game produced unaided,
+ *   which is what all 22 promoted goldens rest on. Its presence does not make
+ *   an observation weaker evidence — the game still resolved the action, and
+ *   the formulas under measurement operate on whatever inputs they are given —
+ *   but it does mean nobody has shown the game's own progression can *reach*
+ *   this scenario. A reviewer has to be able to tell the two apart, so the
+ *   field is carried into the record and surfaced by the promotion gate.
  */
-const CAPTURE_OPTIONAL_KEYS = Object.freeze(["launchNonce", "overdraw"]);
+const CAPTURE_OPTIONAL_KEYS = Object.freeze(["launchNonce", "overdraw", "staged"]);
 
 export const SS2_CAPTURE_ATTESTATION_KEYS = CAPTURE_OPTIONAL_KEYS;
 const SAMPLE_KEYS = Object.freeze(["callSite", "injected", "label", "max", "min", "source", "value"]);
@@ -130,6 +139,27 @@ const COSMETIC_DEBRIS_PATTERN = /^armour-debris-\d+-(?:x|y|rotation)$/;
  */
 const SPELL_ANIMATION_LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
 
+/**
+ * One entry of the staging declaration: `side.field=value`.
+ *
+ * `field` is deliberately the same token shape the trace's `set` paths use
+ * (`SET_PATH_PATTERN` in capture-ingest.js), not the closed
+ * `SS2_PROJECTED_COMBATANT_KEYS` set: the armoured captures stage per-piece
+ * `*_defence` ratings that the wrapper's default watch list omits, and a
+ * declaration that could not name them would be a declaration that lies by
+ * omission.
+ *
+ * `value` admits a decimal number or a boolean and nothing else. Every watched
+ * combatant field is numeric or boolean (see PROJECTED_BOOLEAN_KEYS and the
+ * `Number.isFinite` arm of assertFinalStateShape), and admitting free strings
+ * would let a comma or an `=` into a value and make the list ambiguous to
+ * split.
+ */
+const STAGED_ENTRY_PATTERN =
+  /^(hero|villain)\.([a-z][a-z0-9_]{0,63})=(-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?|true|false)$/;
+/** Roughly 30 entries. A staging list longer than this is a defect, not a scenario. */
+export const SS2_STAGED_MAX_LENGTH = 512;
+
 export class ObservationError extends Error {
   constructor(message, options = {}) {
     super(message, options);
@@ -138,6 +168,53 @@ export class ObservationError extends Error {
 }
 
 export class ObservationValidationError extends ObservationError {}
+
+/**
+ * Parse a staging declaration into its ordered entries, or throw naming the
+ * exact reason.
+ *
+ * This is the single definition of the grammar. `capture-ingest.js` calls it to
+ * validate the trace's `end.staged` (re-reporting any failure against the line
+ * that carried it) and `assertCaptureBlock` calls it to validate the record's
+ * `capture.staged`, so a record can never carry a shape the trace could not.
+ *
+ * Absence is the encoding for "the wrapper staged nothing". The empty string is
+ * therefore rejected rather than accepted as a synonym: two spellings of one
+ * fact would mean two records that claim the same thing digest differently, and
+ * a reader could not tell "staged nothing" from "forgot to say".
+ */
+export function parseSs2StagedDeclaration(text, path = "capture.staged") {
+  const reject = (why) => {
+    throw new ObservationValidationError(
+      `${path} must be a non-empty comma-separated "side.field=value" list in application order, ` +
+      `for example "hero.strength=40,villain.helmet=6" — ${why}. A capture that staged nothing ` +
+      "omits the field entirely; the empty string is not a second spelling of that."
+    );
+  };
+  if (typeof text !== "string") reject(`got ${JSON.stringify(text)}`);
+  if (text.length === 0) reject("it is empty");
+  if (text.length > SS2_STAGED_MAX_LENGTH) {
+    reject(`it is ${text.length} characters, past the ${SS2_STAGED_MAX_LENGTH} cap`);
+  }
+  const entries = [];
+  const seen = new Set();
+  for (const part of text.split(",")) {
+    const match = STAGED_ENTRY_PATTERN.exec(part);
+    if (!match) reject(`the entry ${JSON.stringify(part)} is not side.field=value`);
+    const [, side, field, literal] = match;
+    const key = `${side}.${field}`;
+    if (seen.has(key)) {
+      reject(`${key} is listed twice — each staged field appears once, carrying the value that stuck`);
+    }
+    seen.add(key);
+    entries.push({
+      side,
+      field,
+      value: literal === "true" ? true : literal === "false" ? false : Number(literal)
+    });
+  }
+  return entries;
+}
 
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
@@ -266,6 +343,9 @@ function assertCaptureBlock(capture) {
   ) {
     throw new ObservationValidationError("capture.launchNonce must be a valid token when present.");
   }
+  // Shape only. Whether the declared values actually stuck is checked at ingest
+  // against the staged state dump, which a record no longer carries.
+  if (Object.hasOwn(capture, "staged")) parseSs2StagedDeclaration(capture.staged, "capture.staged");
 }
 
 function assertSampleShape(sample, index) {
@@ -508,6 +588,13 @@ function comparableSamples(samples) {
  * excluded (unobservable and combat-irrelevant); mutation reasons are wrapper
  * hook attributions and are kept because independent runs of the same tooling
  * must attribute alike.
+ *
+ * `capture.staged` is excluded here too, and that exclusion is exactly why the
+ * promotion gate has to compare it itself. Two observations can agree on every
+ * channel in this projection — same scenario values, same tape, same mutations,
+ * same final state — while one of them had those values written in by the
+ * wrapper and the other got them from the game. The values are what this
+ * projection sees; how they came to be is not a value.
  */
 export function projectSs2ObservationForComparison(record) {
   return cloneJson({
