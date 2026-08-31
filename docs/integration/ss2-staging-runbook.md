@@ -636,6 +636,69 @@ won — that is the cost of the run, and it is paid again on every retry.
 
 ---
 
+### 2A.5 What the first live run of this command actually did
+
+Run 2026-08-31, `session-champ-n1`, three attempts, `-ArenaStagedLevel 5` with
+the §2A.2 staging string. **No capture.** The save was byte-identical before and
+after (687 bytes, `2514B1CB`). This section records what the route did, because
+it is now evidence rather than prediction, and two of §2A.4's expectations are
+wrong.
+
+**The route works.** Attempt 2 beat Hector the Noobhammer (60 hp / 40 ac) and
+Severn the Fiend (80 hp / 14 ac) and reached **John the Butcher, 110 hp / 86
+ac** — the fifteenth independent sighting of exactly the decoded numbers.
+Staging applied at every bout including the champion bout: four `at":"staged"`
+lines, one per `battle-ready`, the last at champion-bout tick 20. The per-bout
+`stageTicks` reset works.
+
+**It refused to arm, on both gate conditions, for the whole bout:**
+
+```
+"step":"capture-refused-unstaged","root":226,"level":4,
+  "staminaleft":107,"staminamax":110,"herolevel":4,"stagedLevel":5
+```
+
+1. **The staged `herolevel` is written and does not survive.** `stepStaging`
+   wrote `hero.herolevel=5` — the `staged` line proves the write — and
+   `captureAllowedNow` read **4**, every tick of the bout. This is exactly the
+   distinction the wrapper's own comment draws: the `staged` line "says what was
+   written; whether it SURVIVED is answered at arming time". The likely cause is
+   that `herolevel` is re-derived from `experience`, which §2A.2 stages to 0, so
+   staging the two together is self-cancelling. **This is unverified — it is the
+   next thing to establish from the bytes, and it should be established before
+   the string is edited again.**
+
+2. **The full-stamina gate was never satisfied.** `staminaleft` at the champion
+   bout ran 0, 11, 15, 16, 17, 30, 49, 68, 87, **107** — never 110. The approach
+   walk alone costs 3, so §2A.2's "speed:2 with stamina:5 … costs no net stamina"
+   does not hold across a ladder: `staminaleft` CARRIES across bouts and
+   `battlevalues` refills it only when it is already `<= 0`. A hero who arrives
+   with anything in the bar cannot pass `staminaleft == staminamax`.
+
+   The refills seen at 0 suggest the only reliable route to a full bar is to
+   arrive **empty**, which is the opposite of what the string is tuned for.
+
+**§2A.4's item 3 is wrong in both directions, and the two errors cancel
+misleadingly.** It predicts a mid-ladder level-up "should not land". Two runs:
+
+- Unstaged (`arena-champ-2`, `-ArenaStagedLevel 4`, no `-StageHero`): the hero
+  **did** level 4 → 5 on the ladder and was refused for `herolevel 5` vs
+  `stagedLevel 4`.
+- Staged (`session-champ-n1`): `experience:0` suppressed the level-up, the hero
+  stayed at 4, and was refused for `herolevel 4` vs `stagedLevel 5`.
+
+So the natural progression produces 5 and the staged one produces 4 — each is
+the value the *other* configuration wanted.
+
+**Ladder cost, measured.** Opponents are drawn per entry by
+`randomise_gladiator` and the spread is wider than the family can absorb:
+attempt 1 drew **Skuld the Fox, 90 hp / armourclass 195** against a hero whose
+`min_damage` is 68, and lost immediately. Attempt 3 hit
+`ABORT:special-event-screen`. Across the whole archive the drawn range is
+`ac` 0–195 and `hp` 30–140, against `John the Butcher` invariant at 110/86 in
+all fifteen sightings. Budget several attempts per capture, and note that
+**`-Attempts` re-fights the ladder from the snapshot state each time**.
+
 ## 3. Family A — `candidate-armoured-*` (5). Immediate target.
 
 Tournament bout, staged opponent, direction 5, `normal_attack`. All five share

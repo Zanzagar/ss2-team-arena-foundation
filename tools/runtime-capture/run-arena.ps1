@@ -31,24 +31,40 @@ powershell -File tools\runtime-capture\run-arena.ps1 `
   -SessionId arena-level-1 -Snapshot pre-arena-level-1 -ArenaTarget level:4
 
 .EXAMPLE
-# Capture the tournament rank-1 bout. Requires a level-4 gladiator with
-# current_tournament == 1 (snapshot 'level4-vitality-tournament-gate').
+# Capture the tournament rank-1 bout, normal band. Requires a level-4 gladiator
+# with current_tournament == 1 (snapshot 'level4-vitality-tournament-gate').
 #
-# The five candidate-champion-* fixtures each stage the per-piece <piece>_defence
-# fields, which the wrapper's default watch list omits, and ingest refuses a
-# trace whose staged dump omits a field the fixture stages. Hence -WatchFields.
-# Run ONE member per session: campaign.mjs reports 2 fixtures claiming attack
-# direction 5 and 2 claiming direction 9, so a family run cannot serve them all.
+# -ArenaStagedLevel MUST equal the staged herolevel, and for this family that is
+# 5, not 4. captureAllowedNow refuses to arm unless hero.herolevel equals
+# -ArenaStagedLevel AND staminaleft equals staminamax; a mismatch is a
+# capture-refused-unstaged line rather than a bad trace. Staging herolevel 5 with
+# vitality 10 is what produces the fixture's hitpointsmax 250 (herolevel*10 +
+# vitality*20). An earlier version of this block showed -ArenaStagedLevel 4 with
+# no -StageHero: that pairing cannot produce the fixture's hero, and a live run
+# confirmed it - the hero levelled to 5 beating the two ladder opponents and
+# every arm was refused against stagedLevel 4.
 #
-# -ArenaStagedLevel is not optional here. Both herolevel and staminaleft carry
-# across the two RNG-generated bouts that must be won to reach rank 1, so
-# without it a run can silently produce a trace no second session reproduces.
+# weapon:24 is a TABLE ID, not a purchase: battlevalues reads
+# _root["weapon" + hero.weapon][3]/[4], and weapon 24 is 8/32, so strength 30
+# gives exactly min_damage 68 / max_damage 92. speed:2 with stamina:5 is chosen
+# so the approach walk costs no net stamina, which is what lets the full-stamina
+# gate pass at all. Do not tidy either value.
+#
+# The eleven -WatchFields are the per-piece <piece>_defence and weapon fields the
+# wrapper's default list omits and the fixture stages; ingest refuses a trace
+# whose staged dump omits a field the fixture stages.
+#
+# See docs/integration/ss2-staging-runbook.md section 2A for the derivation, and
+# note that only the two direction-5 members can go through this script - the
+# quick and power band members need -Autopilot, which this script does not
+# forward.
 powershell -File tools\runtime-capture\run-arena.ps1 `
-  -SessionId arena-champ-2 -Snapshot pre-arena-champ-2 `
-  -ArenaTarget tournament -ArenaCapture champion -ArenaStagedLevel 4 `
+  -SessionId session-champ-n1 -ObservationId obs-champ-n1 `
+  -Snapshot champ-n1-pre `
+  -ArenaTarget tournament -ArenaCapture champion -ArenaStagedLevel 5 `
   -FixturePath test\fixtures\ss2-1v1\candidate-champion-normal-armour-absorbed.json `
-  -ObservationId obs-champ-2 `
-  -WatchFields "boot_defence,breastplate_defence,equipped_weapon,gauntlet_defence,greaves_defence,helmet_defence,shield_defence,shinguard_defence,shoulderguard_defence,weapon_enchantment_potency,weapon_enchantment_type"
+  -WatchFields "boot_defence,breastplate_defence,equipped_weapon,gauntlet_defence,greaves_defence,helmet_defence,shield_defence,shinguard_defence,shoulderguard_defence,weapon_enchantment_potency,weapon_enchantment_type" `
+  -StageHero "herolevel:5,experience:0,strength:30,speed:2,attack:3,defence:3,vitality:10,charisma:1,magicka:1,stamina:5,weapon:24,secondary_weapon:0,weapon_enchantment_type:0,weapon_enchantment_potency:0,helmet:0,shoulderguard:0,breastplate:0,gauntlet:0,greaves:0,shinguard:0,boot:0,shield:0"
 
 .EXAMPLE
 # The tournament family needs no extra watch fields: the default list covers it.

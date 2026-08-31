@@ -1,21 +1,38 @@
 # Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
-## State at the end of the 2026-08-30 session
+## State at the end of the 2026-08-31 session
 
-22 promoted goldens. 584 tests, all passing. 38 commits this session, across a
-day of parallel work and one overnight run of twelve agents.
+22 promoted goldens and **no runtime evidence yet for the champion, armoured or
+tournament families**. **586 tests, all passing, 0 skipped** in a capture-bearing
+worktree.
 
-### Expected test profiles after PR #1
+The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
+handoff said 36. PR #1 has since merged — `github/main` is `e3f14aa`, whose
+history includes `ecf4510` — and the 2026-08-31 session added the commits on
+`arena/champion-capture`.
+
+### Expected test profiles
 
 - A capture-bearing operator worktree with the complete ignored raw-trace
-  archive runs all **584 tests: 584 passed, 0 skipped, 0 failed**.
-- A fresh clone or worktree with none of those ignored traces runs **584 tests:
-  583 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  archive runs all **586 tests: 586 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **586 tests:
+  585 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
   existence check; the committed observation and divergence integrity checks
   still run.
 - A partial raw-trace archive does **not** skip: it fails and names every
-  missing expected trace. This keeps the clean-clone accommodation from
-  weakening evidence retention on an operator machine.
+  missing expected trace.
+
+**The skip is now anchored, and this is the part that changed.** It used to skip
+whenever zero expected traces resolved, and a count of successful lookups cannot
+tell "fresh clone" from "the path derivation is broken" — three one-character
+edits each made it skip silently on a machine holding the complete archive, and
+the resulting run was byte-identical to the fresh-clone profile documented
+above. It now requires a POSITIVE anchor: `captures/README.md` is the one path
+`git ls-files captures` returns, so it exists in a fresh clone AND on an
+operator machine. If it does not resolve, the derivation is wrong and the test
+FAILS naming it, instead of skipping.
+
+So a skip no longer needs a human to check which kind of machine they are on.
 
 Read this section, then [`docs/overnight-agent-plan.md`](docs/overnight-agent-plan.md)
 for how the parallel work is organised.
@@ -29,10 +46,45 @@ for how the parallel work is organised.
    1 → 4 and fought the tournament ladder to rank 2 in five of six attempts.
 3. **The wrapper can stage a scenario and buy equipment**, both owner-approved,
    both declared in the evidence.
-4. **The champion was decoded from the map before it was ever seen.** Reading
-   `unleash_hell`'s hard-coded DNA through `initcharacter` and `battlevalues`
-   PREDICTED `hitpointsmax` 110 and `armourclass` 86; twelve independent live
-   draws recorded exactly those. Five `candidate-champion-*` fixtures exist.
+4. **The champion's numbers were derived with no free parameter, from formulas
+   committed a day before the champion was ever met.** `unleash_hell`'s
+   hard-coded DNA, read through `initcharacter` and `battlevalues`, gives
+   `hitpointsmax` 110 and `armourclass` 86, and thirteen live draws recorded
+   exactly those. Five `candidate-champion-*` fixtures exist.
+
+   **The previous version of this file said the champion was "decoded from the
+   map before it was ever seen" and that the reading "PREDICTED" those numbers.
+   That is not what the record shows, and the overstatement was mine.** It is
+   corrected here rather than quietly fixed because it was load-bearing: it was
+   the stated reason to trust the champion family, in the document a new session
+   reads first, on a project whose whole discipline is that a candidate fitted
+   to a known answer makes its own confirmation meaningless.
+
+   The chronology, established by an auditor and then checked independently:
+
+   - `6dc750e` (2026-08-29 23:57) already carried every term needed —
+     `hitpointsmax = herolevel * 10 + vitality * 20`, the per-piece armour
+     multipliers, and decisively the `helmet > 25` branch — at
+     `docs/integration/ss2-battle-map.md:131-134`, in a file that contains no
+     champion.
+   - The thirteen draws ran 2026-08-30 21:31 to 22:06.
+   - `ss2-champion-dna.md`'s only commit before today, `5d3d777`, is
+     2026-08-30 22:48 — **42 minutes after the last draw.**
+
+   So the FORMULAS were effectively pre-registered, some 21 hours before the
+   opponent existed in this project. The DNA INDEX MAP was written afterwards.
+   That map has no fitting freedom to exploit — 50 strictly sequential
+   `characterDNA[n]` assignments, re-derived mechanically from the opcode stream
+   and matching the published table offset for offset — but "written afterwards"
+   and "predicted" are different claims, and only the first one is true.
+
+   The pre-registration is the stronger argument anyway, and the old wording
+   omitted it entirely. Without the `helmet > 25` branch the same arithmetic
+   gives `armourclass` 1081 rather than 86, so that branch is exactly the
+   constant a back-fit would have had to invent — and it was in the repository a
+   day early. [`ss2-champion-dna.md`](docs/integration/ss2-champion-dna.md) now
+   states this as a postdiction in its own text, and says it must not be
+   restated as a forward prediction.
 
 ### The single most important correction
 
@@ -117,17 +169,43 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
-1. **Capture the champion bout.** Everything is in place except one thing:
-   **it cannot go through `run-arena.ps1`.** All five champion fixtures need
-   eleven extra `-WatchFields`, and only `launch-capture.ps1` exposes both that
-   and `-Stage*` — and it has no snapshot guard. Snapshot by hand first, or add
-   the guard. Winning is not required: the wrapper arms on the first
-   `checkattackroll` and the trace closes on that call's return.
+1. **Capture the champion bout. The tooling blocker is gone; a NEW and better
+   understood one replaced it.** `run-arena.ps1` now exposes `-WatchFields`, so
+   the family finally has a vehicle that carries the eleven extra fields, the
+   `-Stage*` flags AND a snapshot guard. Three attempts ran on 2026-08-31 and
+   **captured nothing**, for reasons now backed by a trace rather than by
+   reasoning. Read
+   [`ss2-staging-runbook.md` §2A.5](docs/integration/ss2-staging-runbook.md)
+   before touching the staging string; the short version:
+
+   - The route WORKS. It beat the ladder and reached John the Butcher at
+     110/86 — the fifteenth sighting of exactly the decoded numbers — and
+     staging applied at every bout including that one.
+   - `captureAllowedNow` refused all bout long on BOTH conditions.
+     `hero.herolevel` was WRITTEN as 5 and READ as 4 at arming time (staging
+     `herolevel:5` and `experience:0` together looks self-cancelling, but that
+     is **not yet verified from the bytes — verify it before editing the
+     string**). And `staminaleft` peaked at 107 of 110, never full, because it
+     carries across bouts and `battlevalues` refills it only at `<= 0`.
+   - The two configurations tried produce each other's wanted value: unstaged,
+     the hero levels to 5 and the gate wants 4; staged with `experience:0`, it
+     stays at 4 and the gate wants 5.
+
+   Only the two direction-5 members can go through `run-arena.ps1` at all — the
+   quick and power band members need `-Autopilot`, which it does not forward.
+   Winning is still not required: the wrapper arms on the first
+   `checkattackroll` and closes on that call's return.
+
 2. **Capture `candidate-armoured-*` (5) and `candidate-tournament-*` (3).**
-   Both reachable with the tooling as it stands. `campaign.mjs watch-fields
-   --family <f>` prints what each needs. Staged armour IS honoured
-   (`damagecharacter` reads the live reference at roll time); staged `hitpoints`
-   is NOT (`check_stats` clamps it every phase transition).
+   Both reachable with the tooling as it stands, and neither needs the
+   tournament ladder, so neither carries the level/stamina problem above.
+   `campaign.mjs watch-fields --family <f>` prints what each needs — note the
+   armoured family does NOT agree on one watch list, so it must be run one
+   member at a time. Staged armour IS honoured (`damagecharacter` reads the live
+   reference at roll time); staged `hitpoints` is NOT (`check_stats` clamps it
+   every phase transition). **This is now the cheapest real evidence available
+   and should probably come first.**
+
 3. **The spell family (8) is still blocked** — the hook fix was necessary but
    not sufficient. See below.
 
@@ -138,6 +216,69 @@ has per-fixture commands.
 ---
 
 ## Open items
+
+### Found 2026-08-31, not yet closed
+
+**A third working forgery against the promotion gate. CRITICAL.** Hook
+attribution is not merely unverified — `reason` is stripped from BOTH sides
+before comparison (`src/golden/observation.js:753-760` and `:803-808`,
+`src/golden/promote-1v1-golden.js:373`), so a record carrying deliberately WRONG
+hook labels, `callSite` or `injected` passes ingest, verify AND the promotion
+gate, and yields a golden the committed suite accepts. The mutation trace is the
+documentation's own "substantive evidence", and its attribution to a game
+function is the only thing separating "`damagecharacter` subtracted these
+hitpoints" from "some unnamed code did". This is the same class as the two
+forgeries closed in `cc42503`, and it is open.
+
+The fix is to translate rather than strip — map each fixture entry's static
+reason through the hook table and compare — and it costs no re-capture. **Do
+NOT instead add a fixture-derived `callSite` comparison:** `callSite` is a
+compile-time constant in the wrapper's single roll emitter, so comparing it
+would manufacture the appearance of verification while comparing one hard-coded
+constant to another, which is the defect class this project has now found six
+times.
+
+**`validate-vehicle.ps1`'s new save tripwire hashes only the FIRST file named
+`ss2_data.sol`.** This machine's save root holds three `.sol` files. The gate is
+isolated by `--save-directory` regardless, and the tripwire is documented as
+currently unarmed, but it is narrower than it reads.
+
+**`src/adapter/battle-host.js:155` returns `{ ...declared, resources: first }`,
+and `declared` may legally be an array since `193e54d`.** An array `aiFill`
+collapses to a single object — reproduced end to end against the real modules.
+Pinned by no test. The workaround retirement this was found under is NOT done:
+removing it reddens three assertion sites in `test/ss2-adapter-integration.test.js`,
+one of which pins the defect being removed, so the source edit and its test
+rewrite have to land together in one owner's hands.
+
+*(My error on that track: I briefed the agent with the path `src/team/battle-host.js`.
+The file is `src/adapter/battle-host.js`. The agent correctly stopped and
+reported rather than guessing.)*
+
+**`-StageGold` re-staging on retry: the obvious fix is worse than the bug.**
+Gold gates WHICH weapon the shop scanner accepts, and `hero.weapon` is a
+`battlevalues` input. Making the gold write once-only while leaving the shop
+re-entry in place would let attempt 2 buy a DIFFERENT, cheaper weapon and fight
+with different damage rolls — a real evidence defect, where the current bug only
+fabricates a gold figure no artefact carries. Scope any fix to make the SHOP TRIP
+idempotent, not the gold write.
+
+**One `isNum` site survives, at `ss2-capture-wrapper.as:1407`** — two raw hero
+reads compared with BOTH negated forms, and one operand is demonstrably NaN in a
+committed live trace. Fail-closed (`arenaAbort` only sets flags and logs), so it
+is a correctness and diagnosability defect rather than a corruption path, but the
+claim that the guard is used everywhere it is needed is false.
+
+**The fifteen impossible-hero fixtures: the contradiction is FORCED, not a failed
+search.** The `max_damage - min_damage` spread is strength-free, and exactly one
+row in ninety has spread 8 — so the weapon is uniquely determined before strength
+is considered, and only then does strength turn out to be wrong. And the escape
+hatch is closed: `nextphase` recomputes `battlevalues` for BOTH combatants at
+every phase transition (`ss2-capture-wrapper.as:2078`), so `-StageHero
+"strength:5,min_damage:12,max_damage:20"` cannot reproduce them live either.
+Still deliberately NOT fixed — they must be re-derived from the map, not edited
+to fit — but the reasoning is now a proof rather than an absence.
+
 
 **Evidence chain**
 - Two-session independence still rests on operator strings for every promoted
