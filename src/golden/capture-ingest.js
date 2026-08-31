@@ -112,6 +112,18 @@ function readMeta(lines) {
   return entry;
 }
 
+/**
+ * The one archived-trace escape hatch, named once.
+ *
+ * It waives the ABSENCE of an attestation, never a malformed or non-zero one,
+ * and it exists solely so raw traces captured before these fields existed can
+ * be re-ingested for divergence-report regeneration. The live capture path must
+ * never pass it, which a tripwire test asserts.
+ */
+function allowsMissingAttestations(options) {
+  return options.allowMissingOverdraw === true;
+}
+
 function readEnd(lines, meta, options) {
   const { lineNumber, entry } = lines[lines.length - 1];
   if (entry.t !== "end") fail(lineNumber, "the last line must be an end line.");
@@ -143,7 +155,7 @@ function readEnd(lines, meta, options) {
   // simulate-capture-trace.js, which emits `overdraw: 0` regardless because it
   // is the wrapper's executable specification of this same end line.
   if (!Object.hasOwn(entry, "overdraw")) {
-    if (meta.method === ObservationCaptureMethod.INJECTED_TAPE && options.allowMissingOverdraw !== true) {
+    if (meta.method === ObservationCaptureMethod.INJECTED_TAPE && !allowsMissingAttestations(options)) {
       fail(
         lineNumber,
         `an ${ObservationCaptureMethod.INJECTED_TAPE} trace must carry end.overdraw. It is the only ` +
@@ -171,10 +183,32 @@ function readEnd(lines, meta, options) {
   // against the record's own token pattern here so a malformed nonce is
   // reported against the trace line that carried it rather than surfacing much
   // later as a schema error on a record ingest itself built.
-  if (Object.hasOwn(entry, "launchNonce")) {
-    if (typeof entry.launchNonce !== "string" || !LAUNCH_NONCE_PATTERN.test(entry.launchNonce)) {
-      fail(lineNumber, "end.launchNonce must be a token string when present.");
+  //
+  // MANDATORY on the same terms as overdraw, and for a sharper reason. An
+  // adversarial pass demonstrated the forgery this field exists to stop, and
+  // showed it still worked: take one raw trace, copy it, change the observation
+  // and session ids, and DELETE the launchNonce key from the second copy. Both
+  // ingest, both promote, and the result is a golden claiming two independent
+  // sessions whose comparison projections are byte-identical. The gate only
+  // fired when the forger left the nonce in.
+  //
+  // Absence was accepted because the field arrived after the wrapper had
+  // already emitted traces without it. That is what the archived-trace hatch is
+  // for; it is not a reason to leave the check optional forever.
+  if (!Object.hasOwn(entry, "launchNonce")) {
+    if (meta.method === ObservationCaptureMethod.INJECTED_TAPE && !allowsMissingAttestations(options)) {
+      fail(
+        lineNumber,
+        `an ${ObservationCaptureMethod.INJECTED_TAPE} trace must carry end.launchNonce. It is the ` +
+        "only identity on a record that the operator did not choose, and two observations offered " +
+        "as independent evidence are checked against it. A trace that omits it can be duplicated " +
+        "into a second session for free. Archived traces predating the field can still be " +
+        "re-ingested for divergence-report regeneration by passing { allowMissingOverdraw: true }, " +
+        "which the live capture path must never pass."
+      );
     }
+  } else if (typeof entry.launchNonce !== "string" || !LAUNCH_NONCE_PATTERN.test(entry.launchNonce)) {
+    fail(lineNumber, "end.launchNonce must be a token string when present.");
   }
   return entry;
 }

@@ -482,11 +482,18 @@ test("promotion accepts distinct nonces, absent nonces, and a mix of the two", (
       sessionId: `session-ok-${suffix}`,
       end: wrapperEnd({ launchNonce })
     });
+  // An ARCHIVED trace, ingested through the one documented hatch. A fresh
+  // injected-tape trace can no longer omit the nonce: an adversarial pass
+  // showed the forgery it exists to stop still worked by simply deleting the
+  // key from a duplicated trace, so absence is refused at ingest now. What the
+  // hatch models here is the only honest way a nonce-less record exists — a
+  // trace captured before the field did.
   const withoutNonce = (suffix) =>
     injectedTapeRecord({
       observationId: `obs-ok-${suffix}`,
       sessionId: `session-ok-${suffix}`,
-      end: { t: "end", installHashVerifiedAfter: true, overdraw: 0 }
+      end: { t: "end", installHashVerifiedAfter: true, overdraw: 0 },
+      options: { allowMissingOverdraw: true }
     });
 
   const cases = {

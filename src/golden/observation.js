@@ -369,6 +369,41 @@ function assertSampleShape(sample, index) {
   }
 }
 
+/**
+ * A live capture cannot carry an opcode sample at all, so a record claiming one
+ * is refused rather than quietly excluded.
+ *
+ * The exclusion this closes was a real hole, demonstrated. `armour-debris-*`
+ * opcode rolls are dropped from BOTH sides before comparison, by label regex —
+ * so an observation carrying the fixture's 7 samples plus 120 extra rolls
+ * labelled `armour-debris-N-x` validated, matched a 7-sample fixture, and
+ * promoted. Two observations differing by 120 draws matched each other. That
+ * directly contradicts the runtime-capture doc's own list, which puts "the
+ * NUMBER of draws in the armed window" under *genuinely observed*: an arbitrary
+ * number was invisible, and `overdraw` does not cover them because they are
+ * recorded rather than past-the-tape.
+ *
+ * Closing the channel rather than widening the comparison is the right shape,
+ * because nothing real produces one: the opcode stream cannot be observed by
+ * any instrumentation the wrapper has (that is why the exclusion exists), 0 of
+ * the 67 committed records carry such a sample, the reference simulator emits
+ * none, and the wrapper's tape excludes them. The simulator is exempt because
+ * its traces are a specification of shapes, not a capture.
+ */
+function assertNoUncapturableSamples(samples, method) {
+  if (method === ObservationCaptureMethod.SIMULATED) return;
+  for (let index = 0; index < samples.length; index += 1) {
+    if (samples[index].source === RollSource.RANDOM_NUMBER) {
+      throw new ObservationValidationError(
+        `samples[${index}] is a ${RollSource.RANDOM_NUMBER} sample, which no live capture can ` +
+        "record: the AVM1 opcode stream is not observable by the wrapper, which is precisely why " +
+        "cosmetic opcode rolls are excluded from matching. Admitting one would open an unbounded " +
+        "channel of draws that comparison cannot see."
+      );
+    }
+  }
+}
+
 function tapeProjection(samples) {
   return samples.map((sample) => ({
     label: sample.label,
@@ -527,6 +562,7 @@ export function validateSs2Observation(record) {
     throw new ObservationValidationError("samples must be a non-empty array of at most 200 rolls.");
   }
   record.samples.forEach((sample, index) => assertSampleShape(sample, index));
+  assertNoUncapturableSamples(record.samples, record.capture.method);
   try {
     createOrderedRollTape(tapeProjection(record.samples));
   } catch (error) {

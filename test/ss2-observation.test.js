@@ -82,11 +82,22 @@ function observationFromFixture(fixture, overrides = {}) {
     },
     target: { fixtureId: fixture.fixtureId },
     scenario: cloneJson(fixture.scenario),
-    samples: fixture.samples.map((sample) => ({
-      ...sample,
-      callSite: CALL_SITE,
-      injected: sample.source === "randomBetween"
-    })),
+    // Opcode samples are DROPPED, because a real capture never records one.
+    // The wrapper observes `randomBetween` through a tap on Math.random; the
+    // AVM1 RandomNumber opcode is not reachable by any instrumentation it has,
+    // which is the documented reason cosmetic debris rolls are excluded from
+    // matching in the first place. This helper used to copy them straight out
+    // of the fixture, which made it model a wrapper that cannot exist - and an
+    // adversarial pass showed why that mattered: an observation carrying the
+    // fixture's 7 samples plus 120 invented debris rolls validated, matched a
+    // 7-sample fixture, and promoted.
+    samples: fixture.samples
+      .filter((sample) => sample.source !== "randomNumber")
+      .map((sample) => ({
+        ...sample,
+        callSite: CALL_SITE,
+        injected: sample.source === "randomBetween"
+      })),
     mutationTrace: fixture.expected.mutationTrace.map((entry) => ({
       ...entry,
       reason: HOOK_FOR_REASON[entry.reason] ?? "unattributed"
@@ -229,35 +240,58 @@ test("independent observations match while identity metadata differs", () => {
   );
 });
 
-test("observation matching redacts cosmetic debris values but not combat rolls", () => {
+test("an observation cannot carry an opcode sample, and combat roll values still separate", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
-  const withDebris = (observationId, sessionId, debrisValue, hitValue) =>
-    observationFromFixture(fixture, {
-      observationId,
-      sessionId,
+
+  // A record carrying an opcode roll is REFUSED, rather than carrying it and
+  // having it excluded from comparison.
+  //
+  // The earlier form of this test built two observations that each carried a
+  // fabricated `armour-debris-1-x` sample and asserted they matched. That was
+  // true, and it was the hole: the exclusion is by label regex and applies to
+  // BOTH sides, so an observation could carry an unbounded number of invented
+  // opcode rolls invisibly. An adversarial pass built one with 120 of them; it
+  // validated, matched a 7-sample fixture, and promoted — which contradicts the
+  // runtime-capture doc's own list, where "the NUMBER of draws in the armed
+  // window" sits under *genuinely observed*.
+  //
+  // The channel is closed rather than widened, because the doc's own reason for
+  // the exclusion is that no instrumentation can observe the opcode stream. If
+  // no capture can record one, no record should hold one.
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
       mutate: (draft) => {
-        draft.samples[0].value = hitValue;
         draft.samples.push({
           label: "armour-debris-1-x",
           source: "randomNumber",
           min: 0,
           max: 19,
-          value: debrisValue,
+          value: 3,
           callSite: CALL_SITE,
           injected: false
         });
       }
-    });
-
-  const debrisOnly = ss2ObservationsMatch(
-    withDebris("obs-a", "session-a", 3, 50),
-    withDebris("obs-b", "session-b", 17, 50)
+    })),
+    /no live capture can record/
   );
-  assert.equal(debrisOnly.match, true);
+
+  // And the channel that IS observed still separates: two records differing in
+  // a combat roll's value do not match.
+  const withHit = (observationId, sessionId, hitValue) =>
+    observationFromFixture(fixture, {
+      observationId,
+      sessionId,
+      mutate: (draft) => { draft.samples[0].value = hitValue; }
+    });
+  const identical = ss2ObservationsMatch(
+    withHit("obs-a", "session-a", 50),
+    withHit("obs-b", "session-b", 50)
+  );
+  assert.equal(identical.match, true);
 
   const combatRoll = ss2ObservationsMatch(
-    withDebris("obs-a", "session-a", 3, 50),
-    withDebris("obs-b", "session-b", 3, 51)
+    withHit("obs-a", "session-a", 50),
+    withHit("obs-b", "session-b", 51)
   );
   assert.equal(combatRoll.match, false);
   assert.ok(combatRoll.differences.some((difference) => difference.path === "/samples/0/value"));
@@ -1028,22 +1062,39 @@ test("fixture validation enforces trace/result/state internal consistency", () =
   assert.throws(() => validateSs2OneVsOneFixture(mismatchedStateResult), GoldenFixtureValidationError);
 });
 
-test("cosmetic debris samples are excluded from matching on both sides", () => {
+test("a fixture's cosmetic debris is excluded from matching; an observation cannot carry any", () => {
+  // The exclusion is still needed on the FIXTURE side, and still works: a
+  // candidate models the debris rolls the game really makes, and an observation
+  // - which cannot see the opcode stream - carries none, yet the two match.
   const fixture = fixturesById.get("candidate-armour-removal-debris");
-  const withDebris = observationFromFixture(fixture, {
-    observationId: "obs-debris", sessionId: "session-debris"
+  assert.ok(
+    fixture.samples.some((sample) => sample.source === "randomNumber"),
+    "this fixture is chosen because it models cosmetic opcode rolls"
+  );
+  const observed = observationFromFixture(fixture, {
+    observationId: "obs-wrapper", sessionId: "session-wrapper"
   });
-  assert.ok(withDebris.samples.some((sample) => sample.source === "randomNumber"));
-  assert.equal(matchSs2ObservationToFixture(fixture, withDebris).match, true);
+  assert.ok(
+    observed.samples.every((sample) => sample.source !== "randomNumber"),
+    "a capture records no opcode roll"
+  );
+  assert.equal(matchSs2ObservationToFixture(fixture, observed).match, true);
 
-  const withoutDebris = observationFromFixture(fixture, {
-    observationId: "obs-wrapper", sessionId: "session-wrapper",
-    mutate: (draft) => {
-      draft.samples = draft.samples.filter((sample) => sample.source !== "randomNumber");
-    }
-  });
-  assert.equal(matchSs2ObservationToFixture(fixture, withoutDebris).match, true);
-  assert.equal(ss2ObservationsMatch(withDebris, withoutDebris).match, true);
+  // What is no longer true, and was the hole: an observation carrying one.
+  // Excluding it from BOTH sides meant an arbitrary number of invented opcode
+  // rolls was invisible to comparison, so the doc's claim that the NUMBER of
+  // draws is genuinely observed did not hold. The record now refuses them.
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
+      observationId: "obs-debris",
+      sessionId: "session-debris",
+      mutate: (draft) => {
+        const debris = fixture.samples.find((sample) => sample.source === "randomNumber");
+        draft.samples.push({ ...cloneJson(debris), callSite: CALL_SITE, injected: false });
+      }
+    })),
+    /no live capture can record/
+  );
 });
 
 test("an invalid manifest cannot discard divergence evidence during promotion", () => {
