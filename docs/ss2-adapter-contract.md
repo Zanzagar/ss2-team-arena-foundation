@@ -293,7 +293,7 @@ When a whole team goes down the resolver sets `battle.result`, emits
 {
   "type": "battle-result-pending",
   "status": "pending-animation",
-  "completionToken": "team-arena:<winner>:<losers+>:<reason>",
+  "completionToken": "team-arena:<winner>:<losers+>:<reason>:<battle discriminator>",
   "winnerTeamId": "red",
   "loserTeamIds": ["blue"],
   "reason": "elimination"
@@ -306,10 +306,60 @@ The presentation layer plays the final animation and then returns
 { "type": "battle-result-animation-complete", "completionToken": "<same token>" }
 ```
 
-to `acknowledgeResultAnimation(battle, ack)`. The token is a pure function of
-the outcome, so a replayed battle produces the same token and a host and client
-can compare acknowledgements without extra state. This mirrors the 1v1 result
-bridge in `src/golden/ss2-attack-candidate.js`.
+to `acknowledgeResultAnimation(battle, ack)`.
+
+### The token names one battle, not one result
+
+The token is `<outcome prefix>:<battle discriminator>`, built by
+`completionTokenFor` in `src/team/settlement.js`.
+
+- `outcomeTokenPrefix({ winnerTeamId, loserTeamIds, reason })` is the outcome
+  half — `team-arena:<winner>:<losers+>:<reason>`, with `none` standing in for a
+  draw's null winner and sorted, `+`-joined loser ids. This is what the whole
+  token used to be.
+- The battle half is `combatStateHash(battle)`: eight lowercase hex digits,
+  pinned by `BATTLE_DISCRIMINATOR_PATTERN` so a counter, a timestamp or a random
+  string cannot be smuggled in as one.
+
+`checkResult` in `src/team/resolver.js` reads that hash at one specific moment —
+**after** `battle.result` is set and every `team-eliminated` event is on the
+battle, and **before** `settlement.arm()`. Late enough that the discriminator
+covers the whole terminal state (seed, RNG cursor, rosters, healths, statuses,
+initiative, turn number and the entire ordered event log); early enough that the
+hash cannot see the token it is about to go into, because
+`toTeamWireState` carries `settlement.toJSON()` and that is still the unarmed
+constant at that line.
+
+`arm()` **requires** the discriminator (`assertBattleDiscriminator`) rather than
+defaulting it. A default would silently restore the defect for whichever caller
+forgot it, and the caller that forgets is exactly the one settling the wrong
+bout.
+
+The purity survives the change; what it is pure *in* does not. The token is a
+pure function of the outcome **of one particular battle**: both halves are
+derived, never counted and never drawn, so a replayed battle still produces the
+same token and a host and client can still compare acknowledgements without
+extra state. What they can no longer do is find the *wrong bout's*
+acknowledgement acceptable. The old defect — a campaign of consecutive bouts
+between the same two teams handing every bout the same token, so bout 1's
+acknowledgement satisfied bout 2's second gate and settled it with bout 1's
+winner — is **closed**.
+
+One residual is deliberate rather than a defect: two bouts with an identical
+blueprint *and* an identical action stream still share a token. They are the
+same battle by every observable the projection carries.
+
+Two readers of the token, each reading a different half:
+
+- `battleDiscriminatorOf(token)` returns the battle half, read from the last
+  colon rather than by splitting, because a team id may contain a colon and a
+  discriminator never can;
+- `completionTokenMatchesOutcome(token, outcome)` checks the outcome half and
+  asserts only that *some* well-shaped discriminator follows. It deliberately
+  does not say which battle: a reader holding a finished record cannot recompute
+  an arm-time state hash.
+
+This mirrors the 1v1 result bridge in `src/golden/ss2-attack-candidate.js`.
 
 ## The settlement guarantee
 
@@ -319,13 +369,21 @@ and only when both gates have passed:
 1. an entire team is eliminated (the resolver arms the settlement), and
 2. a matching `battle-result-animation-complete` acknowledgement arrives.
 
+`arm(outcome)` takes `{ winnerTeamId, loserTeamIds, reason, battleDiscriminator }`
+and **requires all four**; an outcome with no discriminator throws
+`SettlementError` rather than defaulting to a result-only token. The
+discriminator is folded into the token and kept nowhere else, so the settlement
+record's public shape is unchanged — `src/campaign/from-battle.js`, the adapter
+bridge and the pending event all still see the same five fields.
+
 `acknowledgeResultAnimation` returns `true` on the acknowledgement that
 actually settles and `false` for every repeat of the same token. An
 acknowledgement before elimination, with a mismatched token, or with the wrong
 shape throws `SettlementError`. The latch is set *before* the campaign callback
 runs, so a throwing callback cannot leave the settlement re-fireable — the
 caller sees the throw and the campaign is not paid twice. Re-arming a settled
-battle throws.
+battle throws, and re-arming an armed battle with a *different* token throws
+too.
 
 The latch is a private field with no public setter and no reset. Settling twice
 requires constructing a second `CampaignSettlement`, so the way to break this
@@ -353,10 +411,61 @@ That is enforced by module shape, not by convention:
 
 | Guarantee | How it is structural |
 | --- | --- |
-| the adapter cannot invent a combat value | every vanilla field write is an **absolute assignment mirroring resolved canonical state**. `vanillaWritesForResolvedAction` reads the resolver's post-action projection; the effect list supplies only ordering and a reason. That holds for all three write kinds, the `RESOURCE` branch included: `to:` is never `before - effect.amount`, and for a resource it is never `effect.to` either — it is `after`'s resource value, so a `to` the resolver *clamped* lands on the clamped number and not on the number the rule set asked for. |
+| the adapter cannot invent a combat value | **`WriteSource`, `ALLOWED_WRITE_FIELDS` and `assertWriteProvenance`** — see [write provenance](#write-provenance-the-mechanism-not-the-convention) below. |
 | presentation cannot mutate the battle | the only combat input `presentation.js` accepts is a plain `toTeamWireState(battle)` projection. A live battle is refused by shape (`assertCombatProjection`), so there is nothing there to mutate. Output is inert JSON command records — no callbacks, no clip handles. |
 | the adapter cannot end a battle | `acknowledgement.js` can only observe the resolver's terminal `battle-result-pending`. It cannot arm settlement, choose a winner, or acknowledge a battle the resolver has not decided. |
 | clip handles cannot enter deterministic state | `ClipRegistry` keeps handles in a private field, is never attached to a battle, and its `toJSON()` **throws**, so serialising anything that reaches one fails loudly instead of embedding it. |
+
+### Write provenance: the mechanism, not the convention
+
+The first row of that table used to describe a *property of the code*: every
+write in `vanillaWritesForResolvedAction` happened to read the post-action
+projection rather than compute a value. Nothing checked it. An adversarial audit
+applied **five** separate combat-deciding edits to `state-bridge.js` — including
+a `staminaleft` write computed as `before - ceil(amount * 1.5)`, exactly the
+shape this document forbade in prose — and the whole suite stayed green, because
+no test drove a heal, a rest, a ranged attack, a spell, a `STATUS` effect or a
+`RESOURCE` effect through the host at all. All five are caught now, and they are
+caught by a mechanism rather than by a bigger comment.
+
+Three named things in `src/adapter/state-bridge.js` carry it:
+
+| Name | What it is |
+| --- | --- |
+| `WriteSource` | a closed set of exactly four values — `canonical-health`, `canonical-status`, `declared-resource`, `clip-facing`. Every write must name one. `fieldWrite` refuses a write that names none, because "a write with no declared source is a write with no evidence that the resolver produced its value." |
+| `ALLOWED_WRITE_FIELDS` | which vanilla fields each source may target, **fixed here and independent of any scenario**: `hitpoints` for canonical health, the six status flags for canonical status, `CANONICAL_RESOURCE_SOURCES` for a declared resource (plus the timed `spell_*` pools, via `isResourceBackedVanillaField`), `gladiator_dir` for the clip facing. A parallel table pins each source to one of the two write targets, so a combat-object source cannot aim at a clip or the reverse. |
+| `assertWriteProvenance(writes, after)` | the check. For each write the source names exactly one place in the post-action projection, and `write.to` must be `===` what is there: `projection.health`, `projection.status.includes(field)`, or `projection.resources[field].value`. Not "close to", not "derivable from" — identical. |
+
+That is what a prose rule could never give. `to: before - effect.amount` reads
+plausibly and passes review; a value computed anywhere in the module has no
+canonical location to be identical to, so it fails by construction. And the
+check walks the produced list rather than trusting how it was built, so a write
+pushed straight onto the array without going through `fieldWrite` is caught too.
+`vanillaWritesForResolvedAction` runs it as its own final step before returning.
+
+`clip-facing` is the one source with no canonical counterpart — the facing is
+presentation, not combat state — so it is checked against the closed
+`FACING_VALUES` vocabulary instead.
+
+A declared resource may never name a field another source already owns
+(`RESOURCE_RESERVED_FIELDS`: `hitpoints`, `hitpointsmax`, the six status flags,
+and `gladiator_dir`). Without that, the resource branch could forge a health or
+status write with a number canonical health never produced.
+
+The effect list still supplies only the *ordering* and the *reason*. The adapter
+can misattribute a reason; it structurally cannot produce a combat value the
+resolver did not already decide and clamp — which for a resource means `after`'s
+value and never `effect.to`, so a `to` the resolver clamped lands on the clamped
+number rather than on the number the rule set asked for.
+
+**The read side has the same discipline**, and it needed it: a write-shape
+argument covers nothing that enters canonical state in the first place.
+`toCanonicalCombatantSource` **throws** for a vanilla record missing a base
+stat rather than defaulting it — reading an absent `defence` as 0 is the adapter
+picking a combat input, and the choice would be invisible afterwards because
+canonical state carries no record that a number was made up. For the same
+reason it emits only the `loadout` keys a named vanilla field answers; see
+[the loadout bridge](#the-loadout-bridge-is-a-placeholder-twice-over).
 
 ## Module layout
 
@@ -396,7 +505,7 @@ sections of [the battle map](integration/ss2-battle-map.md).
 | Canonical | Vanilla | Citation | Note |
 | --- | --- | --- | --- |
 | `health` | `hitpoints` | Live resources | |
-| `maxHealth` | `hitpointsmax` | Live resources; `battlevalues` | The adapter reads it. Deriving it (`herolevel * 10 + vitality * 20`) is a formula, so `compareMaximumHealth` only *reports* disagreement with the rule set and never corrects either side. |
+| `maxHealth` | `hitpointsmax` | Live resources; `battlevalues` | The adapter reads it. Deriving it (`herolevel * 10 + vitality * 20`) is a formula, so `compareMaximumHealth` only *reports* disagreement with the rule set and never corrects either side. See [maximum health](#maximum-health-reported-refused-never-quietly-rewritten) — that sentence was false when it was written and is true now. |
 | `stats.strength` | `strength` | Base stats | |
 | `stats.agility` | `speed` | Base stats | Name reconciliation only; no value is transformed. |
 | `stats.attack` | `attack` | Base stats | |
@@ -406,7 +515,7 @@ sections of [the battle map](integration/ss2-battle-map.md).
 | `stats.magicka` | `magicka` | Base stats | |
 | `status[]` | `burning`, `frozen`, `poison`, `life_stolen`, `taunted1`, `taunted2` | Combatant state objects (runtime-observed 2026-08-30) | Canonical status tokens are the vanilla flag names **verbatim**; there is deliberately no translation table. |
 | `name` | `character_name` | Identity/progression | |
-| `loadout.*` | `min_damage`, `secondary_min_damage`, `using_bow`, `maximum_ammo`, `inventory1..6` | Derived combat; Spell and vanilla AI surface | **Placeholder-vocabulary bridge only.** See below. |
+| `loadout.*` | `min_damage`, `secondary_min_damage`, `using_bow`, `maximum_ammo` | Derived combat | **Placeholder-vocabulary bridge only, and only the keys a named vanilla field answers.** The conversion no longer reads `inventory1..6` and no longer emits `canUseSpell`/`canHeal` at all. See [the loadout bridge](#the-loadout-bridge-is-a-placeholder-twice-over). |
 | `resources.charisma` | `charisma` | Base stats | There is no canonical *stat* named charisma and there should not be. It is a declared **resource** instead — projected, hashed, and writable by an absolute `resource` effect. |
 | `resources.armourclass`, `resources.armourclass_max` | `armourclass`, `armourclass_max` | Live resources; Hit and damage path | Emitted as declared resources, and still deliberately **not** folded into `health`: the armour-first split is a formula (`damagecharacter` subtracts from `armourclass` first and carries only overflow into `hitpoints`), so it stays rule-set work. The adapter carries the pool; a rule set moves it. |
 | the other seventeen `resources.*` | `ammo_left`, `maximum_ammo`, `staminaleft`, `staminamax`, the eight `*_defence` piece ratings, and the five enchantment fields | Live resources; Armour; Primary weapon; Secondary weapon; Derived combat | `toCanonicalCombatantSource` emits a **twenty-entry** resource bag in total. See [the resource bag](#the-resource-bag-the-adapter-emits). |
@@ -437,6 +546,37 @@ fold the clip's facing into the scenario) and reported as `facingSource:
 **Totality.** Every own key of the source object survives the round trip,
 including the timed `spell_*` fields the map declines to name and any key a
 future build adds. Only the two rules above move anything.
+
+### Maximum health: reported, refused, never quietly rewritten
+
+The table above says `compareMaximumHealth` "only *reports* disagreement with
+the rule set and never corrects either side." **That sentence was false when it
+was first written.** `toVanillaCombatant` wrote `hitpointsmax` from canonical
+`maxHealth` on every sync, so `battle-host.js` construction silently pushed a
+*placeholder* formula's answer over a licensed gladiator's own maximum health,
+and `compareMaximumHealth` reported a disagreement the code had already erased.
+It is true now, and three separate changes make it true:
+
+1. **`toVanillaCombatant` no longer writes `hitpointsmax` by default.** It is
+   behind an explicit `{ maxHealth: true }` option; the same gate now covers the
+   seven base stats behind `{ stats: true }`.
+2. **The host refuses rather than corrects.** For a *supplied* gladiator, if
+   `record.fields.hitpointsmax` disagrees with `combatant.maxHealth`,
+   `battle-host.js` throws `BattleHostError` naming both numbers and
+   `diagnostics.maximumHealthReports`. A supplied gladiator's `hitpointsmax` is
+   licensed evidence; `battlevalues` is a vanilla formula, so writing a rule
+   set's answer over it is rule-set work leaking into the adapter.
+3. **It opts in for exactly one case.** An AI-filled slot passes
+   `{ maxHealth: true, stats: true }`, because there is no licensed record to
+   overwrite — `src/team/roster.js` invented the fighter from `team.aiFill`, and
+   the mirror's job is to describe *that* fighter rather than the gladiator the
+   caller's template was copied from. Every rewrite is reported as
+   `diagnostics.aiFillMirrorRewrites`, and what is left over — the template's
+   weapon fields, which have no single-number canonical counterpart — as
+   `diagnostics.aiFillLoadoutGaps` rather than guessed at.
+
+`mirrorDifferences` compares `hitpointsmax` in both cases, so the disagreement
+cannot go unseen in either direction.
 
 ### The resource bag the adapter emits
 
@@ -525,6 +665,38 @@ items. `placeholderLoadoutFrom` is an ASSUMPTION serving the placeholder
 vocabulary only; a runtime-verified rule set will read the vanilla record and
 this function becomes dead. Nothing else in the adapter depends on it.
 
+**The conversion no longer uses it.** `placeholderLoadoutFrom` answered all five
+keys unconditionally, so the adapter's answer always beat
+`roster.normaliseCombatant`'s own default — including where the two disagreed in
+opposite directions. `canUseSpell` / `canHeal` default to `stats.magicka > 0` in
+the roster, so a gladiator with 20 magicka and an empty inventory came out
+unable to cast, and one with 0 magicka holding a scroll came out able to. That
+is the adapter deciding combat on the *read* side, which the write-shape
+argument never covered.
+
+`toCanonicalCombatantSource` now calls `vanillaBackedLoadout`, which emits a key
+only where a named vanilla field carries the answer and stays silent otherwise:
+
+| key | vanilla evidence | absent ⇒ |
+| --- | --- | --- |
+| `meleeDamage` | `min_damage` | omitted; the roster's default stands |
+| `rangedDamage` | `secondary_min_damage` **only** — the old fallback to `min_damage` silently equated ranged with melee for every gladiator without a second weapon | omitted |
+| `canUseRanged` | `using_bow` or `maximum_ammo` | omitted |
+| `canUseSpell` | none: the inventory id sets were the adapter's own decision labels, not a vanilla field | **always** omitted |
+| `canHeal` | none, likewise | **always** omitted |
+
+So `inventory1..6` is no longer read by the conversion at all, and the two spell
+keys are never emitted. The omissions are reported as `omittedLoadoutKeys` on
+the returned source. A caller that genuinely wants the whole placeholder bridge
+passes it explicitly as `options.loadout`. `LOADOUT_SOURCE_FIELDS` still lists
+the six inventory slots because it names the vanilla fields the loadout *could*
+be read from for reporting; `loadoutMirrorDifferences` compares only
+`min_damage`, `secondary_min_damage` and `using_bow`/`maximum_ammo`.
+
+The `min_damage`-as-melee-base reading is still an assumption of the placeholder
+vocabulary. What changed is that an assumption the vanilla record cannot support
+is no longer stated at all.
+
 ## The two-sided problem: a 3v3 on a two-sided surface
 
 The vanilla surface has three two-sided things: two fighter clips (`hero` at
@@ -547,7 +719,20 @@ roster**:
 - a 3v3 has six combatants but still exactly **one ordered (attacker, defender)
   pair per resolved action**. `bindingPlanFor` produces that pair from resolved
   state, so the original callbacks always target the right unit, whatever the
-  team size. Four globals, always; never six clones.
+  team size. Never six clones — the same four globals however many fighters are
+  on the field.
+
+**Four globals is not "always four *bound* globals".** A self-targeted action —
+the placeholder vocabulary's `rest` is one, and it is legal — has no defender,
+so `bindingPlanFor` names none: `attacker` and `game_attacker` are bound,
+`defender` and `game_defender` are `null`, and the plan carries
+`selfTargeted: true` plus an `unmapped` string saying why. The whole binding
+argument rests on the mapped functions taking these four as *distinct*
+parameters (`damagecharacter(defender, attacker, game_defender, game_attacker,
+...)`, `attack_chances(game_attacker, game_defender)`); binding one unit to both
+sides is not a pair, it is one unit passed twice, and a mapped function that
+reads and writes both parameters would be aliasing it. A host must leave the
+previous binding alone rather than point it at the actor.
 
 Around that, the layout:
 
@@ -634,7 +819,12 @@ vanilla's own `death()` has no answer for:
    have three fighters and three death animations. The bridge waits for every
    eliminated fighter on the losing side to report before acknowledging, so the
    campaign is never paid over the top of an animation still playing. A death
-   on the *winning* side is accepted and ignored — it played earlier.
+   on the *winning* side is accepted and ignored — it played earlier. A death
+   reported for a fighter who is **still standing in resolved state is refused**:
+   the reason a winning-side death is accepted is that it played earlier, which
+   is a claim about someone the resolver knocked down. Membership used to be the
+   only thing `reportDeathAnimation` checked, so any live combatant's id counted
+   as a death.
 2. **The animation surface must agree with resolved state.** The arena label
    the surface reached is checked against the label the resolved winner
    implies. `combat_won` reported for a battle the resolver decided the other
@@ -653,19 +843,47 @@ vanilla's own `death()` has no answer for:
    report settles the campaign through the resolver's own gate.
 
 Refusals and repeats: reporting anything before elimination throws; an unknown
-combatant id throws; a mismatched completion token throws; a repeat is answered
-with `counted: false` and `duplicate: true`, and once the bridge has settled
-every further report returns `settled: false` with `alreadySettled: true`. The
-bridge latches *before* submitting, mirroring `CampaignSettlement`, so a
-throwing campaign callback cannot leave it able to fire again.
+combatant id throws; a death for a living combatant throws; a mismatched
+completion token throws; a repeat is answered with `counted: false` and
+`duplicate: true`, and once the bridge has settled every further report returns
+`settled: false` with `alreadySettled: true`. The bridge latches *before*
+submitting, mirroring `CampaignSettlement`, so a throwing campaign callback
+cannot leave it able to fire again.
 
 `expectsArenaLabel` is what a caller draining the animation surface should
 read; it is false exactly for a draw, and `unmappedArenaTransition` says why. A
 null `expectedArenaLabel` is a draw, not an error.
-`host.acknowledgeResultAnimations()` follows that rule — it reports the deaths
-and then stops, and when it is given an explicit `completionToken` for a draw
-it verifies the token *before* the deaths, because in a draw the last death is
-what settles and a token checked afterwards would be checked too late.
+
+### `host.acknowledgeResultAnimations()` supplies nothing
+
+This is the batch form of `bridge.reportDeathAnimation` /
+`bridge.reportArenaLabel` and it grants no extra authority. **Everything is the
+caller's to supply, and nothing is defaulted:**
+
+| parameter | required | what it is |
+| --- | --- | --- |
+| `deaths` | **always** | the combatant ids whose death animation the surface reported |
+| `completionToken` | **always** | the token the `arena-goto` / `overlay-goto` command carried (a draw's `unmapped` command carries it too) |
+| `arenaLabel` | for every non-draw | the label the arena timeline actually reached |
+
+It used to fabricate a death report for every awaiting fighter and then hand the
+bridge `arenaLabel ?? this.#bridge.expectedArenaLabel` — the label the bridge
+itself was waiting for. **Both documented settlement gates were therefore
+satisfied by the adapter talking to itself**: a lethal action followed by a bare
+`acknowledgeResultAnimations()` settled the campaign with zero input from any
+animation surface, and the desync check in point 2 above had nothing independent
+to compare against. A convenience that supplies the evidence it is meant to be
+checking is not a convenience.
+
+**The token is verified before the deaths, for every result** — not only for a
+draw. In a draw the last death is what settles, so a token checked afterwards
+would be checked too late; checking it first for every result costs nothing and
+removes the special case. Reading the token back off the bridge is exactly what
+is refused, because it would compare the bridge with itself.
+
+**A draw stops after the deaths.** Vanilla dispatches no draw transition, so the
+completed death animations are the entire acknowledgement. Passing an
+`arenaLabel` for one is still reported to the bridge, and still refused.
 
 Reporting an arena label for a draw is still **refused**. That is not the old
 gap surviving in a new place: a surface that reached `combat_won` for a battle
@@ -682,7 +900,7 @@ to settle would leave a decided battle that can never pay its campaign.
 | the 22 promoted goldens in `test/fixtures/ss2-1v1-golden/` | **runtime-verified** — and they verify the ordered rolls, the mutation order, and the result transition, not any adapter mapping. No golden observes anything the adapter does. |
 | field names, groups, clip names, depths, positions, panel instances, overlay/arena result labels, the four binding globals | **static map only** for the fingerprinted build |
 | every clip *label* the adapter dispatches | **static map at best**; the ranged `hurtN` adjustment and the death-variant label names are `assumed` |
-| the loadout bridge, the spell/heal inventory id sets | **assumption**, placeholder vocabulary only |
+| the loadout bridge, the spell/heal inventory id sets | **assumption**, placeholder vocabulary only — and no longer on the conversion path. `toCanonicalCombatantSource` emits only the vanilla-backed keys; the inventory id sets survive in `placeholderLoadoutFrom`, which nothing calls unless a caller passes it as `options.loadout`. |
 | multi-slot geometry, ally clip names, ally depths, ally panel widgets | **authored mod surface**; vanilla has no second ally, so no capture can settle it |
 
 `MAP_SILENCE` in `src/adapter/vanilla-fields.js` is the machine-readable
@@ -704,7 +922,7 @@ that was closed two commits ago.
 | --- | --- |
 | **No SS2 field bag on a canonical combatant** — armour, stamina, ammunition, charisma and the chance cache could not enter the combat state hash | `src/team/resources.js`. A combatant declares a named, bounded numeric bag at construction; `combatantView` exposes it and `combatantProjection` carries it, so it is inside `combatStateHash`. Names are the blueprint's, not the resolver's. |
 | **No `charisma` canonical stat**, which the whole taunt path reads | the same module. `charisma` is a resource, not a stat — which is the right shape for it: `DEFAULT_STATS` is the placeholder vocabulary's seven, and a verified rule set has no reason to grow it. |
-| **`normaliseCombatant` drops `source.status`**, so a gladiator entering already burning could not express it | `normaliseStatus` in `src/team/roster.js`, which carries `source.status` through in declaration order, deduplicated, and refuses a malformed list. The adapter's `initialStatusEffects` is now redundant for this purpose: `toCanonicalCombatantSource` already emits `status`, and the roster now honours it. **`battle-host.js` has still not caught up** (re-checked at `e4d02a3`) — it reports the same list as `diagnostics.unappliedInitialStatusEffects`, and both that name and the comment above it ("`normaliseCombatant` hard-codes `status: []`") are now false: the roster applied them. The diagnostic is inert — nothing re-applies it — but a caller who trusts the name and applies it would be applying a status twice. |
+| **`normaliseCombatant` drops `source.status`**, so a gladiator entering already burning could not express it | `normaliseStatus` in `src/team/roster.js`, which carries `source.status` through in declaration order, deduplicated, and refuses a malformed list. The adapter's `initialStatusEffects` is now redundant for this purpose: `toCanonicalCombatantSource` already emits `status`, and the roster now honours it. `battle-host.js` has since caught up: the diagnostic is `diagnostics.startingStatusEffects`, and both the old name (`unappliedInitialStatusEffects`) and the comment that justified it ("`normaliseCombatant` hard-codes `status: []`") are gone. It describes a starting state that is **already applied**; a caller who trusted the old name and applied the list would have set a status the fighter already had. A test asserts the old key is absent from `host.diagnostics`. |
 | **No armour effect kind** — a verified rule set could not express "this hit consumed 22 points of armour and spilled 3 into hitpoints" | `EffectKind.RESOURCE`. An armour-first split is two ordered effects — write the pool down absolutely, then apply the overflow as damage — and the resolver applies exactly that, in exactly that order, without knowing what "armour" is. |
 | **The adapter used none of it** — `toCanonicalCombatantSource` emitted no bag and `vanillaWritesForResolvedAction` had no `RESOURCE` branch, so armour, stamina, ammunition, charisma and the eight piece ratings lived only in the vanilla mirror, outside the hash | `adeb05e`, both halves together, because the resolver refuses a write to an undeclared resource by design. `toCanonicalCombatantSource` emits the twenty-entry bag on **both** sides of the vanilla binding, and `vanillaWritesForResolvedAction` gained the `RESOURCE` branch, so a write reaches `armourclass` — with the value taken from the post-action projection, never from `effect.to`. See [the resource bag](#the-resource-bag-the-adapter-emits). |
 
@@ -740,6 +958,37 @@ that was closed two commits ago.
    `staminaleft` cannot appear as keys in a persisted outcome. Today this is
    moot (`from-battle.js` projects no `resources` block at all), but it is the
    constraint any future attempt will hit.
+5. **There is no per-action animation acknowledgement.** This is the one gap in
+   the acknowledgement story, and it is a hazard rather than a shape problem.
+
+   Every presentation command carries the resolver `sequence` it came from,
+   which orders the commands *relative to each other*. Nothing orders them
+   relative to **time**. `bind-globals` and `clip-goto` carry a sequence and no
+   completion token; `createPresentationBinder`'s cursor advances on drain
+   rather than on anything the surface reports; and the only acknowledgement
+   anywhere in the adapter is the terminal one in `acknowledgement.js`, which
+   fires once per battle.
+
+   So a host that submits action N+1 while action N's timeline is still running
+   rebinds `_global.attacker` / `_global.defender` / `game_attacker` /
+   `game_defender` underneath it — and vanilla's mapped functions read those
+   globals rather than parameters captured at dispatch. Nothing sequences the
+   rebind against the running timeline, and nothing here mitigates it.
+
+   **This is documented, not designed.** What a seam that closed it would have
+   to offer, stated so nobody has to guess: (1) a per-action token on one
+   resolved action's commands — the resolver sequence is already unique per
+   action and would serve, but it has to be *carried* on `bind-globals` and
+   `clip-goto` and *echoed back*, not merely stamped; (2) a reporting call the
+   surface makes when that action's timeline reaches its terminal frame, naming
+   the token and shaped like `reportDeathAnimation` — accepted once, duplicates
+   answered rather than thrown, an unknown token refused; (3) a gate the host
+   consults before submitting the next action, so "the resolver is ready" and
+   "the surface is ready" stay two questions with two answers; and (4) a policy
+   for a surface that never reports, since a timeout is a host decision rather
+   than a presentation one. None of it is implemented, and inventing a mechanism
+   without a capture of the vanilla timeline's own completion signal would put a
+   guess at the centre of the action loop.
 
 ## Networking boundary
 
