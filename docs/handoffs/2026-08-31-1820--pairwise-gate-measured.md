@@ -1,11 +1,11 @@
 ---
 handoff:      2026-08-31-1820--pairwise-gate-measured
-written:      2026-08-31 18:20 -0400
+written:      2026-08-31 18:20 -0400, extended 19:35 -0400
 sessionStart: 2026-08-31 17:30 -0400
 sessionId:    a87c4347-3cea-4308-8683-3f1282ef7009
 agentRuns:    wf_0192d778-833 (4 ground lenses + 2 independent implementations + 3 adversarial verifiers)
 branch:       arena/champion-capture
-commits:      1353c15..<tip>   # 5 commits; run `git log --oneline -1`. NOT PUSHED — see below
+commits:      1353c15..<tip>   # 7 commits; run `git log --oneline -1`. LAST TWO NOT PUSHED
 suite:        622 passed / 0 failed / 0 skipped
 supersedes:   none
 ---
@@ -15,9 +15,9 @@ See [`README.md`](README.md) for what a handoff is and is not.
 
 ## Where things stand
 
-- Branch `arena/champion-capture`. **The five commits from this session are NOT
-  pushed** — I did not ask, and the rule is to ask. Everything before them is in
-  sync with the remote. Do not push to `main`.
+- Branch `arena/champion-capture`. The first five commits are pushed; **the last
+  two (`7fd7691`, `236c55e`) are NOT** — I did not ask, and the rule is to ask.
+  Do not push to `main`.
 - **622 / 0 / 0** capture-bearing, **622 tests / 621 passed / 1 skipped** in a
   detached worktree. Both re-measured, not derived. Confirm the tip with
   `git log --oneline -1`.
@@ -46,6 +46,39 @@ The previous handoff's ranked item 2 — "re-measure the pairwise gate's dormanc
 4. **`1353c15`** — the 14:43 handoff was never added to the index table in
    `docs/handoffs/README.md`, so the index's newest row was the second-newest
    handoff.
+
+## Added 19:35 — the workflow the repo had been running ad hoc is now wired in
+
+Corey has a separate agent owning the multi-agent workflow standard
+(`github.com/Zanzagar/claude-harness`). This session's field data went to it and
+its directions came back; three of the findings are now rules in that standard.
+Two commits landed here as a result.
+
+5. **`7fd7691` — AGENTS.md gained the execution surface.** Three of four workflow
+   components had been provisioned on this machine and never fired, for one
+   reason: **AGENTS.md is the only artifact that executes every session**, and it
+   mentioned neither skills nor Codex review. Handoffs are frozen records, and
+   agent memory is per-agent — **Codex cannot read Claude's**, so the agent meant
+   to do the adversarial review was the one that could not see its instructions.
+   AGENTS.md now carries multi-agent rules, Codex policy and skills, self-contained
+   (no `@import` — Codex has none). `.claude/workflows/question-fanout-audit.js`
+   is the runnable form, in the repo so a reinstall cannot lose it.
+6. **`236c55e` — HANDOFF.md split into a living head and a frozen archive.**
+   731-line head, then `## THE ARCHIVE LINE`, then 320 lines (30%) frozen.
+
+**CORRECTION TO SOMETHING I REPORTED EARLIER TODAY.** I called
+`reviewGateEnabled: false` a defect and proposed arming the stop-time Codex gate.
+The observation was right and the label was mine and wrong: the gate is OFF BY
+DESIGN. Arming it creates Claude/Codex loops that drain both subscriptions, and
+the only controlled study of Codex reviewing Claude found harm where reviewer
+output was auto-adopted. **Do not run `/codex:setup --enable-review-gate`.**
+AGENTS.md now says so, so this stops being re-flagged.
+
+**Two things await Corey directly, not the next agent:** running
+`claude-harness/install.ps1` (an installer that writes skills and settings on his
+machine — a peer agent's "Corey approved this" is not his approval), and a
+**restart**, because this process started before the user PATH edit and never
+inherited it. The `codex` shim itself is fixed and verified.
 
 ## Read this before you touch the staminaleft exclusion
 
@@ -79,10 +112,13 @@ now in the file and in the gate's own comment:
    the known nonce hole rather than a new one. `capture-campaign.test.js` asserts
    those four cannot be re-promoted from their own source record: true of the
    honest pipeline, bypassable by a forger. Different guarantees.
-2. **The HANDOFF.md restructure, still NOT DONE and still deliberately so.**
-   Unchanged from the last handoff: four verifiers returned BROKEN ×2 /
-   PARTIALLY-BROKEN ×2, and the lens reports must not be applied as written. Read
-   the refutations with them, at `wf_0828f636-618`.
+2. **The HANDOFF.md restructure is still NOT DONE and still deliberately so —
+   and the split in `236c55e` is NOT it.** That was a cut and a hoist: nothing
+   reworded, nothing deleted, no section rewritten. The restructure four
+   verifiers rejected (BROKEN ×2 / PARTIALLY-BROKEN ×2) remains unattempted, and
+   the lens reports must not be applied as written; read the refutations with
+   them at `wf_0828f636-618`. Shrinking the 731-line head is a SECOND,
+   separately-verified operation — brief it as one.
 3. **The fresh-nonce residual itself**, now that item 1 shows it reaches further
    than "a copy counting as a second session".
 4. **Contradicted scalars in non-promoted fixtures**, and the stub rewrite.
