@@ -567,6 +567,43 @@ test("a caller's own aiFill resources outrank the template bag the host would su
     rngTape: hitTape(8)
   });
 
+/**
+ * The ARRAY half of `declaredFillResources`, which nothing pinned.
+ *
+ * The test above covers a team-level OBJECT `aiFill` carrying resources. The
+ * array form — one entry per slot, which is the shape per-slot fill exists for —
+ * went through lines 153-155 of battle-host.js and no test reached them: an
+ * adversarial verifier deleted the whole array branch and the suite stayed
+ * green at 602/602. That is this project's signature defect, and it was sitting
+ * inside the fix for a different defect.
+ *
+ * The two slots below declare DIFFERENT bags, which is the case an object
+ * `aiFill` cannot express at all, so a regression cannot hide behind the
+ * object path.
+ */
+test("a per-slot array aiFill's own resources outrank the template bag, per slot", () => {
+  const declared = createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      {
+        id: "blue",
+        aiFill: [{ resources: { armourclass: 5 } }, { resources: { armourclass: 9 } }],
+        members: [
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 4, armourclass: 44 }) },
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 3, armourclass: 12 }) }
+        ]
+      }
+    ],
+    rngTape: hitTape(8)
+  });
+
+  // Per SLOT, and neither value is either template's armourclass (44, 12).
+  assert.equal(resourceValue(declared.combatant("blue-fill-1"), "armourclass"), 5);
+  assert.equal(resourceValue(declared.combatant("blue-fill-2"), "armourclass"), 9);
+  assert.deepEqual(Object.keys(declared.combatant("blue-fill-1").resources), ["armourclass"]);
+  assert.deepEqual(Object.keys(declared.combatant("blue-fill-2").resources), ["armourclass"]);
+});
+
   // The roster treats the empty-slot marker as the nearest fill source, so a
   // bag put there unconditionally would silently outrank the caller's own
   // declaration. Both filled slots read 7, from neither template.

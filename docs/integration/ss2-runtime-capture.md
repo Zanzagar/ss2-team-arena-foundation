@@ -778,16 +778,17 @@ are optional and why no committed record was rewritten to add them. **No
 committed record carries `staged`**: nothing has been wrapper-staged yet, so
 every record in the repository is evidence the game produced unaided.
 
-One gap in that "holding only the repository" claim, found while checking the
-attacker-side labels and recorded here so it is not rediscovered: the 22 goldens
-cite 47 observation ids, and **three of them have no committed record** —
-`obs-nav6` (one of the two behind `golden-prisoner-normal-kill-dir5`) and
-`obs-diag` and `obs-gold3`, which are *both* of the observations behind
-`golden-prisoner-normal-kill-dir6`. Each appears exactly once in the repository,
-in the manifest that attests it. The golden carries their digests; the records
-those digests cover are not here, so for `-dir6` neither piece of its evidence
-can be re-read, re-matched, or checked for side labels from this repository
-alone. The remaining 44 are committed and were checked.
+That "holding only the repository" claim was checked, and it holds. The 22
+goldens cite 47 distinct observation ids, and **all 47 have committed records**
+under `test/observations/ss2-1v1/` (67 records committed in total).
+
+An earlier revision of this section claimed three of them — `obs-nav6`,
+`obs-diag` and `obs-gold3` — had no committed record. That was wrong, and the
+cause is worth recording because it is a trap anyone re-checking this will walk
+into: the records are **not** in `test/observations/`, they are one level down in
+`test/observations/ss2-1v1/`. A census that reads the parent directory finds a
+single subdirectory, resolves nothing, and reports every id as missing. Resolve
+against the leaf directory and the count is 47 of 47.
 
 ## Matching rules
 
@@ -984,10 +985,10 @@ observation records and originates only `createdAt`. Rebuilding the
 hand-written `test/manifests/prisoner-dir6.json` from its two observations
 reproduces its canonical digest
 (`889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c`), which
-is the digest `golden-prisoner-normal-kill-dir6` already cites. That rebuild
-cannot be re-run from this repository today: both of those observation records
-(`obs-diag`, `obs-gold3`) are uncommitted — see
-[observation records](#observation-records).
+is the digest `golden-prisoner-normal-kill-dir6` already cites. Both observation
+records behind it (`obs-diag`, `obs-gold3`) ARE committed under
+`test/observations/ss2-1v1/`, so that rebuild can be re-run from this repository
+— see [observation records](#observation-records).
 
 `-SkipPipeline` on `run-capture.ps1`/`launch-capture.ps1` leaves the raw log
 for the campaign driver. Without it the launcher verifies against the one
