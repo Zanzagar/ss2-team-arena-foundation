@@ -104,15 +104,36 @@ Provenance for the shared rules and workflows is the `claude-harness` repo.
 
 ## Running the tests
 
-`npm` is NOT on PATH. From the repo root:
+There are no dependencies to install. From the repo root, with node >= 26:
+
+```
+node --test --test-concurrency=1
+```
+
+Use `--test-concurrency=1`: the machine is memory-starved with many agents, and
+parallel spawns intermittently fail with `spawn UNKNOWN`, which is not a code
+failure.
+
+**If `node` is not on PATH, you are in a Windows-native session** (npm is not
+installed there either). Use the codex runtime's node, which is the only one on
+that machine — resolve it rather than pinning it, as the directory moves on
+update:
 
 ```
 & 'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --test --test-concurrency=1
 ```
 
-**A skipped test is a real finding, not noise.** Expect the exact count the
-newest handoff states; if you measure a different number, say so rather than
-carrying the old one forward.
+**Two test profiles are correct, and which one you get depends on the tree:**
+
+- A capture-bearing tree, holding the gitignored `captures/` raw-trace archive:
+  **all tests pass, 0 skipped.**
+- A fresh clone or worktree without that archive: **1 skipped**, and the skip is
+  the raw-trace archive existence check. This is EXPECTED, not a defect.
+
+**Otherwise a skipped test is a real finding, not noise.** Expect the exact count
+the newest handoff states; if you measure a different number, say so rather than
+carrying the old one forward. The archive check is anchored so that a broken path
+derivation FAILS and names itself rather than skipping silently.
 
 ## Conventions
 

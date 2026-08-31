@@ -196,10 +196,14 @@ six. It is the cheapest quality step in the run.
   that should break it, and check that it does. This project's signature defect
   is an assertion that cannot fail; six audits have each found one and each was
   hiding a real bug.
-- Tests: `'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --test --test-concurrency=1`
-  (npm is NOT on PATH; concurrency 1 because the machine is memory-starved with
-  many agents and parallel spawns intermittently fail with `spawn UNKNOWN`,
-  which is not a code failure).
+- Tests: `node --test --test-concurrency=1` (node >= 26; no dependencies to
+  install). Concurrency 1 because the machine is memory-starved with many agents
+  and parallel spawns intermittently fail with `spawn UNKNOWN`, which is not a
+  code failure. **In a Windows-native session `node` is not on PATH** — use the
+  codex runtime's, resolved not pinned since the directory moves on update:
+  `'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe'`.
+  A tree WITHOUT the gitignored `captures/` archive correctly reports 1 skipped;
+  that is the archive existence check, not a defect.
 - Leave the suite green and report the exact count. If it is already red when
   you arrive, say so and name the failing file — in a parallel run that is
   usually another writer mid-edit, and it is not yours to fix.
