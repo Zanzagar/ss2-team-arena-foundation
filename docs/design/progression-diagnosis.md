@@ -4,7 +4,7 @@
 document does not propose the section D/E progression system and does not
 authorize implementation.
 
-**Research date:** 2026-08-30.
+**Research date:** 2026-08-30; source/link refresh 2026-08-31.
 
 ## Evidence discipline
 
@@ -589,7 +589,7 @@ respec/stat potions later push that principle much further.
 
 #### What Synergies and common companion mods add
 
-The [SynergiesMOD author page](https://steamcommunity.com/workshop/filedetails/?id=136232408)
+The historical [SynergiesMOD author page](https://steamcommunity.com/workshop/filedetails/?id=136232408)
 documents random monster affixes, fifty fame levels, altered skill/enchant
 pacing, respec and stat potions, new crafting systems, more than 300 additional
 legendaries, explicit Tier 0/0.5/1 raid content, boss-specific drops,
@@ -614,20 +614,30 @@ The ecosystem itself supplies useful counter-evidence:
   randomized affixes; that demonstrates demand for a longer item chase, but
   most replicated level variants are vertical quantity, not new play; [O: mod
   author]
+- the historical [LAO III listing](https://steamcommunity.com/sharedfiles/filedetails/?id=791856602)
+  deliberately keeps character level at 100 while extending items, dungeons,
+  Mapworks maps, and NG+ far beyond it; the author says raising character level
+  further breaks multiplayer. [O: historical mod-author claim] It is unusually
+  direct support for decoupling a finite combat/stat cap from continuing
+  content and reward axes. It does **not** support literal item/map tier 999,
+  and its removed/incompatible banners do not establish current multiplayer
+  compatibility;
 - [Adventure Mode](https://github.com/tukkek/torchlight2-AdventureMode)
   replaces automatic level matching with fixed map tiers, push/farm choice,
   gameplay modifier families, and targetable reward categories; this is a
   cleaner expression of the Mapworks principle; [O: mod author]
 - the historical [RnF Skill Spells listing](https://steamcommunity.com/sharedfiles/filedetails/?id=158678801)
   turns class abilities into findable inventory spells usable by any class,
-  while Essentials bundles respec, inventory/UI, classes, sets, and loot
+  while the historical Essentials page bundles respec, inventory/UI, classes, sets, and loot
   changes. [O: mod author] The former is conceptually close to SS2's existing
   item-id spell inventory; the latter is evidence that quality of life is part
   of making a complex progression system usable.
 
 The user's exact historical mod stack beyond Synergies remains [U]. LAO,
 Adventure Mode, findable skills, and Essentials are comparisons, not claims
-about what the user played.
+about what the user played. The individual Synergies, LAO, RnF, and Essentials
+Workshop pages now display removed/incompatible banners; their surviving text
+is historical author-intent evidence, not current availability. [O]
 
 #### Torchlight transfer ranking
 
@@ -752,12 +762,18 @@ offers anchored in something already kept, Scrolls of Fortune, guaranteed
 Skill Cards, and refinement at level cap. [O: official overview,
 21:42–24:37] The launch plan withheld starter Skill Cards until a first
 Prestige; the
-[July 28 correction](https://ascension.gg/en/changelog/2026?page=26) moved them
-to character creation and also cut Dawnrise unlearn costs. [O] The transferable
+[July 28 pagination snapshot](https://ascension.gg/en/changelog/2026?page=26)
+records moving them to character creation and cutting Dawnrise unlearn costs.
+The same archive records fully tradeable Dawnrise Mystic Scrolls on July 27.
+[O] The transferable
 rule is that **reversibility and a deterministic anchor must arrive before a
 failed build becomes sunk cost**. Forced full re-levelling/Prestige as the
 normal repair mechanism does not transfer to a sequence of short duels: it
 turns experimentation into punishment and rewards repetitive farming.
+Tradeable build-defining rolls do not transfer either: a small personal duel
+economy would turn them into carry funneling or account laundering. SS2's
+eventual anchors, pity, and correction currency should remain personal and
+nontradeable. [A]
 
 Season 10's Class Fusion layer addresses another classless failure at the
 substrate rather than through thousands of bespoke pairings. Multischool
@@ -771,10 +787,10 @@ action triggers every payoff. The control is a strict tag budget, explicit
 trigger timing, and stacking groups.
 
 Post-launch changes make that last control concrete. The
-[August 2–4 changelog](https://ascension.gg/en/changelog/2026/08/04) made
-several percentage healing and damage bonuses mutually exclusive, stopped
-some multiplayer effects stacking multiplicatively, and removed other
-unintended stacking. [O] For SS2's eventual 2v2/3v3 rule set, the
+[August 2–3 pagination snapshot](https://ascension.gg/en/changelog/2026?page=20)
+made several percentage healing and damage bonuses mutually exclusive and
+stopped a multiplayer interaction from stacking multiplicatively. [O] For
+SS2's eventual 2v2/3v3 rule set, the
 principle is **strongest-only or diminishing stacking groups applied across
 the whole team**, not merely within one fighter's inventory. Otherwise the
 degenerate team is predictable: everyone stacks the same multiplier, or one
@@ -804,7 +820,7 @@ while the item is upgraded through cleared content tiers; the permitted tier
 is progression-gated and earlier costs fall as the realm advances. The 2026
 [mid-February update](https://ascension.gg/en/news/mid-february-updates-heroic-world-bosses-worldforged-upgrades-and-more/525)
 and Shadows over Blackrock corroborate continued tier upgrading, while the
-[August 18 entry](https://ascension.gg/en/changelog/1?page=4) caps later Rune
+  [August 18 Bronzebeard entry](https://ascension.gg/en/changelog/5?page=1) caps later Rune
 costs at the Onyxia rate. [O] A future SS2 signature item or technique could
 likewise evolve instead of being discarded every few levels. The invited degeneration is a permanent
 best-in-slot obligation that deletes later loot choice. Its required control
@@ -815,12 +831,21 @@ Bronzebeard's more important loot lesson is layered **deterministic bad-luck
 protection**, not additional slot-machine pulls. Shadows over Blackrock
 documents slot-targetable tier tokens, visible callboard progress, and
 boss-earned currency that eventually buys an exact item from a cleared raid.
-The dated [August 16 archive entry](https://ascension.gg/cs/changelog/2026/05/19)
-documents current-spec weighting plus 200-cache suppression after recycling;
-the [August 24 archive](https://ascension.gg/en/changelog/2026/07/30) adds a
-searchable vendor containing every Mythic-0 item, whose upgrade power is capped
-by the player's highest cleared key. [O] The archive routes are pagination
-artifacts, so the entry dates—not their URL dates—identify the changes.
+It also lets one earned slot token expose same-slot set pieces for alternate
+specializations as gold purchases. That is discovery-gated lateral access, not
+permission for a perfect counter wardrobe; an SS2 translation still needs a
+between-Circuit loadout lock and bounded Pivot. [O/A]
+
+A separate [August 16 Live-realm pagination snapshot](https://ascension.gg/en/changelog/2026?page=8)
+documents current-spec weighting plus 200-cache suppression after recycling.
+Because that entry is absent from the current Bronzebeard and CoA filters, it
+is comparison evidence, not evidence for either mode. The
+[Bronzebeard-filtered August 24 archive](https://ascension.gg/en/changelog/5)
+adds a searchable vendor containing every Mythic-0 item; the separate
+[Mythic+ release specification](https://ascension.gg/en/news/mythic-releases-on-warcraft-reborn/522)
+says those items can be upgraded only to the player's highest completed key.
+[O] Ascension's archive URLs are mutable pagination/filter views, so the entry
+dates and realm filters—not apparent date paths—identify the changes.
 Abstracted for a duel loop, the complete pattern is:
 
 1. suppress or convert duplicates;
@@ -867,9 +892,9 @@ between them.
 
 Current Ascension material describes Conquest of Azeroth as 21 authored
 classes with three specializations each, not a single unrestricted pool. [O]
-Source: [current overview](https://ascension.gg/en). The
-[official release overview](https://www.youtube.com/watch?v=pIPOCauIHKw) was
-published 2026-06-28 for the 2026-07-03 launch. [O] Its development history is
+Sources: [current overview](https://ascension.gg/en) and the
+[official Vol'jin timeline](https://ascension.gg/en/timeline/voljin), which
+records the July 3, 2026 launch and 21 classes. [O] Its development history is
 valuable because it documents why more options were removed or reorganized.
 The June 2023
 [talent overhaul](https://ascension.gg/en/news/conquest-of-azeroth-talent-overhaul/425)
@@ -910,10 +935,11 @@ dependency. A three-unit team is too small to absorb a
 required MMO role, and a deterministic duel is too short for hard denial to
 average out over many encounters.
 
-No current public CoA-specific bad-luck-protection system comparable to
-Bronzebeard's cache suppression or exact raid-item fallback was verified. [U]
-CoA shares broader Ascension content, but those Bronzebeard acquisition rules
-must not be projected onto it.
+A current [CoA-filtered August 24 entry](https://ascension.gg/en/changelog/4)
+verifies the searchable all-Mythic-0 upgrade vendor on CoA. [O] It does not
+verify the Live-realm 200-cache suppression, Bronzebeard's cleared-raid
+exact-item fallback, or Bronzebeard's highest-completed-key upgrade ceiling on CoA.
+Those narrower rules must not be projected across modes. [U]
 
 #### Combined conclusion from the current modes
 
@@ -945,7 +971,9 @@ in sections D/E.
 
 ### 2.4 Corroborating references that genuinely transfer
 
-Only three additional patterns earn a place here.
+The following patterns earn a place because each adds a distinct test or
+supplies unusually direct counter-evidence. They do not justify importing the
+source games' scale.
 
 #### Hades: difficulty as a player-authored constraint budget
 
@@ -976,6 +1004,83 @@ upgrades or resources while empowering enemies and eventually unlocking an
 additional boss. [O] The transferable pattern is a **paired bargain**: an
 optional power gain incurs visible future difficulty debt. Unit fusion, deck
 construction, and multi-floor wave routing do not transfer.
+
+#### Path of Exile: route specialization and bounded identity
+
+Path of Exile's current 3.28 Atlas makes map tiers generic while the player
+selects revealed locations, explores outward, and targets visible regional
+content/rewards. [O: current 2026 patch] The historical Siege of the Atlas
+description isolates the durable pattern: completion earns specialization
+points that steer which endgame content appears and which risks/rewards the
+player pursues. Its current Ascendancy page separately exposes twenty bounded
+class identities selected through a finite point layer. [O]
+
+What transfers is a **small post-cap route map** that steers opponent doctrine
+and reward family, plus a very small mutually exclusive identity layer whose
+nodes change behaviour. Routing-only choices can preserve combat-rule parity;
+identity nodes that change action semantics require the designed rule set.
+Literal consumable maps, trade/crafting markets, hundreds of nodes, kill-density
+rewards, Labyrinth gates, and twenty subclass-sized kits do not transfer. The
+degenerate result would be one profit route plus one mandatory identity and
+constant respec. Counter it with equal expected route efficiency,
+Circuit-length commitment, tiny sidegrade trees, and explicit action/control/
+role budgets. [A]
+
+#### Diablo: cap the board, diversify the route, reject the reset
+
+Diablo III introduced uncapped account-wide Paragon, then Season 29 capped
+assignable points at 800 while Blizzard stated that Paragon had become the
+dominant source of power and it wanted knowledge and gear to matter more. [O:
+historical live experiments] Diablo IV's historical 2.0 PTR likewise limited
+builds to five Paragon boards to concentrate decisions. These are official
+counter-evidence against an endless scalar point sink, not reasons to add a
+second SS2 board. [A]
+
+Diablo II: Resurrected's Terror Zones supply the narrower positive lesson:
+diversify the route to a finite cap rather than extend the cap through one
+unchanging grind. Diablo seasons do not solve endlessness; they reset progress,
+separate economies, and privilege scheduled restarts. For SS2, rotating or
+choosable opponent doctrines can preserve combat semantics when they change
+only content. Mandatory seasons, exclusive permanent combat power, shared
+Paragon carry/funneling, and real-time zone calendars are rejected. Keep a
+persistent career, asynchronous access, and provenance-labelled optional
+tracks. [O/A]
+
+#### Battle Brothers: telegraphed crisis chapters and soft endings
+
+Battle Brothers' original crisis design lets a campaign choose a random or
+specific late-game crisis, telegraphs it through a buildup, changes factions,
+enemy mixtures, contracts, and events, then treats victory as a soft ending;
+continuing eventually produces a different crisis. [O: 2016 original design]
+The transferable structure is a bounded **Crisis Circuit**: warning/preparation,
+a short coherent sequence, a climax/first clear, and the choice to retire or
+continue into a different chapter. This adds recurring context rather than a
+new scalar axis.
+
+Opponent order/roster/rewards can preserve combat-rule parity; crisis-specific
+combat modifiers require the designed rule set. Open-world travel, settlement
+destruction, twelve-unit permadeath attrition, and mass battles do not transfer.
+Full foreknowledge invites perfect counter wardrobes, no warning invalidates
+builds, and ignorable crises invite safe farming. Use partial warning,
+Circuit-locked kits, at least two viable response families, bounded/local
+consequences, and first-clear-heavy rewards. [A]
+
+#### Roguelite metaprogression: option breadth, not failure-funded power
+
+Hades' historical Mirror redesign paired permanent alternatives with only one
+active side per pair, staged unlocks, and full refund. Rogue Legacy 2 openly
+demonstrates the opposite model: repeated play can buy expansive permanent
+power, softened by optional House Rules. [O] The useful synthesis is narrow:
+failure and mastery may reveal matchup knowledge, presets, cosmetics, or
+mutually exclusive sidegrades, with correction between Circuits. They should
+not fund unbounded health/damage until a player outgrinds the duel.
+
+The degeneration is intentional-loss farming, veteran-account advantage, and
+eventually owning every active answer. Award most progress for first clears or
+mastery objectives rather than losses/turn count, cap any introductory vertical
+bonus early, preserve active-slot budgets, and provide catch-up. Intel,
+cosmetics, and presets preserve combat parity; behaviour sidegrades require the
+designed rule set. [A]
 
 ### 2.5 The seven principles to hold the later design against
 
@@ -1055,7 +1160,9 @@ A short deterministic duel magnifies every rule. One opponent doctrine and a
 few legible combatant identities can create more meaningful variety than
 hundreds of enemies or thousands of item copies. Randomness belongs primarily
 in what challenge/build is offered; once a fight begins, outcomes must remain
-ordered, replayable, and explainable through the resolver's RNG channel.
+deterministic, replayable, and explainable through a versioned resolver-owned RNG
+model. The classic path remains ordered; EP-A02 must select the designed path's
+public outcome/information contract.
 
 **Degeneration to watch:** affix combinations become unreadable, especially in
 3v3, or loot administration takes longer than combat. **Control:** small
@@ -1140,11 +1247,13 @@ viable slice.
 - [SynergiesMOD](https://steamcommunity.com/workshop/filedetails/?id=136232408),
   the [official Synergies collection](https://steamcommunity.com/sharedfiles/filedetails/?id=136429082),
   [LAO 2.0](https://steamcommunity.com/sharedfiles/filedetails/?id=185023302),
+  [LAO III](https://steamcommunity.com/sharedfiles/filedetails/?id=791856602),
   [Adventure Mode](https://github.com/tukkek/torchlight2-AdventureMode),
   [RnF Skill Spells](https://steamcommunity.com/sharedfiles/filedetails/?id=158678801),
   and [Torchlight II Essentials](https://steamcommunity.com/sharedfiles/filedetails/?id=138228035)
-  author pages. LAO and RnF are historical/removed Workshop references; they
-  document mod design, not current availability.
+  author pages. SynergiesMOD, LAO 2.0, LAO III, RnF Skill Spells, and Torchlight
+  II Essentials currently display removed/incompatible Workshop banners; their
+  surviving pages document historical author intent, not current availability.
 - Project Ascension's earlier classless-system record:
   [classless overview](https://ascension.gg/en/features/classless-wow),
   [Draft overview](https://ascension.gg/en/news/mastering-draft-mode/368),
@@ -1160,16 +1269,18 @@ viable slice.
   [realm status](https://ascension.gg/en/status), official
   [Season 10 overview](https://www.youtube.com/watch?v=98nvu-v5ruA),
   [Bronzebeard launch overview](https://www.youtube.com/watch?v=Q6Yg37OpR34),
-  and [Conquest of Azeroth release overview](https://www.youtube.com/watch?v=pIPOCauIHKw).
+  and the [Vol'jin timeline](https://ascension.gg/en/timeline/voljin).
 - Live 2026 Ascension articles and changelogs:
   [July 28 Season 10 corrections](https://ascension.gg/en/changelog/2026?page=26),
-  [August 2–4 stacking corrections](https://ascension.gg/en/changelog/2026/08/04),
+  [August 2–3 stacking corrections](https://ascension.gg/en/changelog/2026?page=20),
   [Shadows over Blackrock](https://ascension.gg/en/news/warcraft-reborn-shadows-over-blackrock/529),
   [mid-February Worldforged update](https://ascension.gg/en/news/mid-february-updates-heroic-world-bosses-worldforged-upgrades-and-more/525),
   [Raid Trials specification](https://ascension.gg/en/news/warcraft-reborn-march-updates-new-world-boss-mythic-11-15-alterac-valley-raid-trials-blood-bowl-and-more/526),
-  [August 16 cache suppression](https://ascension.gg/cs/changelog/2026/05/19),
-  [August 18 Worldforged cost cap](https://ascension.gg/en/changelog/1?page=4),
-  and [August 24 Mythic vendor](https://ascension.gg/en/changelog/2026/07/30).
+  [August 16 Live-realm cache suppression](https://ascension.gg/en/changelog/2026?page=8),
+  [August 18 Worldforged cost cap](https://ascension.gg/en/changelog/5?page=1),
+  [August 24 Bronzebeard Mythic vendor](https://ascension.gg/en/changelog/5),
+  [Bronzebeard Mythic+ upgrade ceiling](https://ascension.gg/en/news/mythic-releases-on-warcraft-reborn/522),
+  and [August 24 CoA Mythic vendor](https://ascension.gg/en/changelog/4).
 - Historical/pre-release Ascension design evidence: Bronzebeard's
   [July 2025 Alpha design](https://ascension.gg/en/news/bronzebeard-warcraft-reborn-the-next-chapter-unfolds/497)
   and Conquest of Azeroth's
@@ -1182,11 +1293,28 @@ viable slice.
   [Vol'jin](https://ascension.gg/en/timeline/voljin),
   [Dawnrise](https://ascension.gg/en/timeline/dawnrise), and
   [Darkmoon](https://ascension.gg/en/timeline/darkmoon).
-- Supergiant's [Pact redesign](https://www.supergiantgames.com/blog/hades-superstar-update-patch-notes/)
-  and [Pact enemy-perk changes](https://www.supergiantgames.com/blog/hades-the-nighty-night-update-patch-notes/).
+- Supergiant's [Pact redesign](https://www.supergiantgames.com/blog/hades-superstar-update-patch-notes/),
+  [Pact enemy-perk changes](https://www.supergiantgames.com/blog/hades-the-nighty-night-update-patch-notes/),
+  and historical [Mirror redesign](https://www.supergiantgames.com/blog/hades-the-nighty-night-update-patch-notes/).
 - Mega Crit's [Ascension announcement](https://steamcommunity.com/games/646570/announcements/detail/1665638172195983578)
   and [levels 16–20 update](https://steamcommunity.com/games/646570/announcements/detail/1706188954889923898).
 - Monster Train's official [Last Divinity overview](https://www.themonstertrain.com/dlc/the-last-divinity).
+- Path of Exile's current
+  [3.28 Mirage notes](https://www.pathofexile.com/forum/view-thread/3913392/filter-account-type/staff),
+  historical [Siege of the Atlas](https://www.pathofexile.com/siege), current
+  [Ascendancy classes](https://www.pathofexile.com/ascendancy/classes), and
+  historical [Ascendancy design goals](https://www.pathofexile.com/forum/view-thread/2090663).
+- Blizzard's historical
+  [Diablo III Paragon introduction](https://news.blizzard.com/en-us/article/12671560/patch-2-0-1-now-live),
+  [Season 29 Paragon cap](https://news.blizzard.com/en-us/article/23999068/season-29-visions-of-enmity-has-concluded),
+  [Diablo IV 2.0 PTR board limit](https://news.blizzard.com/en-gb/article/24130178/the-2-0-ptr-what-you-need-to-know),
+  [Diablo seasonal separation](https://news.blizzard.com/en-us/article/20635661/seasons-on-console),
+  current [Seasonal/Eternal distinction](https://news.blizzard.com/en-us/article/24267729/prepare-for-the-reckoning-lord-of-hatred-draws-near),
+  and [Terror Zones retrospective](https://news.blizzard.com/en-us/article/23935220/inside-battle-nethow-the-diablo-ii-resurrected-team-terrorized-sanctuary).
+- Overhype Studios' original
+  [Battle Brothers late-game crises design](https://battlebrothersgame.com/dev-blog-92-late-game-crises/).
+- Cellar Door Games' historical
+  [Rogue Legacy 2 v0.6.0 notes](https://www.cellardoorgames.com/roguelegacy2-patch/v060).
 
 ### Community sources used only for labelled illustrations
 

@@ -1,5 +1,25 @@
 # Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
+## 2026-08-31 Endless readiness update
+
+The docs-only branch `design/endless-progression-readiness` adds the
+[six-decision owner record](docs/design/endless-progression-decisions.md) and
+[MVP readiness record](docs/design/endless-mvp-readiness.md), refreshes the
+reference-game and SS2 mod-scene research, and red-teams the stable proposal.
+It implements no Endless mechanics and does not authorize implementation.
+
+Before any Endless code, the owner must accept EP-D01–EP-D06 and EP-A01–EP-A03,
+or supersede any of them with a fully normative, explicitly accepted replacement.
+A rejection or open revision remains blocking. The audit also requires complete
+designed combat and Pressure specifications, a JSON/u64 encoding decision, rule-contract
+v2/provenance, canonical active-battle state, collision-resistant durable
+digests, one atomic progression boundary, crash-safe settlement, and separate
+headless/playable gates. Playable work additionally needs an evidenced
+per-action animation-completion signal. The branch did not run capture tools,
+launch Ruffle, or touch parity evidence, candidates, classic rules, or the
+licensed installation. Its fresh-worktree verification profile is 584 tests:
+583 passed, one expected raw-trace archive check skipped, and zero failed.
+
 ## State at the end of the 2026-08-30 session
 
 22 promoted goldens. 584 tests, all passing. 36 commits this session, across a
@@ -199,9 +219,13 @@ on `fightMode` (the fixtures carry it now).
 
 ## The design track is deliberately quarantined
 
-A separate track researches endless progression, on branch
-`design/endless-progression` (PR #1), and it now carries a complete proposed
-Arena Circuit progression, loot, inventory, opponent and settlement design.
+PR #1 merged the quarantined Endless design into `main` at `e3f14aa`. Follow-up
+design-readiness work continues on `design/endless-progression-readiness`; the
+merged proposal carries the Arena Circuit progression, loot, inventory,
+opponent, and settlement design, but its six product decisions remain
+unapproved in the [owner decision record](docs/design/endless-progression-decisions.md),
+and the [MVP readiness record](docs/design/endless-mvp-readiness.md) keeps
+implementation blocked on its model and contract gates.
 
 **Design must never flow into candidate authoring.** A candidate fitted to a
 design is a candidate fitted to a hypothesis, and the capture that "confirms" it
@@ -219,8 +243,8 @@ brief into a full proposal.
 `Zanzagar/swords-and-sandals-2-multiplayer`; the `github` remote already points
 at the new URL. The local worktree directories and the `origin` bundle keep the
 old `ss2-team-arena-foundation` name **intentionally** — do not rename them or
-hand-edit worktree metadata. `package.json` still carries the old identity on
-`main`; the migration is part of PR #1 and lands when that merges.
+hand-edit worktree metadata. `package.json` on `main` carries the new package
+identity from merged PR #1.
 
 ## Working agreement for parallel agents
 

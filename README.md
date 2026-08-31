@@ -20,7 +20,7 @@ read-only. This is not yet a finished playable mod.
 | Shared team resolver | Implemented and tested for one to three combatants per team. 1v1, 2v2, and 3v3 use the same resolver. |
 | Vanilla parity | Partial and expanding. Promoted runtime goldens exist, but no complete runtime-verified SS2 rule set has been injected into the resolver. |
 | SS2 adapter and campaign layer | Asset-free state bridge, slot layout, presentation commands, acknowledgement bridge, and additive campaign-record schema have landed. Rendering, roster read-back, rewards, and licensed-build integration remain incomplete. |
-| Endless progression | Quantitatively diagnosed and specified in a reviewed design. No Endless rule set or progression implementation exists yet. |
+| Endless progression | Quantitatively diagnosed and specified in a research-backed design; owner decisions and readiness blockers remain open. No Endless rule set or progression implementation exists yet. |
 | Online multiplayer | Deterministic foundations exist; lobby, transport, authentication, reconnect, and desync recovery are planned. |
 
 The detailed and frequently changing delivery state lives in the
@@ -39,7 +39,7 @@ The detailed and frequently changing delivery state lives in the
 - Controller identity is separate from combatant and seat identity. Local,
   hot-seat, named remote, and AI controllers can coexist, and controller
   reassignment does not alter combat state.
-- Ordered labelled RNG, action logs, replay, JSON-safe snapshots, and
+- Ordered labelled RNG, action logs, replay, JSON-safe wire projections, and
   controller-independent combat hashes provide a host-authoritative foundation.
 - [`src/adapter/`](src/adapter) converts between vanilla-shaped and canonical
   state and emits inert presentation commands. Those commands have not proved a
@@ -63,9 +63,11 @@ separate:
 - **Endless path:** a future `endless-v0` rule set containing intentional mod
   mechanics. Before it can start, the shared rule-set contract must advance to
   v2 and require `designVersion`. Until a later verification-enum migration,
-  `endless-v0` remains `placeholder` with explicit `designIntent: designed` and
-  `runtimeVerified: false`. Its progression data uses a separately versioned
-  sidecar, and it never reinterprets a classic fixture or golden.
+  `endless-v0` remains `placeholder` with `runtimeVerified: false`; today its
+  human-readable provenance note carries designed intent. If v2 retains an
+  explicit `designIntent`, it must validate, project, hash, persist, and migrate
+  it. Its progression data uses a separately versioned sidecar, and it never
+  reinterprets a classic fixture or golden.
 
 Both paths may use the same team resolver, controller model, settlement gate,
 and deterministic protocol. They do not share an evidence claim.
@@ -95,18 +97,25 @@ and the required counter/rejection test. Names, rates, caps, unlock levels, and
 balance thresholds remain design assumptions until approved and tested.
 
 The first proposed proof is a deterministic 2v2, four-fight Contract loop.
-Before code, the six decisions named in the design must be approved or revised.
-The first enabling slices are shared rule-contract v2/design-version support and
-reviewable sidecar/snapshot specifications. Minimum canonical
-equipment/resources and durable settlement recovery follow before the headless
-Circuit loop; UI arrives afterward. None of those later slices blocks the first
-contract/schema change.
+Before code, each of the six product decisions and EP-A01–EP-A03 must be
+accepted or superseded by a fully normative, explicitly accepted replacement;
+rejection or an open revision remains blocking.
+The readiness audit also found three P0 model questions that approval alone
+does not close—career/challenge pacing, deterministic retry/seed shopping, and
+post-completion maintenance access—plus missing designed-combat budgets and an
+incomplete Pressure termination proof, and one incompatible JSON/u64
+persistence claim. Rule-contract v2, sidecar/snapshot, or `endless-v0` code
+remains blocked until their selected repairs/specifications are normative.
+Headless and playable proofs have different final gates; playable work also
+needs a real per-action animation acknowledgement signal.
 
 Read the work in this order:
 
 1. [progression diagnosis and transferable principles](docs/design/progression-diagnosis.md);
 2. [Swords & Sandals mod-scene survey](docs/design/swords-and-sandals-mod-scene-survey.md);
-3. [complete Endless progression-system design](docs/design/endless-progression-system.md).
+3. [complete Endless progression-system design](docs/design/endless-progression-system.md);
+4. [six owner decisions](docs/design/endless-progression-decisions.md); and
+5. [MVP implementation-readiness record](docs/design/endless-mvp-readiness.md).
 
 ## Evidence vocabulary
 
@@ -141,6 +150,8 @@ The primary technical sources are the
 - [quantitative progression diagnosis](docs/design/progression-diagnosis.md)
 - [mod-scene findings](docs/design/swords-and-sandals-mod-scene-survey.md)
 - [Arena Circuit progression design](docs/design/endless-progression-system.md)
+- [Endless owner decision record](docs/design/endless-progression-decisions.md)
+- [Endless MVP readiness record](docs/design/endless-mvp-readiness.md)
 
 ## Run the verification suite
 

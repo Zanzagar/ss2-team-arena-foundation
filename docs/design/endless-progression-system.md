@@ -5,7 +5,15 @@
 specification, not an implementation plan or authorization to change combat
 code, measured fixtures, the launcher, or the installed game.
 
-**Research date:** 2026-08-30.
+**Readiness warning:** the 2026-08-31 adversarial audit found open contradictions
+in career/frontier pace, retry RNG, and post-completion access, plus missing
+combat/Pressure specifications and an incompatible JSON/u64 persistence claim.
+The [owner decision record](endless-progression-decisions.md)
+and [MVP readiness record](endless-mvp-readiness.md) control whether any slice
+is eligible for separate implementation authorization. Where they flag an open
+gate, this proposal is not implementation-ready.
+
+**Research date:** 2026-08-30; readiness audit 2026-08-31.
 
 ## Evidence discipline
 
@@ -186,7 +194,7 @@ therefore do not coerce every participant into the grant channel. The settlement
 then advances the Circuit. A Practice battle also gets an attempt receipt but
 has no grant.
 
-Eligibility stores one frozen paid-slot classification per combatant--
+Eligibility stores one frozen paid-slot classification per combatant—
 `grantEligible`, `recordEligible`, or none--plus the independent boolean
 `clearEligible`:
 
@@ -334,9 +342,9 @@ already capped. [V/A]
 
 ## 2. The four-fight Arena Circuit
 
-An Arena Circuit is the repeatable unit. Four fights are long enough to test a
-locked build against more than one pressure and short enough for a local co-op
-session.
+An Arena Circuit is the candidate repeatable unit. Four fights are intended to
+test a locked build against more than one pressure while remaining a local co-op
+session-sized measurement boundary; D03's end-to-end timing gate may revise it.
 
 1. **Scout:** one disclosed doctrine and no positive rule modifier.
 2. **Foil:** a different primary doctrine chosen to ask a different question.
@@ -355,7 +363,8 @@ At Circuit start the team receives three persisted route offers. Each shows:
 
 The team selects one route and each combatant selects one personal hunt family:
 `weapon`, `armour`, `shield`, or `spell/technique`. The opponent recipes,
-reward plan, RNG cursors, and participating `combatantId` roster are then
+reward plan, noncombat generation cursors, any EP-A02-required public combat
+commitment/forecast state, and participating `combatantId` roster are then
 persisted. Active equipment, Rule Load, and roster lock for all four encounters.
 A disconnect may change that combatant's controller to AI, but no bench
 substitution may multiply rewards or bypass the series test.
@@ -364,13 +373,14 @@ A defeat does not regenerate anything. Doctrine, signature, liability, target
 policy, and every other decision-relevant fixed mechanic are disclosed before
 the first attempt; losing reveals no hidden module. Rematch exists only after
 team elimination—there is no voluntary restart action. Every Rematch restores
-the complete immutable attempt-start battle projection: health, armour, wards,
+the complete immutable non-RNG start projection: health, armour, wards,
 position, statuses, stamina, magicka, ammunition, per-battle charges, equipment
-durability, combat seed, and starting combat-RNG label counters/hash. Identical commands
-therefore replay identically. A changed policy can consume a different labelled
-draw sequence but cannot shop for a more favourable attempt seed or pad label
-counters with a restart. The loss log exposes only events already resolved, never
-the raw seed, unconsumed draw tape, or alternate-branch outcomes.
+durability, and other rule-readable state. Its new immutable attempt snapshot's
+combat RNG/information state follows EP-A02. Identical commands replay
+identically only from the same selected attempt state. No claim is made yet about
+same-seed Rematch, counterfactual forecasts, or post-loss seed evolution. The
+loss log exposes only events already resolved unless EP-A02 deliberately makes
+a broader public forecast part of play.
 
 Arena-Circuit carried Techniques use battle-local charges restored by Rematch.
 Any equipment-durability counter in designed mode is likewise battle-local and
@@ -391,8 +401,10 @@ terminal `source-forfeited`, clears any matching
 `grandfatherOvertimePotId`, and binds the prepared Recovery branch. Recovery or
 restart can never restore that pot. A crash exposes either all of that mutation
 or none; completion recorded after Concede ignores the terminal pot.
-The campaign then binds to a seed-committed zero-debt **Recovery Circuit** at
-the same challenge tier. This is also the only **fallback route**: its four
+The campaign then binds to a recipe-committed zero-debt **Recovery Circuit** at
+the same challenge tier. EP-A02 separately decides when its combat attempt seed
+comes into existence and what information is public. This is also the only
+**fallback route**: its four
 recipes, including the same queued milestone final if any, were persisted with
 the paid route before reveal. It writes attempt receipts but grants no XP,
 gold, cache, Marks, pity, target progress, Contract rank, or first-clear bonus.
@@ -401,13 +413,17 @@ advance `highestClear`, award only baseline narrative/source credit, and create
 the next frontier set under §3.1's shared next-set-kind rule. It never consumes
 or replaces a paid key.
 
-No route ballot reappears at that tier. Conceding Recovery restarts the same
-four recipes, seed, and clear-only state. The frozen `combatantId` roster stays
-the same; before the first Recovery attempt its custodians may choose one new
+No route ballot reappears at that tier. A permitted Recovery restart keeps the
+same four recipes and clear-only branch; its combat-attempt state follows the
+selected EP-A02 contract. The frozen `combatantId` roster stays the same; before
+the first Recovery attempt its custodians may choose one new
 loadout which then locks for all four fights. This makes retreat possible
-without creating extra paid encounters, RNG shopping, or a route/source reroll.
+without creating extra paid encounters or a route/source reroll. R-02 must prove
+that the selected combat-attempt information policy does not create RNG
+shopping.
 Recovery restart has the same between-attempt/unanimous rule and one idempotent
-restart receipt; it consumes no RNG and cannot repeat the one loadout choice.
+restart receipt; it consumes no noncombat RNG, changes combat-attempt state only
+as EP-A02 specifies, and cannot repeat the one loadout choice.
 
 This block structure asks a different question from a one-fight counter-pick:
 **what kit can cover a short, disclosed range of problems, and where will the
@@ -514,8 +530,9 @@ four-fight core:
 - **Overtime:** after an ordinary full-roster paid final consumes one unspent
   reward or record key for every frozen participant, the team may cash out each
   separately displayed personal bonus-pot outcome or unanimously risk the pots against one
-  of at most two additional seed-committed fights. A loss destroys only that
-  bonus pot, never already committed Circuit rewards. A pot is precommitted
+  of at most two additional recipe-committed fights whose combat-attempt seed
+  timing and forecast follow the selected EP-A02 contract. A loss destroys only
+  that bonus pot, never already committed Circuit rewards. A pot is precommitted
   with the Circuit plan and typed by its source key: a reward-key participant
   receives personal gold plus an optional record/title payload, while a
   record-key participant receives zero gold and a record/title payload only.
@@ -575,11 +592,12 @@ order and player questions*, not a claim about vanilla pacing.
 | 80–89 | Rival-led coalition encounters; fourth boss tests target priority and independent seat agency. | “Do we disrupt the leader, the escort, or the shared engine first?” |
 | 90–99 | Up to three compatible Contract debts; capstone route previewed one full Circuit early; no new active capacity. | “Which explicit weakness will I carry into the final exam?” |
 | 100 | Authored capstone; first Epoch Charter; permanent confirmation that raw and Rule Load growth have ended. | “Can this team answer the complete grammar without a level-stat escape hatch?” |
-| 101+ | Twenty-five-level Epochs; a lateral Mastery choice at least every three levels and an Epoch boss/Charter every 25. | “Do I discover a new family, deepen an alternate Form, or prune future offers?” |
+| 101+ | Twenty-five-level Epochs; until mechanical completion, a lateral Mastery choice at least every three levels, plus an Epoch boss/Charter every 25. Mastery cadence ends at completion; frontier fights use the separate typed-record rule in §1.2. | “Do I discover a new family, deepen an alternate Form, prune future offers, or record a completed frontier?” |
 
 ### 3.1 Career and clear transitions
 
-Exact XP amounts remain `[U/A]`, but the state transitions are normative:
+Exact XP amounts remain `[U/A]`. The following are candidate state transitions,
+not normative until EP-A01 resolves the career/frontier contradiction:
 
 - A combatant's **frontier challenge tier** is exactly `highestClear + 1`.
   Challenge entry is unlocked by the previous clear, not by career level or
@@ -638,10 +656,11 @@ Exact XP amounts remain `[U/A]`, but the state transitions are normative:
   final records `clearOnly: true`, grants nothing, and may add only the fixed
   baseline narrative/source credit declared in its prepared plan. A completed
   historical encounter replay has neither clear eligibility nor a new key.
-- Crossing career levels 20, 40, 60, 80, or 100 queues the corresponding
+- Under this candidate, crossing career levels 20, 40, 60, 80, or 100 queues the corresponding
   milestone boss for the next eligible Circuit final. The level gate is
-  authoritative; “roughly every fifth Circuit” is a pacing target to test
-  after the XP curve is authored, not a second schedule.
+  the proposed trigger. The former “roughly every fifth Circuit” target is
+  inconsistent with synchronized career/frontier pace and is rejected unless
+  EP-A01 explicitly replaces that synchronization model.
 - If mixed combatants queue different bosses, the next final uses the oldest
   pending gate (lowest required level, then stable boss ID). The clear grants
   milestone credit only to participating combatants that reached that gate;
@@ -660,13 +679,17 @@ cannot grow once per procedural fight forever.
 
 ### 3.2 Mastery offers
 
-At least every three levels, present three seed-committed choices. A larger
-system milestone may replace that level's Mastery screen, but no gap may exceed
-three levels:
+Until a combatant reaches mechanical completion, at least every three levels
+present three seed-committed choices. A larger system milestone may replace
+that level's Mastery screen, but no pre-completion gap may exceed three levels:
 
 1. one compatible with a currently equipped semantic tag;
 2. one coverage/counter option;
 3. one off-axis option.
+
+Completion ends this Mastery-offer cadence; it does not itself create a
+`recordFact`. The typed post-completion outcomes in §1.2 remain frontier-fight
+records whose optional payload may be cosmetic/title.
 
 The offer can unlock a Technique, Form, blueprint family, or later a pruning
 choice. It never increases Rule Load after level 50. Every tenth level includes
@@ -759,8 +782,8 @@ combatants, and `team.charterAssignments` retains only an index currently used
 by one of them, its one queued next boundary, or an active plan/snapshot. Thus it
 holds at most `persistentCombatantCount + 1` entries (four). Once no such
 reference exists, an atomic compaction preserves the already-updated deck,
-three-entry recent window, `highestCompactedEpochIndex`, and saturating per-
-Charter clear/record counters (`min(old + 1, 2^32 - 1)`), then deletes the
+  three-entry recent window, `highestCompactedEpochIndex`, and saturating
+  per-Charter clear/record counters (`min(old + 1, 2^32 - 1)`), then deletes the
 assignment. If a lagging
 combatant later reaches a compacted index, that band derives
 `standard-catchup` without a new ballot or deck/window mutation and without
@@ -772,8 +795,9 @@ Load or base budgets.
 Each personal `charterClearLedger` is likewise keyed only by the finite current
 Charter catalog ID and stores highest cleared Epoch plus a saturating count; it
 never stores one key per Epoch. Exceptional recent boundary receipts remain
-inside the shared 32-detail window and their u64 high-water makes older replay
-rejectable.
+  inside the shared 32-detail window; the R-06-selected high-water encoding
+  makes older replay rejectable without pretending JSON numbers can represent
+  every unsigned 64-bit value.
 
 At each Epoch boundary, the combatant attunes at most twelve known Rule effects
 into an **Epoch Library**. Four Rule Load is equipped from those twelve for a
@@ -841,15 +865,16 @@ receipt. No wholesale reattunement is legal after that preview, and no later
 Circuit in the same band reruns the assignment ballot.
 
 The initial content target is four mechanical Epochs (levels 101–200), not a
-claim of endless novelty. When all authored mechanical options are resolved,
-the combatant records `mechanicalCompleteAtReceipt`: future personal reward
-plans stop gold, caches, Marks, pity, and target progress and instead award
-one `recordEligible` `recordFact` whose `xpDelta` may coexist with zero or one
+claim of endless novelty. The current completion candidate records
+`mechanicalCompleteAtReceipt`: future personal reward plans stop gold, caches,
+Marks, pity, and target progress and instead award one `recordEligible`
+`recordFact` whose `xpDelta` may coexist with zero or one
 cosmetic/title/seeded-record payload; both zero XP and `payloadKind: none` form
-the explicit no-outcome. Existing currency remains
-spendable on known identities but no new mechanical currency is issued. One
-completed player does not suppress another eligible player's rewards. That is
-a truthful completion state, not a design failure.
+the explicit no-outcome. Existing currency remains spendable and one completed
+player does not suppress another eligible player's rewards. R-03 showed that
+zero future mechanical income can strand discovered-but-unretained identities,
+so this terminal economy is **not approved** until EP-A03 supplies a progressive,
+zero-copy-growth maintenance/reconstruction contract.
 
 If completion is recorded while the current frontier set is reward-kind, its
 ID becomes the completion receipt's sole grandfather. At most that set's four
@@ -1253,20 +1278,25 @@ team-size-normalized and stack 8 arrives by cycle 14. `[A]`
 This late floor does not alter opening probabilities and does not decide a
 fight by an arbitrary score. Define each target's
 `hitsRemaining = ceil(remainingDurability / ceil(pressureDurability / 5))`.
-After stack 8, the sum of all opposing `hitsRemaining` values plus remaining
-approach debts is strictly decreasing on every scheduled action. Five
+After stack 8, the intended sum of all opposing `hitsRemaining` values plus
+remaining approach debts is strictly decreasing on every **resolved Pressure
+action**. Five
 direct-damage actions exhaust any one target's Pressure-entry snapshot. For `n` seats per
 team, cycle 14 has used at most `28n` actor-actions, all living fighters add at
 most `2n` approach actions, and after at most `10n - 1` further direct-damage
 actions the pigeonhole principle gives one team at least `5n` attacks. Dead and
 non-snapshot targets are illegal, so `5n` such attacks exhaust all `n` opposing
 snapshots.
-The resulting authored cap is `40n - 1`: 39 actions in 1v1, 79 in 2v2, and 119 in 3v3. The
-exact cycle, floor, and durability projection must still pass exhaustive state
-tests before implementation.
+The candidate authored cap is `40n - 1`: 39 resolved actor-actions in 1v1, 79
+in 2v2, and 119 in 3v3. This is not yet a termination proof: R-05 requires the
+scheduler to turn every stack-8 living-seat opportunity, including an otherwise
+frozen/skipped turn, into a forced Pressure action and to bound scheduled
+opportunities separately from resolved actor-actions. The exact cycle, floor,
+integer recovery rule, durability projection, and both counters must pass
+exhaustive state tests before implementation.
 
-The resolver/canonical battle state owns cycle-wrap increments and scheduled-
-turn expiry such as Control Fatigue. The selected rule set reads that state to
+The resolver/canonical battle state owns cycle-wrap increments and
+scheduled-turn expiry such as Control Fatigue. The selected rule set reads that state to
 define legal actions, recovery scaling, and action outcomes; it does not own or
 advance the scheduler clock. [V/A]
 
@@ -1772,7 +1802,7 @@ vanilla fields. A conceptual v1 record is:
 
 The sidecar schema may begin at v1, but its rule descriptor targets a required
 **rule-set contract v2**. Before `endless-v0` can start a battle or persist a
-campaign, v2 must add a required nonnegative integer `designVersion` to the
+campaign, v2 must add a required nonnegative safe-integer `designVersion` to the
 descriptor validator; return it from `describeTeamRuleSet`; project it into
 `team-battle.rules`; and include it in battle-start hashes, results, recipes,
 reward outcomes, items, and receipts. Lobby/adapter validation rejects a peer,
@@ -1781,6 +1811,12 @@ classic descriptors migrate explicitly to `designVersion: 0`; no runtime path
 silently invents a missing value. The current contract/projection does not yet
 do this, so this is a blocking seam change, not a field the sidecar may pretend
 is already authoritative. [V/A]
+
+The example's explicit `provenance.designIntent` is also future v2 shape, not a
+current authoritative field: today's validator accepts it without semantics and
+`describeTeamRuleSet` drops it. Contract v2 must either validate, describe,
+project, hash, and persist it, or remove it and rely only on the human-readable
+provenance note. It may not be a UI-only identity claim. [V/A]
 
 The example deliberately retains the currently legal `placeholder`
 verification with `runtimeVerified: false` and an explicit designed-intent note.
@@ -1817,23 +1853,29 @@ At minimum, persist independent deterministic streams for:
 Presentation order, controller identity, wall clock, and reload count never
 seed any of them. Preparing the paid+Recovery plan advances the route stream
 once before reveal. After that commit, Concede and every Recovery restart
-advance **no** RNG stream. Only a final-clear receipt may request the next route
-offer draw, keyed idempotently by the canonical hash of sorted newly eligible
-personal `frontierRewardSetId` values; replay returns the same offers/cursor.
+advance **no noncombat** RNG stream. The selected EP-A02 model defines whether
+an irreversible loss/Concede receipt derives combat-attempt state. Only a
+final-clear receipt may request the next route offer draw, keyed idempotently by the
+canonical hash of sorted newly eligible personal `frontierRewardSetId` values;
+replay returns the same offers/cursor.
 None can shift a future level's Mastery choices.
-Changing a reward animation cannot perturb a combat roll. A Rematch restores
-its encounter's same combat seed and attempt-start labelled-cursor state rather
-than consuming a new attempt seed.
+Changing a reward animation cannot perturb a combat roll. However, the original
+same-seed Rematch plus independent per-action/target semantic-label proposal was
+rejected by the 2026-08-31 adversarial audit: a seed-aware player can shop
+counterfactual hit, damage, critical, proc, status, and target labels. No Endless
+combat RNG model is currently approved. See readiness R-02 and architecture
+disposition EP-A02. [D/U]
 
-`endless-v0` may not use one action-agnostic global tape that a harmless action
-can advance to change a later hit. Each combat draw is addressed by a stable
-semantic tuple such as `(battleSeed, sourceCombatantId, targetCombatantId,
-actionOrEffectId, rollKind, occurrenceOrdinalForThatLabel)`. The canonical RNG
-projection persists the per-label occurrence counters/hash. An unused roll is
-never drawn; presentation, no-op, controller, logging, and a different semantic
-label cannot advance another label's occurrence. Attempt count and prior losses
-are not inputs. This is deterministic domain separation, not a secrecy claim:
-the design must remain sound even if a local player can inspect its seed.
+Any replacement must preserve the valid requirements: classic ordered tapes
+remain unchanged; an unused/presentation/no-op/logging call consumes nothing;
+all next-draw-relevant state is projected and hashed; reload repeats committed
+state; and the model remains sound with local seeds visible. EP-A02 must first
+select a branch-oracle-safe public coupling/forecast contract. Only after that
+foundation is selected may it choose exact retry state or a persisted
+finite-attempt seed sequence. Recovery and Overtime must separately define when their
+attempt seed becomes actionable. Until EP-A02 is selected, same-seed Rematch,
+per-label counters, and attempt-seed evolution are unapproved, and seed
+evolution alone is not a branch-oracle repair.
 
 ### 10.3 Attempt settlement, grants, and clear-only transitions
 
@@ -1845,8 +1887,9 @@ Use this flow:
 
 1. Before the encounter's first attempt, persist its opponent recipe,
    participating personal reward/record slot-key values, complete corresponding
-   outcomes, and one encounter combat seed/label-cursor state inside the active
-   `circuitPlanEnvelope`. Assistance stores only the base recipe hash, removed
+   outcomes, and only the EP-A02-selected public combat commitment/forecast
+   inputs that exist at plan time inside the active `circuitPlanEnvelope`; this
+   does not assume an attempt seed already exists. Assistance stores only the base recipe hash, removed
    modifier ID, definition version, derived assisted hash, and alternate outcome
    IDs under the **same** personal keys; a pure versioned function derives the
    recipe. Selecting it atomically tombstones every full-rank sibling and stale
@@ -1855,16 +1898,18 @@ Use this flow:
    namespace after the ordinary plan commits.
 2. Starting an attempt atomically reserves a unique `battleSequence` and
    freezes the encounter, branch/recipe and definition hashes, roster, loadout,
-   selected combat seed/label counters, completion identity, scheduler, every
+   selected combat RNG/information model and this attempt's state, completion identity, scheduler, every
    combatant's health/armour/ward/position/resource/status state, per-battle
    charges, and durability in a compact immutable `attemptStartSnapshot`.
-   Ordinary Rematch can be created only from those bytes. Assistance gets one
+   Reloading that active attempt uses those exact bytes. A Rematch copies the
+   frozen non-RNG start fields and applies EP-A02's selected retry transition to
+   create a new immutable attempt snapshot. Assistance gets one
    new derived-branch start snapshot; Recovery's one allowed loadout gets one
    new Recovery start snapshot. Neither can mutate the paid snapshot.
    Individual knockouts do not settle.
    After each resolved actor-action, the active `team-battle` store atomically
    checkpoints the same `battleSequence`, stable command operation ID,
-   canonical combat/scheduler state, label counters, event high-water, and
+   canonical combat/scheduler/RNG state, event high-water, and
    bounded log append. Retrying a command returns its recorded event or resolves
    it once; it never draws twice.
 3. Team elimination arms the result. Before passing the matching animation
@@ -1874,7 +1919,7 @@ Use this flow:
    journal**. The blob contains campaign/encounter/battle IDs and versions,
    branch/recipe and loadout hashes, frozen result, completion token,
    acknowledgement evidence, canonical combatants/resources/statuses,
-   scheduler/cycle/Pressure state, and combat seed/label counters. Its content
+   scheduler/cycle/Pressure state, and complete combat RNG state. Its content
    hash verifies the embedded bytes but never replaces them or points only to a
    mutable `team-battle` projection. Only after that atomic write may the
    resolver latch and invoke its callback. [V/A] At most one pre-ack blob exists
@@ -1883,9 +1928,10 @@ Use this flow:
    keyed by
    `campaignId + encounterInstanceId + battleSequence + completionToken` and
    atomically commits the result plus the applicable per-combatant transitions:
-   - **ordinary paid/Recovery/Practice loss:** write a zero-grant attempt receipt, advance the
-     encounter's attempt count, and preserve its recipe, reward plan, fixed
-     start snapshot, and unconsumed eligibility keys for Rematch;
+    - **ordinary paid/Recovery/Practice loss:** write a zero-grant attempt receipt, advance the
+      encounter's attempt count, and preserve its recipe, reward plan, frozen
+      non-RNG restart source, EP-A02 retry state, and unconsumed eligibility keys
+      for Rematch;
    - **`grantEligible` win:** verify and consume each unspent participating key,
      add its precommitted XP/currency, persist its personal reward outcome,
      update pity/target state, and write its grant fact. If this is the frontier
@@ -1931,8 +1977,9 @@ Use this flow:
    `lastAppliedBattleSequence`, and clears both
    `pendingAttemptSettlement` and its embedded pre-ack bytes. A duplicate,
    stale, consumed-key, reordered, mismatched, or second next-frontier intent is
-   rejected without mutation. The attempt-start snapshot remains only while the
-   encounter can still Rematch and is garbage-collected after branch completion.
+    rejected without mutation. The last settled-loss non-RNG restart source and
+    EP-A02 retry state remain only while the encounter can still Rematch and are
+    garbage-collected after branch completion.
 6. On load, a matching `ack-prepared` record with no receipt rehydrates a fresh
    resolver from the embedded bytes after validating their hash, schema/version,
    battle identity, result, and completion token, then replays the recorded
@@ -1952,8 +1999,9 @@ Use this flow:
    the exact last durable action checkpoint; `decided` without `ack-prepared`
    rehydrates that decided checkpoint and re-presents the same pending
    acknowledgement. None allocates a new sequence, restores an earlier action,
-   writes an attempt receipt, or exposes Rematch. Only a settled-loss receipt
-   authorizes constructing a Rematch from the attempt-start snapshot.
+    writes an attempt receipt, or exposes Rematch. Only a settled-loss receipt
+    authorizes constructing a Rematch from the frozen non-RNG restart source and
+    the retry transition selected by EP-A02.
 7. A reward claim, equip, locker transfer, trade, Forge, salvage, or other sink
    is a separate idempotent mutation. Each carries a stable operation ID, an
    actor-scoped monotonic sequence, and expected entity version. The journal
@@ -2028,13 +2076,12 @@ These are uncompressed JSON design estimates, not measured saves:
 
 Growth bounds are part of the schema: at most three persistent members and
 three persistent combatants, at most four live Charter assignments plus one
-compacted high-water/counter summary, and only current/next route offers. Use
-fixed-width unsigned 64-bit canonical integers for level/Epoch/challenge,
-sequence, and high-water counters (smaller declared fields may use u32); never
-an arbitrary-precision decimal that grows in bytes. Overflow rejects the next
-mutation with a diagnostic rather than wrapping. That finite bound is far beyond
-practical play and is consistent with this document's rejection of literal
-infinite novelty.
+compacted high-water/counter summary, and only current/next route offers. R-06
+must select one authoritative counter representation before schema authoring:
+safe JSON integers, canonical fixed-width strings, or a binary u64 format.
+Smaller declared fields may use u32. The selected finite encoding rejects the
+next mutation with a diagnostic before overflow rather than wrapping; it may
+not use an arbitrary-precision decimal whose bytes grow without bound.
 use phase-exclusive opponent storage: a paid Circuit holds four core plus four
 precommitted Recovery recipes (eight); Assistance adds only one versioned
 module-removal delta/outcome pointer, not a ninth recipe; after Concede the paid
@@ -2067,7 +2114,7 @@ bitsets, not copied definitions.
 | Epoch attunement/prune/retirement and team Charter assignments/deck | Bounded IDs/bitsets | 1–2 KB |
 | Recent mixed receipts/high-water checkpoints | 32 detailed receipts | 4–8 KB |
 | Active six-combatant battle base | Without an unbounded log | 5–10 KB |
-| Immutable Rematch attempt-start snapshot | At most one active branch | 5–10 KB |
+| Immutable active-attempt start / Rematch non-RNG restart source | At most one active branch | 5–10 KB |
 | Embedded immutable pre-ack snapshot | At most one while `ack-prepared` | 5–10 KB |
 | Bounded 120-action event history | Roughly two 150 B events/action | 36 KB |
 
@@ -2075,10 +2122,12 @@ The listed worst-live-state subtotal is approximately **124–154 KB** before
 JSON key/allocator overhead. Budget **150–200 KB** for the full campaign plus
 active battle, then
 replace estimates with measured serializer fixtures. The smaller two-combatant
-MVP target remains below 100 KB at its 80-action cap and smaller item/catalog
-bounds **while `ack-prepared` and both immutable snapshots are live**; that is a
-measured acceptance gate, not a consequence asserted from the full-design
-estimate.
+MVP planning target remains below 100 KB at R-05's candidate 79-action bound and
+smaller item/catalog bounds **while `ack-prepared` and both immutable snapshots
+are live**. That target cannot pass the current 64 KiB backend by definition.
+The actual acceptance gate is measured worst-live serialized bytes plus explicit
+overhead below the configured atomic backend limit with margin; raising and
+versioning that limit is required if the measured envelope does not fit.
 Storage volume is less risky than migration, ownership, idempotence, and
 unbounded event history.
 
@@ -2096,7 +2145,7 @@ existing semantics; it does not mean the campaign itself is vanilla.
 | Already-capped Speed/ammunition axes | Designed allocation/reward authoring and UI; it does not change mapped classic formulas. | Offer dead Speed after 40 or fictional ammunition capacity after level 45, creating fake progression. | Marginal-projection validator removes unchanged choices; audit Speed 39/40/41 and career levels 44/45/46/100 and reject any displayed vertical choice with a byte-identical combat projection. |
 | Frontier paid/clear eligibility | Campaign challenge/reward state; no classic combat change. | Hold a tier, farm fresh keys/Marks/pity, or clear-only/carry far ahead then claim high-tier rewards. | Initialize one four-key set; separate grant from clear; closed slots never reopen; only paid grants mutate reward channels/Trophy source; cap each personal reward budget to career tier; either frozen final creates at most one next set. Reject hold/farm/skip/carry policies. |
 | Four-fight Circuit and build lock | Campaign state/UI; classic-compatible only for existing actions. | Find one universal kit or Concede until a better fallback appears. | Scout/foil/mixed/final grammar, fixed eligibility keys, and the same precommitted Recovery recipes/source credit after every Concede; reject if removing the lock leaves the same policy or repeated Concede changes route/source odds. |
-| Loss log/Training Assistance | Campaign reward/recipe state/UI; selected boss modules may use designed semantics. | Scout a fixed RNG tape, pad labels, preserve two sibling keys, or deliberately fail into an easier farm. | Full attempt-start restore, semantic-label RNG, resolved-events-only log, no voluntary restart, and atomic same-key Assistance delta after three boss losses; include all scouting actions and reject if an intentional-loss/padding policy improves progression per total resolved action. |
+| Loss log/Training Assistance | Campaign reward/recipe state/UI; selected boss modules may use designed semantics. | Scout a fixed RNG branch, exploit a private forecast, preserve two sibling keys, or deliberately fail into an easier farm. | Exact active-attempt restore plus the selected EP-A02 Rematch transition, information-parity and white-box policy tests, no voluntary restart, and atomic same-key Assistance delta after three boss losses; reject if seed inspection, intentional loss, or padding creates a material private advantage. |
 | Shared-decision protocol | Campaign member/ballot state/UI; no combat-rule change. | Host chooses everything, hot-seat fighters multiply votes, or one controller destroys allied keys with Concede. | One vote per custodian, ranked route ballot, unanimous frozen electorate for spend/risk/Concede/Recovery restart, timeout=no, and atomic forfeiture; test ties/disconnect/handoff/crash. |
 | Champion Gauntlet/Overtime variants | Campaign schedule/reward; modifiers/Laws use their selected rule set. | Cool a high-tier run with allies/Assistance, strand a completed roster behind a grant-only cooldown, redirect completed-player gold, or reload to protect a lost pot. | Freeze entry tier/roster and decrement only on three same-roster, same-or-higher-tier full-rank non-Assistance paid final receipts that consume every reward/record key; no Gauntlet Overtime; typed reward-key gold/record versus record-key record-only pots and atomic risk receipts; reject dominant rotation/risk/cash-out. |
 | Route offers | Campaign generator/save/UI. | Reload until the best route appears. | Persist all offers before display; 100 reloads must be byte-identical. |
@@ -2115,7 +2164,7 @@ existing semantics; it does not mean the campaign itself is vanilla.
 | Pursuit Step | Designed movement/resource state. | Make Charge the universal answer or create free infinite pursuit/kiting. | Enemy-created-range trigger keyed to the equipped source actor, that actor's immediate-next-Charge expiry, rounded surcharge, no extra action, Pressure fallback; search retreat/Charge cycles and reject strict movement dominance. |
 | Sideboard/Pivot | Campaign/loadout state/UI. | Perfect counter-respec before every fight. | Two reserves, one swap per Circuit after fight two, route-level not exact preview; reject if adaptation has no opportunity cost. |
 | Contracts/Arena Laws | Content-only debts may be classic-compatible; semantic debts use designed rules. | Farm the easiest debt/reward pair or stack multiplicative debts. | Interaction-priced rewards, family exclusions, first-clear emphasis, standard route always available; lower mode must not be fastest hard-mode power. |
-| Arena Pressure | Resolver/canonical state owns cycle lifecycle; designed rules own recovery, legality, and outcomes. | Stall until the floor, attack summons/objects, redirect mandatory damage, or exhaust every ordinary attack. | Stack-8 living-seat target set, non-seat removal without procs, monotone hits/debt measure, universal Advance/Strike and nondivertible one-fifth floor, 40/80/120 caps, no turn-count reward; graph-search every target/death/resource/status state. |
+| Arena Pressure | Resolver/canonical state owns cycle lifecycle; designed rules own recovery, legality, and outcomes. | Stall until the floor, attack summons/objects, redirect mandatory damage, or exhaust every ordinary attack. | Stack-8 living-seat target set, non-seat removal without procs, monotone hits/debt measure, universal Advance/Strike and nondivertible one-fifth floor; R-05 must prove the candidate 39/79/119 bounds independently for scheduled opportunities and resolved actor-actions. No turn-count reward; graph-search every target/death/resource/status state. |
 | Doctrine opponents | Existing-record doctrines may be classic-compatible; new AI/target policy is designed. | One counter build trivializes every recipe. | Small rotating vocabulary and composition matrix; at least three full-design build families should lead at least 15% of cells each. |
 | Procedural champions | Campaign generator plus designed modifier catalog. | Affix soup, hidden immunity, or stat-check. | One signature/one liability, fixed module budget, exclusions, two viable families, preview; reject unreadable or no-counter recipes. |
 | Persistent rivals | Campaign state; designed AI only if memory changes policy. | Sandbag, win once in a fake kit, or create runaway exact mirroring. | A remembered tag must appear in two of the last three victories, with one replaceable broad counter and fixed ±15% budget; adversarial loss and tag-spoof victory policies must not improve later win rate or progression. |
@@ -2134,7 +2183,7 @@ existing semantics; it does not mean the campaign itself is vanilla.
 | Co-op target/control safeguards | Designed AI/control rules. | Focus one seat before it acts, fixed buff opener, support appliance. | Telegraphed Focus, fatigue, strongest-only groups, self-capable kits; at least 95% of Standard seed fights give every starting seat one resolved action. |
 | Epoch/Charter progression | Campaign content/state/UI; semantic Laws designed. | Per-Circuit ballots reroll Laws, later cards never enter, history grows forever, or retire/Prune fakes completion. | Formula-queued bosses and receipt-backed index; deterministic card insertion/mapping; max-four live assignments plus Standard catch-up compaction; three-decline retirement; full-potential completion/reopen tests. |
 | Sidecar save and versioned provenance | New persistence layer plus rule-contract v2; classic fields untouched. | Upgrade strands a live result/offer, balance reinterpretation, or corrupt migration. | Validate/hash version triples; settle/claim under pinned old implementation; migrate only clean or transform escrow by explicit receipt; idempotent mappings/quarantine and cross-version lobby rejection. |
-| Isolated deterministic RNG streams | Campaign generator, selected rule set, canonical combat state, and persistence. | Noncombat calls perturb combat, filler actions pad a tape, or repeated Recovery pads future routes. | Independent streams, semantic-label counters, zero draws after plan preparation on Concede/restart, and one set-keyed next-route advance; perturb/replay all inputs. |
+| Isolated deterministic RNG streams | Campaign generator, selected rule set, canonical combat state, and persistence. | Noncombat calls perturb combat, action alternatives become independent lottery tickets, or Recovery/Overtime exposes a private future. | Independent noncombat streams, a selected EP-A02 combat model with complete projected state, one set-keyed next-route advance, and white-box information/policy tests; perturb/replay all inputs. |
 | Circuit plan, attempt receipts, and grant/clear transitions | Persistence plus existing settlement callback. | Process kill restarts an attempt, latch loses payout, Overtime loss preserves pot, or duplicate creates a set. | Durable per-action checkpoints and exact-state load; embedded pre-ack bytes; atomic paid/record/clear/Practice/Overtime classification, key/set/pot/receipt mutation, and fault tests at every boundary. |
 
 ---
@@ -2217,29 +2266,31 @@ not claim current balance.
 - One hundred reloads before/after route reveal, reward reveal, battle,
   each durable action checkpoint, `decided`, `ack-prepared`, attempt settlement,
   Concede/Recovery restart, and claim produce identical IDs, recipes,
-  candidates, cursors, events, and grants. After plan preparation, every
-  Concede/Recovery restart leaves every RNG cursor byte-identical; the next
-  frontier advances the route cursor once under its set ID.
+  candidates, committed state, events, and grants. After plan preparation,
+  Concede/Recovery restart leaves every **noncombat generation** cursor
+  byte-identical; combat-attempt state changes only as the selected EP-A02 contract
+  derives from an irreversible receipt. The next frontier advances the route
+  cursor once under its set ID.
 - Every persisted battle/result, opponent recipe, personal reward outcome,
   item, transaction receipt, and migration result identifies campaign,
   `ruleSet` ID/contract/design version, generator ID/version where applicable,
   and definition version; a cross-version lobby or claim is rejected rather
   than silently reinterpreted.
-- Starting from one byte-identical attempt-start snapshot, combat seed, and command
+- Starting from one byte-identical attempt-start snapshot, combat RNG state, and command
   sequence, perturb route, Mastery, opponent, reward, presentation order,
   controller handoff, and wall-clock inputs independently. Combat events,
-  outcome, and combat RNG label counters must remain byte-identical; each noncombat
+  outcome, and next-draw-relevant combat RNG state must remain byte-identical; each noncombat
   perturbation may advance only its declared stream. Concede/Recovery cannot
-  alter a level-keyed Mastery offer, and Rematch restores every canonical
-  resource/status/durability/charge byte plus the same combat seed/counters
-  rather than selecting another.
+  alter a level-keyed Mastery offer. Rematch/retry behavior follows the selected
+  EP-A02 model and cannot be inferred from this gate.
 - Compare continuing after a bad opening, intentional elimination, filler/action
   reordering, and one or more learned Rematches against the best honest policy.
-  Count scouting attempts' actions in the denominator. Unrelated semantic labels
-  may not shift another label's roll opportunity; reject if loss/padding changes
-  the opportunity set or improves expected progression per total resolved
-  actor-action beyond the 5% policy tolerance. Strategic learning may change
-  commands, but no attempt count or prior result enters RNG.
+  Count scouting attempts' actions in the denominator, but also compare direct
+  seed inspection—which costs zero actions—against the exact UI/log information.
+  Reject private counterfactual access or any seed-aware policy advantage beyond
+  the approved tolerance; if forecasts are intended gameplay, the UI must expose
+  byte-identical information. Attempt count/prior result may enter RNG only if
+  EP-A02 selects and specifies persisted post-loss seed evolution.
 - Attempting to substitute a bench `combatantId`, active item hash, or Rule Load
   after Circuit lock is rejected without mutation. AI controller handoff for a
   locked combatant remains legal and changes none of those hashes.
@@ -2297,8 +2348,9 @@ not claim current balance.
 - Exercise paid+Recovery recipes, Assistance delta, pending escrows, Overtime
   phase, attempt-start snapshot, and live `ack-prepared`; assert no phase exceeds
   eight full recipes and all compaction waits for the receipt it depends on.
-- MVP campaign plus active battle remains below 100 KB at its action cap while
-  both immutable snapshots and live `ack-prepared` are present.
+- MVP campaign plus active battle, both immutable snapshots, live
+  `ack-prepared`, and serialization overhead remain below the configured atomic
+  backend limit with margin at the proved R-05 action/opportunity bounds.
 
 ### 12.5 Fresh-save progression and economy
 
@@ -2322,9 +2374,10 @@ not claim current balance.
   same-rarity general drop throughput, or improves higher-tier progression by
   farming a cleared tier. Explicitly simulate refusing the next frontier clear:
   no new paid key, XP, cache, Mark, pity, or boss progress may be created.
-- Simulate three paid wins, Concede, and arbitrarily many restarts of the same
-  precommitted Recovery branch. The three consumed slots and one forfeited slot
-  remain closed; no route/source ballot or recipe/seed changes. Recovery fights
+- Simulate three paid wins, Concede, and every restart permitted by the selected
+  EP-A02 contract on the same precommitted Recovery branch. The three consumed
+  slots and one forfeited slot remain closed; no route/source ballot or recipe
+  changes, while combat-attempt state follows EP-A02. Recovery fights
   one through three advance only clear-only branch state; its final may advance
   `highestClear` and baseline narrative/source credit but cannot mint a fifth
   payout, Trophy count, or debt credit. That final atomically creates exactly
@@ -2482,19 +2535,33 @@ that candidate classic observations are promoted:
 | Launcher entry | None. | None. | None. | None. | Fixed launcher registry. | Separate integration. |
 
 There is no honest “rule-set-only playable build” today: the inexpensive
-content/rule seams still depend on missing campaign persistence, canonical
-equipment/resources, or presentation. The critical path is:
+content/rule seams still depend on campaign persistence, structured canonical
+equipment/status state, or presentation. Headless and playable proofs have
+different final gates. The following is a **future dependency order**, not
+implementation authorization:
 
-1. approve and implement rule-contract v2 (`designVersion` validation,
-   projection, and hashing), the sidecar schema, stable IDs, labelled RNG
-   streams, and settlement-repair snapshots;
-2. add the minimum canonical item/resource/status state and deterministic
-   serializer;
-3. implement the eight-effect `endless-v0` rule slice and loadout validator;
-4. implement headless Circuit/opponent/reward generation and adversarial tests;
-5. add the two-member route/Armory/reward UI;
-6. expand content, then add rivals, locker/trade, and full 3v3 presentation;
-7. consider launcher exposure only after the headless/UI slice is accepted.
+1. accept each of the six product decisions in §15 and EP-A01–EP-A03, or
+   supersede it with a fully normative, explicitly accepted replacement;
+   rejection/open revision remains blocking. Complete R-04–R-06 before their
+   owning slices;
+2. specify and review rule-contract v2 (`designVersion` validation, projection,
+   hashing, and explicit classic migration), the selected versioned Endless
+   combat RNG/information contract, the persistence
+   transaction boundary, sidecar/active-battle schemas, stable IDs, and
+   settlement repair;
+3. author the missing normative numeric inputs: tier-50 stat/chassis budgets,
+   item chassis catalog, opponent base templates, action/resource costs, and
+   every proposed `C_t`;
+4. add the minimum structured canonical item/status/cycle state and
+   deterministic serializer, reusing the existing generic numeric resource
+   bag/effect protocol;
+5. implement the complete `endless-v0` MVP rule surface—not only its eight loot
+   effects—and its loadout validator;
+6. implement headless Circuit/opponent/reward generation and adversarial tests;
+7. add per-action animation acknowledgement, then the two-member
+   route/Armory/reward UI for a safely sequenced playable proof;
+8. expand content, then add rivals, locker/trade, and full 3v3 presentation;
+9. consider launcher exposure only after the headless/UI slice is accepted.
 
 ### 13.1 Cheapest: campaign/content over existing semantics
 
@@ -2532,17 +2599,24 @@ verification class is implemented.
 
 ### 13.3 Large/blocking: canonical combat state and effect protocol
 
-The current canonical state does not yet model complete SS2 equipment,
-inventory, stamina, ammunition, magicka, spells, timed statuses, or the complete
-SS2-specific RNG call surface/mutation ordering. It **does** already carry the
-authoritative generic RNG state/cursor. The current outcome protocol exposes
-damage, heal, and boolean status effects, not every numeric resource or
-equipment mutation needed here. [V]
+The current canonical state already carries generic stats, authoritative RNG
+state/cursor, and a projected/hashed generic numeric resource bag. The SS2
+adapter emits a fixed twenty-entry set—including current/maximum stamina,
+ammunition, armour, piece ratings, and enchantment values—with unbounded numeric
+`min`/`max` declarations; its canonical stats include base magicka. The rule
+effect protocol already supports absolute numeric resource writes. [V]
+
+What it does **not** yet model is structured SS2 equipment/item identity,
+carried item-instance references, a spendable spell/magicka catalog, timed and
+counted status/cycle lifecycle, or the complete SS2 action-specific RNG and
+mutation ordering required here. [V] The design must extend those shapes rather
+than rebuild already canonical numeric-resource infrastructure.
 
 Likely expansions include:
 
 - complete mapped equipment and six carried item references;
-- numeric resources and charges;
+- any missing numeric resources/charges using the existing generic resource
+  protocol, rather than SS2-named resolver fields;
 - timed/counted statuses, Signature markers, Control Fatigue, and Pressure;
 - resolver-owned cycle-wrap Pressure increments and scheduled-turn status
   expiry;
@@ -2563,7 +2637,7 @@ spawned seats, or alternate result paths.
 - personal frontier reward sets, milestone queues, Epoch
   attunement/prune/retirement, and team Charter assignments/rotation deck;
 - item ownership, custody, offer/bound-award escrows, locker, blueprints, and pity;
-- active Circuit plan envelope, immutable Rematch/pre-ack snapshots, and durable
+- active Circuit plan envelope, immutable per-attempt/pre-ack snapshots, and durable
   mixed transaction journal;
 - clean-boundary migration plus pinned old-version continuation for active
   battles and pending escrows;
@@ -2728,8 +2802,9 @@ MVP acceptance:
   three-action policy in at least 25% of doctrine×tier cells;
 - pre-first-action defeat remains below 5%, no opener guarantees a knockout,
   and no resource/control/movement cycle is reachable;
-- 2v2 median duration is 12–24 actor-actions, 95th percentile at most 36, and
-  Arena Pressure enforces the 80-action hard cap;
+- 2v2 median duration is 12–24 actor-actions and 95th percentile at most 36;
+  after R-05 is closed, Arena Pressure must separately enforce the candidate
+  79-opportunity and 79-resolved-actor-action safety bounds;
 - in at least 80% of sampled states, each living seat has two consequential
   non-dominated legal actions;
 - personal reward outcomes and opponents are identical across reload;
@@ -2765,8 +2840,9 @@ MVP acceptance:
   transition. Concede cannot remove an earlier grant;
 - rule ID, contract v2, and design version are validated/projected/hashed on
   every battle/result/product, and a mismatch prevents start or claim;
-- save remains below 100 KB at the action cap with live `ack-prepared`, embedded
-  pre-ack bytes, and the Rematch start snapshot;
+- save bytes plus serialization/backend overhead remain below the configured
+  atomic backend limit with margin at the proved action/opportunity bounds, with
+  live `ack-prepared`, embedded pre-ack bytes, and the Rematch start snapshot;
 - after all eight authored effects and the Trophy are known, the next
   would-be mechanical reward state resolves to an explicit completion/record choice,
   never a filler scalar upgrade.
@@ -2806,9 +2882,9 @@ power remains bounded.
   usable full-design limits.
 - `[A]` Arena Pressure after cycle 6 with eight stacks is late enough to preserve
   ordinary tactics and early enough to prevent stalls.
-- `[A]` Per-semantic-label combat draws plus full attempt-start restoration make
-  intentional-loss scouting an acceptable learning cost rather than the best
-  progression-per-action policy; the adversarial gate may reject this premise.
+- `[U]` the combat RNG/retry model. The original independent per-semantic-label
+  draws plus full attempt-start restoration failed the seed-aware branch-oracle
+  audit and are not approved; readiness R-02 defines the open alternatives.
 
 ### Unverified before implementation
 
@@ -2827,8 +2903,9 @@ power remains bounded.
 
 ### Gate before code
 
-Do not implement the full system directly from this document. First approve or
-revise these six decisions:
+Do not implement the full system directly from this document. First accept each
+of these six product decisions or supersede it with a fully normative,
+explicitly accepted replacement; rejection or an open revision remains blocking:
 
 1. vertical power ends at career tier 50;
 2. active Rule Load caps at four;
@@ -2840,9 +2917,15 @@ revise these six decisions:
    grandfathered;
 6. the first playable proof is 2v2 and uses a separate designed rule set.
 
-After those decisions, land rule-contract v2 and its `designVersion`
-validation/projection/hash tests first. Then write the `endless-v0` descriptor,
-sidecar/snapshot schemas, and transition fixtures as reviewable specifications.
+Then accept EP-A01–EP-A03 (or fully normative, explicitly accepted
+replacements) and close readiness R-04–R-06 plus every cross-layer exit gate in
+the [MVP readiness record](endless-mvp-readiness.md).
+Only after all of those reviewed gates may the owner give separate explicit
+implementation authorization. The first authorized future slice would be
+rule-contract v2 and its
+`designVersion` validation/projection/hash tests. The next would specify the
+`endless-v0` descriptor, sidecar/snapshot schemas, and transition fixtures as
+reviewable contracts.
 No `endless-v0` battle or save is valid under the current contract-v1
 projection. Build the headless deterministic MVP only after those gates, before
 any launcher or original-game presentation work.
@@ -2852,6 +2935,8 @@ any launcher or original-game presentation work.
 - [Research brief](endless-progression-brief.md)
 - [Progression diagnosis and reference-game sources](progression-diagnosis.md)
 - [Swords & Sandals mod-scene survey](swords-and-sandals-mod-scene-survey.md)
+- [Six owner decisions](endless-progression-decisions.md)
+- [MVP implementation-readiness record](endless-mvp-readiness.md)
 - [SS2 battle map](../integration/ss2-battle-map.md)
 - [SS2 adapter contract](../ss2-adapter-contract.md)
 - [Roadmap](../roadmap.md)
