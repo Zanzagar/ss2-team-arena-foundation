@@ -778,6 +778,7 @@ var shopArmourTop = Number(rawShopArmour);
 if (!(shopArmourTop > 0)) shopArmourTop = 0;
 
 var goldStaged = false;
+var heroStagedInTown = false;
 var shopDone = (shopWeaponTop <= 0 && shopArmourTop <= 0);
 var shopKind = "weapon";      // "weapon" -> "armour" -> done
 var shopItem = 0;             // the id currently being offered
@@ -803,6 +804,26 @@ function shopConfirm(which) {
     var root = gameRoot();
     var clip = shopClip(which);
     var hero = root.game.hero;
+    // REFUSE ON UNREADABLE OPERANDS. This is not defensive padding - it is a
+    // repair. The first version read `clip.itemcost` and `clip.itemnumber`
+    // straight off the shop clip on the strength of a doc summary; live, both
+    // came back undefined, `goldpieces -= undefined` produced NaN, and
+    // check_for_nan then "repaired" the gladiator's gold to herolevel * 1000.
+    // A staged 5,000,000 became exactly 4,000.
+    //
+    // The plain guard `goldpieces < itemcost` did not stop it, for the third
+    // time in this file: EVERY comparison with NaN is false in AVM1, so a
+    // less-than test passes an unreadable operand straight through. Numbers
+    // read out of the game go through isNum first, always.
+    if (!isNum(clip.itemcost) || !isNum(clip.itemnumber) || !isNum(hero.goldpieces)) {
+        arenaLog("shop-operands-unreadable",
+            "\"kind\":\"" + which + "\"" +
+            ",\"itemcost\":\"" + String(clip.itemcost) + "\"" +
+            ",\"itemnumber\":\"" + String(clip.itemnumber) + "\"" +
+            ",\"goldpieces\":\"" + String(hero.goldpieces) + "\"" +
+            ",\"shopFrame\":" + jnum(clip._currentframe));
+        return false;
+    }
     if (Number(hero.goldpieces) < Number(clip.itemcost)) return false;
     if (Number(clip.itemcost) != 0) root.coins.start();
     if (which == "weapon") {
@@ -944,6 +965,25 @@ function stepArenaNavigator() {
             root.game.hero.goldpieces = stageGold;
             root.constructDNA();
             arenaLog("staged-gold", "\"goldpieces\":" + jnum(root.game.hero.goldpieces));
+        }
+        // Hero staging is applied HERE as well as at battle start, because the
+        // shop gate reads the hero's attributes and the shop runs before any
+        // battle. Byte-verified: the item onRelease at weaponbuttons +0x0929
+        // branches on `item.itemlevel > item.attribute_required` to a refusal
+        // reading "you need at least <itemlevel>", and `attribute_required` is
+        // the HERO's governing attribute for that band, assigned per item by
+        // weaponbuttons(). A vitality-only gladiator has base strength and
+        // speed, so every worthwhile weapon is refused - observed live, twenty
+        // five successive refusals from item 40 down to 14.
+        //
+        // Unlike the damage fields, an ATTRIBUTE is a genuine battlevalues
+        // input rather than one of its outputs, so staging it is not writing
+        // over a formula the game will recompute.
+        if (!heroStagedInTown && (stageHeroFields.length > 0)) {
+            heroStagedInTown = true;
+            applyStageSide("hero", stageHeroFields);
+            root.constructDNA();
+            arenaLog("staged-hero-town", "\"applied\":\"" + stagedSummary() + "\"");
         }
         if (!shopDone) {
             if (shopKind == "weapon" && shopWeaponTop > 0) {
