@@ -231,6 +231,39 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+**The 81 divergence-report digests are unverified, and the obvious fix is
+another assertion that cannot fail.** `ss2-divergence-corpus.test.js` compares
+`record.digest` to `report.observationDigest` only inside
+`if (record.target.fixtureId === report.fixtureId)`, a branch dead by
+construction — a report exists *because* the observation did not match that
+fixture — and the file already asserts `sameTarget === 0` and says so.
+
+Measured while looking for a repair, and the measurement is the finding: for all
+six reports that resolve to a committed record, `computeSs2ObservationDigest`
+reproduces the record's **stored** digest exactly (6/6), and the **report's**
+`observationDigest` is a different value in every case. So the report digest is
+not the observation record's digest, despite `promote-1v1-golden.js:207` reading
+`observationDigest: observation.digest` — a second code path produces the ones in
+the corpus. Until that is traced, there is nothing in the repository to compare
+them against.
+
+Do NOT "fix" this by adding
+`assert.equal(record.digest, computeSs2ObservationDigest(record))`.
+`ss2-capture-attestation.test.js:92-104` already establishes that this
+assertion **cannot fail**: `validateSs2Observation` recomputes and compares the
+digest internally and `ingestSs2CaptureTrace` returns through it, so the equality
+holds by construction on any ingested record. That file solves the real problem
+the right way — it adds and removes each attestation and requires the digest to
+MOVE — and any repair here should follow that shape rather than compare a value
+to itself.
+
+Three genuinely redundant assertions also survive in the divergence corpus file:
+the duplicate-pair check at :259 (implied by the filename check above it, since
+a directory cannot hold two files of the same name), and the two closing
+equalities of the archive test, each arithmetically implied by the
+`assert.deepEqual(missing, [])` five lines above. They are noise rather than
+cover for a bug, but they should be given independent derivations or deleted.
+
 **The wrong-side guard does not protect the arena route, and 9 of 20 armed
 captures were mislabelled. CRITICAL, and found live.**
 
