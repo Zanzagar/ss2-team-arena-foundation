@@ -809,18 +809,20 @@ test("GAP: a gladiator who enters already burning loses that condition at constr
     rngTape: hitTape(4)
   });
 
-  // The adapter read the condition and can express it declaratively...
-  assert.deepEqual(host.diagnostics.unappliedInitialStatusEffects, [
-    { kind: EffectKind.STATUS, targetId: "blue-1", status: "burning", active: true }
-  ]);
-  // ...but `roster.normaliseCombatant` hard-codes `status: []`, and the
-  // resolver exposes no entry point that applies an effect outside
-  // `applyAction`, so there is nowhere to put them.
-  assert.deepEqual(host.combatant("blue-1").status, []);
-  // Worse: bringing the mirror into step with canonical state *erased* a
-  // runtime-observed vanilla condition.
-  assert.ok(host.diagnostics.canonicalSyncs.some((entry) => entry.differences.some((d) => d.startsWith("burning"))));
-  assert.equal(host.mirrorFor("blue-1").fields.burning, false);
+  // CLOSED. This test used to document a gap: the adapter could express the
+  // condition declaratively, but `normaliseCombatant` hard-coded `status: []`,
+  // so a gladiator who walked into the arena already burning silently stopped
+  // burning — and the canonical sync then erased it from the mirror too.
+  //
+  // The roster now honours `source.status`, so the condition survives
+  // construction and the mirror keeps agreeing with the game.
+  assert.deepEqual(host.combatant("blue-1").status, ["burning"]);
+  assert.equal(host.mirrorFor("blue-1").fields.burning, true);
+  assert.equal(
+    host.diagnostics.canonicalSyncs.some((entry) => entry.differences.some((d) => d.startsWith("burning"))),
+    false,
+    "the canonical sync must no longer erase a runtime-observed condition"
+  );
 });
 
 test("GAP: armour lives outside canonical state, so no field write ever reaches armourclass", () => {
@@ -834,7 +836,10 @@ test("GAP: armour lives outside canonical state, so no field write ever reaches 
     "the only field the whole battle ever wrote"
   );
   assert.equal(everyWrite.some((write) => write.field === "armourclass"), false);
-  assert.deepEqual(Object.values(EffectKind).sort(), ["damage", "heal", "status"]);
+  // EffectKind gained a generic resource kind rather than a bespoke armour
+  // one: a bespoke kind would put an SS2 noun inside a game-agnostic resolver
+  // and need a sibling for stamina, ammo and everything after.
+  assert.deepEqual(Object.values(EffectKind).sort(), ["damage", "heal", "resource", "status"]);
 
   // The defeated fighter is at 0 hitpoints with all 44 points of armour still
   // standing. That is correct *adapter* behaviour — the armour-first split is
@@ -907,9 +912,12 @@ test("GAP: a rule set cannot read the vanilla record, and smuggling it in defeat
   bare.submit({ actorId: "red-1", type: "strike", targetId: "blue-1" });
 
   // The rule set never saw armour in what the resolver handed it...
+  // The view now carries `resources`, and the invariant that makes it sound is
+  // that the projection carries everything the view does - so a value a rule
+  // set can read can no longer sit outside the state hash.
   assert.deepEqual(seen[0], [
     "aiFilled", "alive", "health", "id", "loadout", "maxHealth",
-    "name", "seatId", "slotIndex", "stats", "status", "teamId"
+    "name", "resources", "seatId", "slotIndex", "stats", "status", "teamId"
   ].sort());
   assert.equal(seen[0].includes("armourclass"), false);
   assert.equal(seen[0].includes("vanilla"), false);

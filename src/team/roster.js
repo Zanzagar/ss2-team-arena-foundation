@@ -13,6 +13,7 @@
 
 import { ControllerKind, createControllerRegistry } from "./controllers.js";
 import { BattleError } from "./errors.js";
+import { normaliseResourceBag } from "./resources.js";
 
 export const MIN_TEAM_SLOTS = 1;
 export const MAX_TEAM_SLOTS = 3;
@@ -38,6 +39,33 @@ export const DEFAULT_LOADOUT = Object.freeze({
 
 export function seatIdFor(teamId, index) {
   return `${teamId}:slot-${index + 1}`;
+}
+
+/**
+ * The conditions a combatant is carrying, in declaration order, deduplicated.
+ *
+ * This used to be hard-coded to `[]`, which silently discarded the starting
+ * state of anyone who entered a battle already burning, frozen or poisoned.
+ * A status is an opaque string to the resolver, so there is nothing to
+ * validate beyond the shape — but the shape is validated, because a malformed
+ * status is a desync the projection would happily hash.
+ */
+function normaliseStatus(source) {
+  if (source === undefined || source === null) return [];
+  if (!Array.isArray(source)) {
+    throw new BattleError("A combatant's status must be an array of non-empty strings.");
+  }
+  const seen = new Set();
+  const statuses = [];
+  for (const entry of source) {
+    if (typeof entry !== "string" || entry.length === 0) {
+      throw new BattleError("A combatant's status must be an array of non-empty strings.");
+    }
+    if (seen.has(entry)) continue;
+    seen.add(entry);
+    statuses.push(entry);
+  }
+  return statuses;
 }
 
 /**
@@ -69,10 +97,14 @@ export function normaliseCombatant(source, teamId, index, rules) {
       canUseSpell: source.loadout?.canUseSpell ?? stats.magicka > 0,
       canHeal: source.loadout?.canHeal ?? stats.magicka > 0
     },
+    // Every per-combatant number a rule set needs that the resolver does not
+    // itself define. Empty unless the blueprint declares one, so a rule set
+    // that needs no resources — the placeholder included — never opts in.
+    resources: normaliseResourceBag(source.resources),
     maxHealth: source.maxHealth,
     health: source.health,
     alive: true,
-    status: []
+    status: normaliseStatus(source.status)
   };
   combatant.maxHealth = rules.maximumHealth(combatant);
   combatant.health = clamp(combatant.health ?? combatant.maxHealth, 0, combatant.maxHealth);

@@ -8,6 +8,7 @@
  * | `rule-set.js`       | the injection contract and the verified/placeholder gate |
  * | `placeholder-rules.js` | the only formulas in the tree, all placeholder        |
  * | `rng.js`            | the ordered authoritative RNG channel                    |
+ * | `resources.js`      | the open, clamped, hashed per-combatant numeric bag      |
  * | `roster.js`         | teams, slots, combatant identity, AI fill                |
  * | `controllers.js`    | seat -> controller identity, independent of combatants   |
  * | `elimination.js`    | knockouts, combatant-defeated, team elimination          |
@@ -21,6 +22,7 @@ export * from "./errors.js";
 export * from "./rule-set.js";
 export * from "./placeholder-rules.js";
 export * from "./rng.js";
+export * from "./resources.js";
 export * from "./controllers.js";
 export * from "./roster.js";
 export * from "./elimination.js";

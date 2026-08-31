@@ -328,7 +328,11 @@ test("vanilla starting statuses are surfaced as declarative effects, because the
     ],
     rngTape: hitTape(2)
   });
-  assert.deepEqual(battle.teams[0].combatants[0].status, []);
+  // CLOSED. The roster used to hard-code `status: []`, so a gladiator who
+  // entered already burning silently stopped burning. It now honours the
+  // starting statuses, which is what lets the adapter's mirror keep agreeing
+  // with the game instead of erasing a runtime-observed condition.
+  assert.deepEqual(battle.teams[0].combatants[0].status, ["burning"]);
 });
 
 test("maximum health is compared against the rule set, never corrected by the adapter", () => {

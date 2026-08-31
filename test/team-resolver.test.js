@@ -6,6 +6,7 @@ import {
   acknowledgeResultAnimation,
   advanceAiTurns,
   applyAction,
+  applyActionWithOutcome,
   BATTLE_RESULT_ACK_TYPE,
   BATTLE_RESULT_PENDING_TYPE,
   BattleError,
@@ -20,10 +21,15 @@ import {
   describeTeamRuleSet,
   EffectKind,
   isCampaignSettled,
+  lastResolvedAction,
   legalActions,
+  normaliseResourceBag,
   placeholderTeamRules,
   reassignController,
   replayTeamBattle,
+  RESERVED_RESOURCE_NAMES,
+  resourceValue,
+  ResultReason,
   RngSequenceError,
   RuleSetVerification,
   SettlementError,
@@ -711,4 +717,552 @@ test("the legacy engine wire projection keeps its exact historical shape", () =>
   assert.equal(wire.teams[0].combatants[0].controller, "client-red");
   assert.equal(typeof engine.stateHash(battle), "string");
   assert.equal(engine.stateHash(battle).length, 8);
+});
+
+/* ------------------------------------------------------------------ */
+/* Canonical resources                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A fighter carrying declared resources. `maxHealth` is pinned so the numbers
+ * in these tests are exact.
+ */
+const warden = (id, agility, resources = {}, overrides = {}) => ({
+  id,
+  name: id,
+  controller: overrides.controller ?? "local",
+  stats: { strength: 10, agility, attack: 40, defense: 0, vitality: 0, stamina: 5, magicka: 0 },
+  loadout: { meleeDamage: 40, rangedDamage: 10, canUseRanged: false, canUseSpell: false, canHeal: false },
+  maxHealth: 30,
+  resources,
+  ...overrides
+});
+
+const strike = (actorId, targetId) => ({ actorId, type: "strike", targetId });
+
+/**
+ * DEMONSTRATION ONLY — invented for these tests, never measured against the
+ * licensed build, and not a proposal for the SS2 rule set.
+ *
+ * It is deliberately shaped like vanilla's armour-first split — write the
+ * armour pool down, carry only the overflow into hitpoints — because that is
+ * the shape the seam has to be able to express. Testing the machinery against
+ * something easier would prove nothing.
+ */
+const armourFirstRules = ({ id = "test-armour-first", hit = 25 } = {}) => defineTeamRuleSet({
+  id,
+  verification: RuleSetVerification.PLACEHOLDER,
+  provenance: {
+    runtimeVerified: false,
+    note: "Invented to exercise the resource seam. Not measured against the licensed SS2 build."
+  },
+  actionTypes: ["strike"],
+  maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+  legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+  resolveAction(request) {
+    const armour = resourceValue(request.target, "armour");
+    return {
+      effects: [
+        // Ordered and absolute: armour down first, then whatever spilled past it.
+        { kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "armour", to: armour - hit },
+        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: Math.max(0, hit - armour) }
+      ],
+      events: [{
+        type: "strike",
+        actorId: request.actorId,
+        targetId: request.targetId,
+        absorbed: Math.min(armour, hit),
+        damage: Math.max(0, hit - armour)
+      }]
+    };
+  },
+  chooseAiAction: (view, actorId, options) => options[0]
+});
+
+/**
+ * Both fighters declare `armour`, because the rule set writes it on whoever it
+ * hits and the resolver refuses to conjure a resource nobody declared. That
+ * strictness is the point of constraint 2 in `src/team/resources.js`: a
+ * resource that exists only on the branch one peer happened to take is a
+ * desync with a delay fuse.
+ */
+const armouredPair = (armourclass, { rules = armourFirstRules(), redMaxHealth = 30 } = {}) =>
+  createTeamBattle({
+    seed: 5,
+    rules,
+    teams: [
+      {
+        id: "red",
+        combatants: [warden("red-1", 30, { armour: { value: 0, max: 44 } }, { maxHealth: redMaxHealth })]
+      },
+      { id: "blue", combatants: [warden("blue-1", 4, { armour: { value: armourclass, max: 44 } })] }
+    ]
+  });
+
+/**
+ * THE DEFECT THIS WHOLE SEAM EXISTS TO FIX.
+ *
+ * Before resources, a rule set that needed armour had to close over a side
+ * channel, and two battles that differed by 44 points of armour produced the
+ * *same* `combatStateHash` and then diverged to health 30 versus 5 on the same
+ * action. A hash that cannot see an input the rule set read is not a desync
+ * check; it is a desync check that lies.
+ */
+test("two battles differing only in a resource now hash differently, before they diverge", () => {
+  const armoured = armouredPair(44);
+  const bare = armouredPair(0);
+
+  // Everything else about these two battles is identical.
+  assert.equal(armoured.rulesDescriptor.id, bare.rulesDescriptor.id);
+  assert.equal(combatantById(armoured, "blue-1").health, combatantById(bare, "blue-1").health);
+
+  // The hash separates them *before* the action that makes them diverge, which
+  // is the only moment at which knowing is useful.
+  assert.notEqual(combatStateHash(armoured), combatStateHash(bare));
+
+  applyAction(armoured, strike("red-1", "blue-1"));
+  applyAction(bare, strike("red-1", "blue-1"));
+
+  assert.equal(combatantById(armoured, "blue-1").health, 30, "44 armour absorbed the whole hit");
+  assert.equal(combatantById(bare, "blue-1").health, 5, "no armour, so all 25 reached hitpoints");
+  assert.notEqual(combatStateHash(armoured), combatStateHash(bare));
+});
+
+/**
+ * The structural property that makes the test above true in general rather
+ * than by luck: a rule set can only read what the projection carries, so there
+ * is no field it can act on that the hash does not already cover.
+ */
+test("every field a rule set can see is carried by the projection, so the hash covers every input", () => {
+  const seenViews = [];
+  const probe = defineTeamRuleSet({
+    id: "test-view-probe",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented probe. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction(request) {
+      seenViews.push(request.actor, request.target, ...request.allies, ...request.foes);
+      return { effects: [], events: [{ type: "strike", actorId: request.actorId }] };
+    },
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+
+  const battle = createTeamBattle({
+    seed: 11,
+    rules: probe,
+    teams: [
+      {
+        id: "red",
+        combatants: [
+          warden("red-1", 30, { armour: { value: 12, max: 44 }, ammo: 5 }),
+          warden("red-2", 20, { stamina: { value: 100, min: 0, max: 150 } })
+        ]
+      },
+      { id: "blue", combatants: [warden("blue-1", 4, { armour: 44, charisma: { value: 9, min: 9, max: 9 } })] }
+    ]
+  });
+
+  // The projection taken *before* the action is the state the views were built
+  // from, so the two are directly comparable.
+  const before = toTeamWireState(battle);
+  applyAction(battle, strike("red-1", "blue-1"));
+
+  const projections = new Map(before.teams.flatMap((team) => team.combatants).map((entry) => [entry.id, entry]));
+  assert.ok(seenViews.length > 0);
+  for (const view of seenViews) {
+    const projection = projections.get(view.id);
+    assert.ok(projection, `${view.id} was visible to the rule set but absent from the projection`);
+    for (const key of Object.keys(view)) {
+      assert.ok(key in projection, `${key} is visible to a rule set but is not in the projection`);
+      assert.deepEqual(view[key], projection[key], `${view.id}.${key} disagrees with the projection`);
+    }
+  }
+  // And specifically: the resources reached the rule set, and are hashed.
+  assert.deepEqual(projections.get("blue-1").resources, {
+    armour: { value: 44, min: 0, max: null },
+    charisma: { value: 9, min: 9, max: 9 }
+  });
+  assert.equal(resourceValue(seenViews.find((view) => view.id === "blue-1"), "armour"), 44);
+});
+
+test("a resource battle replays deterministically at 1v1, 2v2 and 3v3", () => {
+  for (const size of [1, 2, 3]) {
+    const team = (prefix, baseAgility) => ({
+      id: prefix,
+      combatants: Array.from({ length: size }, (unused, index) =>
+        warden(`${prefix}-${index + 1}`, baseAgility - index * 3, {
+          armour: { value: 10 * (index + 1), max: 44 },
+          stamina: { value: 100, min: 0, max: 150 }
+        }, { controller: "ai" }))
+    });
+    const blueprint = {
+      seed: 20260830 + size,
+      rules: armourFirstRules(),
+      teams: [team("red", 60), team("blue", 40)]
+    };
+    const live = createTeamBattle(blueprint);
+    const actions = advanceAiTurns(live, 400);
+    assert.ok(live.result, `${size}v${size} settled`);
+
+    const rebuilt = replayTeamBattle(blueprint, actions);
+    assert.deepEqual(toTeamWireState(rebuilt), toTeamWireState(live));
+    assert.equal(combatStateHash(rebuilt), combatStateHash(live));
+    // Resources moved during the battle, so this is not a vacuous replay.
+    assert.ok(
+      toTeamWireState(live).teams.flatMap((entry) => entry.combatants)
+        .some((combatant) => combatant.resources.armour.value === 0)
+    );
+  }
+});
+
+test("a defeated fighter's armour pool is spent, not left standing", () => {
+  const battle = armouredPair(44, { redMaxHealth: 200 });
+  // 44 armour, 25 per hit, 30 hitpoints: the armour absorbs before hitpoints
+  // move at all. Vanilla could never end a fight with the loser at zero
+  // hitpoints and full armour, and now neither can the resolver.
+  const trace = [];
+  while (!battle.result) {
+    const actor = currentCombatant(battle);
+    const foeId = actor.teamId === "red" ? "blue-1" : "red-1";
+    applyAction(battle, strike(actor.id, foeId));
+    trace.push({
+      blueArmour: combatantById(battle, "blue-1").resources.armour.value,
+      blueHealth: combatantById(battle, "blue-1").health
+    });
+  }
+  const loser = combatantById(battle, "blue-1");
+  assert.equal(loser.alive, false);
+  assert.equal(loser.health, 0);
+  assert.equal(loser.resources.armour.value, 0, "the armour was actually spent");
+  assert.equal(trace[0].blueHealth, 30);
+  assert.equal(trace[0].blueArmour, 19);
+});
+
+test("a resource effect is absolute and the resolver clamps it to the declared bounds", () => {
+  const overshoot = defineTeamRuleSet({
+    id: "test-resource-overshoot",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [
+        { kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "armour", to: -500 },
+        { kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "stamina", to: 99999 }
+      ],
+      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+  const battle = createTeamBattle({
+    seed: 3,
+    rules: overshoot,
+    teams: [
+      { id: "red", combatants: [warden("red-1", 30)] },
+      {
+        id: "blue",
+        combatants: [warden("blue-1", 4, { armour: { value: 20, max: 44 }, stamina: { value: 10, max: 150 } })]
+      }
+    ]
+  });
+  applyAction(battle, strike("red-1", "blue-1"));
+  const blue = combatantById(battle, "blue-1");
+  assert.equal(blue.resources.armour.value, 0, "clamped to min");
+  assert.equal(blue.resources.stamina.value, 150, "clamped to max");
+  // A spent pool is not death. Only health decides that.
+  assert.equal(blue.alive, true);
+  assert.equal(blue.health, 30);
+});
+
+test("the resolver refuses a resource effect naming a resource nobody declared", () => {
+  const inventive = defineTeamRuleSet({
+    id: "test-undeclared-resource",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [{ kind: EffectKind.RESOURCE, targetId: request.targetId, resource: "mana", to: 3 }],
+      events: [{ type: "strike", actorId: request.actorId }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+  const battle = createTeamBattle({
+    seed: 3,
+    rules: inventive,
+    teams: [
+      { id: "red", combatants: [warden("red-1", 30)] },
+      { id: "blue", combatants: [warden("blue-1", 4, { armour: 44 })] }
+    ]
+  });
+  assert.throws(
+    () => applyAction(battle, strike("red-1", "blue-1")),
+    (error) => error instanceof BattleError && /declared at construction/.test(error.message)
+  );
+});
+
+test("a malformed resource effect is refused by the outcome contract", () => {
+  const bad = (effect) => defineTeamRuleSet({
+    id: "test-bad-resource-effect",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: () => 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: () => ({ effects: [effect], events: [] }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+  const run = (effect) => {
+    const battle = createTeamBattle({
+      seed: 1,
+      rules: bad(effect),
+      teams: [
+        { id: "red", combatants: [warden("red-1", 30)] },
+        { id: "blue", combatants: [warden("blue-1", 4, { armour: 44 })] }
+      ]
+    });
+    applyAction(battle, strike("red-1", "blue-1"));
+  };
+  assert.throws(
+    () => run({ kind: EffectKind.RESOURCE, targetId: "blue-1", to: 1 }),
+    (error) => error instanceof TeamRuleSetError && /without a resource name/.test(error.message)
+  );
+  assert.throws(
+    () => run({ kind: EffectKind.RESOURCE, targetId: "blue-1", resource: "armour" }),
+    (error) => error instanceof TeamRuleSetError && /absolute/.test(error.message)
+  );
+  assert.throws(
+    () => run({ kind: EffectKind.RESOURCE, targetId: "blue-1", resource: "armour", to: Number.NaN }),
+    (error) => error instanceof TeamRuleSetError && /absolute/.test(error.message)
+  );
+});
+
+test("resource key order is normalised, so two peers cannot hash differently for the same bag", () => {
+  const build = (resources) => createTeamBattle({
+    seed: 8,
+    rules: armourFirstRules(),
+    teams: [
+      { id: "red", combatants: [warden("red-1", 30)] },
+      { id: "blue", combatants: [warden("blue-1", 4, resources)] }
+    ]
+  });
+  const forwards = build({ armour: 44, ammo: 5, stamina: 100 });
+  const backwards = build({ stamina: 100, ammo: 5, armour: 44 });
+  assert.deepEqual(Object.keys(combatantById(forwards, "blue-1").resources), ["ammo", "armour", "stamina"]);
+  assert.equal(combatStateHash(forwards), combatStateHash(backwards));
+});
+
+test("the resource bag is typed, not a grab-bag", () => {
+  // Shorthand and long form agree.
+  assert.deepEqual(normaliseResourceBag({ armour: 44 }), { armour: { value: 44, min: 0, max: null } });
+  assert.deepEqual(
+    normaliseResourceBag({ armour: { value: 44, max: 44 } }),
+    { armour: { value: 44, min: 0, max: 44 } }
+  );
+  // Declared out of range is clamped on the way in, exactly as `health` is.
+  assert.equal(normaliseResourceBag({ armour: { value: 90, max: 44 } }).armour.value, 44);
+  // Nothing declared is an empty bag, never a missing one.
+  assert.deepEqual(normaliseResourceBag(undefined), {});
+
+  const refuses = (bag, pattern) => assert.throws(
+    () => normaliseResourceBag(bag),
+    (error) => error instanceof BattleError && pattern.test(error.message),
+    `expected ${JSON.stringify(bag)} to be refused`
+  );
+  refuses({ armour: "44" }, /finite number or a/);
+  refuses({ armour: true }, /finite number or a/);
+  refuses({ armour: { value: 4, hp: 1 } }, /unsupported keys/);
+  refuses({ armour: { value: Number.POSITIVE_INFINITY } }, /finite numeric value/);
+  refuses({ armour: { value: 4, max: Number.POSITIVE_INFINITY } }, /finite number or null/);
+  refuses({ armour: { value: 4, min: 10, max: 5 } }, /min 10 above max 5/);
+  refuses({ "not a name": 1 }, /must match/);
+  refuses([1, 2], /plain object of named numbers/);
+  // Reserved: the resolver already owns a combatant field of each of these
+  // names and interprets it, so a resource may not shadow one.
+  assert.ok(RESERVED_RESOURCE_NAMES.includes("health"));
+  for (const reserved of RESERVED_RESOURCE_NAMES) {
+    refuses({ [reserved]: 1 }, /is reserved/);
+  }
+});
+
+test("a rule set that declares no resources is untouched: the machinery is opt-in", () => {
+  const battle = createTeamBattle({
+    seed: 42,
+    rngTape: hitTape(4),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40)] },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  assert.deepEqual(combatantById(battle, "r1").resources, {});
+  assert.deepEqual(toTeamWireState(battle).teams[0].combatants[0].resources, {});
+  applyAction(battle, melee("r1", "b1"));
+  assert.equal(battle.rulesDescriptor.verification, RuleSetVerification.PLACEHOLDER);
+  assert.deepEqual(combatantById(battle, "b1").resources, {});
+});
+
+/* ------------------------------------------------------------------ */
+/* The resolved-action trace                                           */
+/* ------------------------------------------------------------------ */
+
+test("applyAction surfaces the effects it applied instead of discarding them", () => {
+  const battle = armouredPair(44);
+  assert.equal(lastResolvedAction(battle), null, "nothing resolved yet");
+
+  applyAction(battle, strike("red-1", "blue-1"));
+  const trace = lastResolvedAction(battle);
+  assert.deepEqual(trace.effects, [
+    { kind: EffectKind.RESOURCE, targetId: "blue-1", resource: "armour", to: 19 },
+    { kind: EffectKind.DAMAGE, targetId: "blue-1", amount: 0 }
+  ]);
+  assert.deepEqual(trace.events, [
+    { type: "strike", actorId: "red-1", targetId: "blue-1", absorbed: 25, damage: 0 }
+  ]);
+  assert.equal(trace.actorId, "red-1");
+  assert.equal(trace.turn, 1);
+  assert.deepEqual(trace.knockouts, []);
+  // The trace is a frozen copy: reading it cannot reach live state.
+  assert.throws(() => {
+    trace.effects.push({});
+  }, TypeError);
+
+  // The one-call form is the same record, and `applyAction` still returns the
+  // battle, so nothing that already called it has to change.
+  assert.equal(applyAction(battle, strike("blue-1", "red-1")), battle);
+  const second = applyActionWithOutcome(battle, strike("red-1", "blue-1"));
+  assert.equal(second, lastResolvedAction(battle));
+  assert.equal(second.turn, 2);
+  assert.equal(second.firstEventSequence, 3);
+
+  // It is a trace, not state: it is not projected and it is not hashed.
+  assert.equal("lastResolution" in toTeamWireState(battle), false);
+});
+
+test("the trace reports the knockout the action caused", () => {
+  const battle = armouredPair(0);
+  applyAction(battle, strike("red-1", "blue-1"));
+  applyAction(battle, strike("blue-1", "red-1"));
+  const finisher = applyActionWithOutcome(battle, strike("red-1", "blue-1"));
+  assert.deepEqual(finisher.knockouts, ["blue-1"]);
+  assert.equal(combatantById(battle, "blue-1").alive, false);
+});
+
+/* ------------------------------------------------------------------ */
+/* Starting conditions                                                 */
+/* ------------------------------------------------------------------ */
+
+test("a gladiator who enters a battle already burning keeps the condition", () => {
+  const battle = createTeamBattle({
+    seed: 1,
+    rngTape: hitTape(4),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40)] },
+      { id: "blue", combatants: [{ ...brute("b1", 20), status: ["burning", "poison"] }] }
+    ]
+  });
+  assert.deepEqual(combatantById(battle, "b1").status, ["burning", "poison"]);
+  // It is in the view a rule set reads, and in the projection the hash covers.
+  assert.deepEqual(toTeamWireState(battle).teams[1].combatants[0].status, ["burning", "poison"]);
+
+  const clean = createTeamBattle({
+    seed: 1,
+    rngTape: hitTape(4),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40)] },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  assert.notEqual(combatStateHash(battle), combatStateHash(clean));
+});
+
+test("a starting status list is deduplicated in order, and a malformed one is refused", () => {
+  const build = (status) => createTeamBattle({
+    seed: 1,
+    rngTape: hitTape(4),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40)] },
+      { id: "blue", combatants: [{ ...brute("b1", 20), status }] }
+    ]
+  });
+  assert.deepEqual(combatantById(build(["poison", "burning", "poison"]), "b1").status, ["poison", "burning"]);
+  assert.deepEqual(combatantById(build([]), "b1").status, []);
+  assert.deepEqual(combatantById(build(undefined), "b1").status, []);
+  for (const bad of ["burning", [""], [null], [{ status: "burning" }]]) {
+    assert.throws(
+      () => build(bad),
+      (error) => error instanceof BattleError && /array of non-empty strings/.test(error.message)
+    );
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* Draws                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * DECIDED: the resolver can produce a draw, and settles one through its own
+ * two gates like any other result.
+ *
+ * The alternatives are worse in both directions. Refusing to call a mutual
+ * wipe decided leaves a battle with no living combatant and `advanceTurn`
+ * throwing; naming a winner would be the resolver inventing a combat rule,
+ * which it is forbidden to do. So `battleStanding` stays total: every
+ * reachable state has an answer, and "both teams are down" is a draw.
+ *
+ * That the adapter's acknowledgement bridge cannot acknowledge one is an
+ * adapter defect, not a resolver one — vanilla's `death()` dispatches only
+ * `combatwon`/`combatlost`, so a draw has no arena label and the bridge
+ * requires an arena label. The fix belongs there: a draw's acknowledgement is
+ * the completed death animations, with no arena transition.
+ */
+test("a drawn battle settles through the resolver's own two gates", () => {
+  const settlements = [];
+  const mutual = defineTeamRuleSet({
+    id: "test-mutual-destruction",
+    verification: RuleSetVerification.PLACEHOLDER,
+    provenance: { runtimeVerified: false, note: "Invented; forces the draw branch. Not SS2 behaviour." },
+    actionTypes: ["strike"],
+    maximumHealth: (combatant) => combatant.maxHealth ?? 30,
+    legalActions: (view) => view.foes.map((foe) => ({ type: "strike", targetId: foe.id })),
+    resolveAction: (request) => ({
+      effects: [
+        { kind: EffectKind.DAMAGE, targetId: request.targetId, amount: 999 },
+        { kind: EffectKind.DAMAGE, targetId: request.actorId, amount: 999 }
+      ],
+      events: [{ type: "strike", actorId: request.actorId, targetId: request.targetId }]
+    }),
+    chooseAiAction: (view, actorId, options) => options[0]
+  });
+  const battle = createTeamBattle({
+    seed: 2,
+    rules: mutual,
+    teams: [
+      { id: "red", combatants: [warden("red-1", 30)] },
+      { id: "blue", combatants: [warden("blue-1", 4)] }
+    ],
+    onCampaignSettled: (record) => settlements.push(record)
+  });
+
+  applyAction(battle, strike("red-1", "blue-1"));
+
+  assert.equal(battle.result.reason, ResultReason.DRAW);
+  assert.equal(battle.result.winnerTeamId, null);
+  // Both teams are eliminated and both are named as losers, so a campaign
+  // record built from this can neither invent a winner nor leave a survivor.
+  const pending = battle.settlement.pendingResultEvent();
+  assert.deepEqual(pending.loserTeamIds, ["blue", "red"]);
+  assert.equal(pending.winnerTeamId, null);
+  assert.equal(eventTypes(battle).filter((type) => type === "team-eliminated").length, 2);
+
+  assert.equal(acknowledgeResultAnimation(battle, ackFor(battle)), true);
+  assert.equal(isCampaignSettled(battle), true);
+  assert.equal(settlements.length, 1);
+  assert.equal(campaignSettlement(battle).winnerTeamId, null);
+  assert.equal(campaignSettlement(battle).reason, ResultReason.DRAW);
+  // Idempotent, exactly as a decided battle is.
+  assert.equal(acknowledgeResultAnimation(battle, ackFor(battle)), false);
 });
