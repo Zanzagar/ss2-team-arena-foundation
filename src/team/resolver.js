@@ -275,6 +275,30 @@ function applyEffects(battle, effects) {
 /**
  * A whole team is down. Record it, freeze the battle result, and arm — but do
  * not fire — campaign settlement. Settlement waits for the acknowledgement.
+ *
+ * The settlement is armed with a **battle discriminator** as well as the
+ * outcome, because the outcome alone does not identify a battle. Two bouts
+ * between the same two teams ending the same way are the delivery target here
+ * — a networked campaign of consecutive bouts — and without a discriminator
+ * they share a completion token, so bout 1's `battle-result-animation-complete`
+ * satisfies bout 2's second gate and settles it with bout 1's winner.
+ *
+ * The discriminator is `combatStateHash(battle)` read *here*: after the result
+ * and the `team-eliminated` events are on the battle and before the settlement
+ * is armed. That ordering matters twice over.
+ *
+ * - It is late enough to cover this battle's whole terminal state — seed, RNG
+ *   cursor, rosters, healths, statuses, initiative, turn number and the entire
+ *   ordered event log — so two genuinely independent bouts differ in it.
+ * - It is early enough that the hash cannot see the token it is about to go
+ *   into. `toTeamWireState` carries `settlement.toJSON()`, which is still the
+ *   unarmed constant at this line, so there is no circularity to resolve.
+ *
+ * It stays a pure function of this battle's own play: a replay of the same
+ * blueprint and the same ordered actions reaches the identical terminal state
+ * and therefore the identical token. A counter or a random value would have
+ * discriminated just as well and broken deterministic replay, which is why
+ * neither is used.
  */
 function checkResult(battle) {
   if (battle.result) return;
@@ -287,7 +311,8 @@ function checkResult(battle) {
   battle.settlement.arm({
     winnerTeamId: standing.winnerTeamId,
     loserTeamIds: standing.eliminatedTeamIds,
-    reason: standing.reason
+    reason: standing.reason,
+    battleDiscriminator: combatStateHash(battle)
   });
   const pending = battle.settlement.pendingResultEvent();
   addEvent(battle, {

@@ -230,13 +230,16 @@ trusting a staged capture of that family.
 - `src/team/roster.js` builds AI-filled slots from one `aiFill` template per
   team, not per slot; the host reports `diagnostics.aiFillResourceGaps` and
   declares nothing rather than guessing.
-- **A4 is open and needs four files one agent did not own.** The completion
-  token is `team-arena:<winner>:<losers>:<reason>` and carries no battle
-  identity, so two bouts between the same teams share a token and bout 1's
-  acknowledgement settles bout 2. Fixing it needs `resolver.js` to pass the
-  battle to `CampaignSettlement`, `record.js`'s `assertSettlementBlock` to stop
-  recomputing the token, and two test files that hard-code the literal string.
-  Record ids change, which is cheap now (no campaign records are committed).
+- ~~A4: the completion token carries no battle identity~~ **CLOSED.** The token
+  is now `<outcome prefix>:<battle discriminator>`, the discriminator being the
+  battle's arm-time `combatStateHash` — read after the result and the
+  `team-eliminated` events are on the battle and before `arm()`, which is late
+  enough to cover the whole terminal state and early enough that the hash cannot
+  see the token it is about to go into. `arm()` requires it rather than
+  defaulting, because a default would silently restore the defect.
+  One residual, and it is correct rather than a defect: two bouts with an
+  identical blueprint AND an identical action stream still share a token. They
+  are the same battle by every observable.
 - No per-action animation acknowledgement exists, so nothing sequences action
   N+1's rebind against action N's running timeline. Documented, not invented.
 

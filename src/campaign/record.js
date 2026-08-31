@@ -17,7 +17,7 @@
  *
  * | Block | Why it is here |
  * | --- | --- |
- * | `settlement` | the record exists because settlement fired. `completionToken` is a pure function of the outcome (`src/team/settlement.js`), so it is also the natural idempotency key and is recomputed here as a consistency check. |
+ * | `settlement` | the record exists because settlement fired. `completionToken` is `<outcome>:<battle discriminator>` — a pure function of the outcome **of one battle** (`src/team/settlement.js`) — so it is the natural idempotency key, and its outcome half is recomputed here as a consistency check. Two bouts between the same teams ending the same way no longer share a token, and therefore no longer share a `recordId`. |
  * | `teams` | the roster: team ids, slot seats, and **which slots were AI-filled**. `aiFilled` is a roster fact — the slot had nobody in it — and is not the same question as whether a seat's controller is the AI. |
  * | `seats` | controller identity, kept in its own block exactly as `toControllerState()` keeps it out of `toTeamWireState()`. A seat entry may not carry a combatant id; the validator says so by name. |
  * | `outcomes` | per-combatant results: survival, final health, statuses, and the event sequence at which the combatant was defeated. |
@@ -45,7 +45,7 @@ import { ControllerKind } from "../team/controllers.js";
 import { ResultReason } from "../team/elimination.js";
 import { MAX_TEAM_SLOTS, MIN_TEAM_SLOTS, TEAMS_PER_BATTLE } from "../team/roster.js";
 import { RuleSetVerification } from "../team/rule-set.js";
-import { completionTokenFor } from "../team/settlement.js";
+import { battleDiscriminatorOf, completionTokenMatchesOutcome } from "../team/settlement.js";
 import { CampaignRecordError, CampaignRecordIntegrityError } from "./errors.js";
 import { assertNoVanillaFieldNames } from "./vanilla-boundary.js";
 
@@ -330,10 +330,32 @@ function assertSettlementBlock(settlement, teamIds) {
   if (reason === ResultReason.DRAW && loserTeamIds.length !== teamIds.size) {
     throw new CampaignRecordError("A draw must name every team as eliminated.");
   }
-  // Recomputed, not trusted: the token is a pure function of the outcome, so a
-  // record whose outcome was edited no longer agrees with its own token.
-  const expected = completionTokenFor({ winnerTeamId, loserTeamIds, reason });
-  if (completionToken !== expected) {
+  // Checked, not trusted — but checked against the half of the token this
+  // layer can honestly recompute.
+  //
+  // The token is `<outcome prefix>:<battle discriminator>`, and the
+  // discriminator is `combatStateHash(battle)` as it stood the instant the
+  // settlement armed (`src/team/resolver.js`, `checkResult`). A record is a
+  // finished artefact: it holds the state hash of the *settled* battle, not
+  // the arm-time one, so nothing here can recompute the discriminator. The
+  // outcome half it can, and that is the half worth checking — a record whose
+  // result was edited no longer agrees with its own token, which is exactly
+  // the tamper this check has always existed to catch.
+  //
+  // The discriminator is not left unguarded either: `recordId` is SHA-256 over
+  // `{battleId, completionToken}`, so editing it alone is caught by
+  // `validateCampaignRecord`'s recordId check, and `digest` covers everything.
+  //
+  // Shape first, so a token from before the discriminator existed is refused
+  // by name instead of surfacing as a confusing outcome mismatch.
+  if (battleDiscriminatorOf(completionToken) === null) {
+    throw new CampaignRecordError(
+      "settlement.completionToken carries no battle discriminator. A token naming only the outcome is " +
+      "shared by every bout between the same teams that ended the same way, so it cannot identify the " +
+      "battle this record describes."
+    );
+  }
+  if (!completionTokenMatchesOutcome(completionToken, { winnerTeamId, loserTeamIds, reason })) {
     throw new CampaignRecordError("settlement.completionToken does not match the recorded outcome.");
   }
   if (acknowledgedToken !== completionToken) {

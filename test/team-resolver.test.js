@@ -10,9 +10,12 @@ import {
   BATTLE_RESULT_ACK_TYPE,
   BATTLE_RESULT_PENDING_TYPE,
   BattleError,
+  battleDiscriminatorOf,
   campaignSettlement,
   combatantById,
   combatStateHash,
+  completionTokenFor,
+  completionTokenMatchesOutcome,
   ControllerKind,
   controllerOf,
   createTeamBattle,
@@ -24,6 +27,7 @@ import {
   lastResolvedAction,
   legalActions,
   normaliseResourceBag,
+  outcomeTokenPrefix,
   placeholderTeamRules,
   reassignController,
   replayTeamBattle,
@@ -240,7 +244,24 @@ test("settlement fires exactly once, and only after elimination and acknowledgem
   const pending = battle.events.at(-1);
   assert.equal(pending.type, BATTLE_RESULT_PENDING_TYPE);
   assert.equal(pending.status, "pending-animation");
-  assert.equal(pending.completionToken, "team-arena:red:blue:elimination");
+  // The token is `<outcome>:<battle discriminator>`. The outcome half is the
+  // string the token used to be in its entirety; the battle half is this
+  // battle's own arm-time `combatStateHash`, and is what stops a second bout
+  // between the same teams from sharing this bout's token.
+  assert.equal(
+    outcomeTokenPrefix({ winnerTeamId: "red", loserTeamIds: ["blue"], reason: "elimination" }),
+    "team-arena:red:blue:elimination"
+  );
+  assert.ok(pending.completionToken.startsWith("team-arena:red:blue:elimination:"));
+  assert.match(battleDiscriminatorOf(pending.completionToken), /^[0-9a-f]{8}$/);
+  assert.equal(
+    completionTokenMatchesOutcome(pending.completionToken, {
+      winnerTeamId: "red",
+      loserTeamIds: ["blue"],
+      reason: "elimination"
+    }),
+    true
+  );
   // Gate 2 not passed yet: nothing has settled.
   assert.equal(settled.length, 0);
   assert.equal(isCampaignSettled(battle), false);
@@ -248,12 +269,14 @@ test("settlement fires exactly once, and only after elimination and acknowledgem
   assert.equal(acknowledgeResultAnimation(battle, ackFor(battle)), true);
   assert.equal(settled.length, 1);
   assert.equal(isCampaignSettled(battle), true);
+  // The settlement record's shape is unchanged: five fields, the discriminator
+  // living inside the token and nowhere else.
   assert.deepEqual(settled[0], {
     winnerTeamId: "red",
     loserTeamIds: ["blue"],
     reason: "elimination",
-    completionToken: "team-arena:red:blue:elimination",
-    acknowledgedToken: "team-arena:red:blue:elimination"
+    completionToken: pending.completionToken,
+    acknowledgedToken: pending.completionToken
   });
 });
 
@@ -274,7 +297,17 @@ test("an acknowledgement before team elimination is refused", () => {
       { id: "blue", combatants: [brute("b1", 20), brute("b2", 10)] }
     ]
   });
-  const premature = { type: BATTLE_RESULT_ACK_TYPE, completionToken: "team-arena:red:blue:elimination" };
+  // A perfectly well-formed token for the result this battle is heading for.
+  // Gate 1 has not passed, so it is refused on the gate, not on its shape.
+  const premature = {
+    type: BATTLE_RESULT_ACK_TYPE,
+    completionToken: completionTokenFor({
+      winnerTeamId: "red",
+      loserTeamIds: ["blue"],
+      reason: "elimination",
+      battleDiscriminator: "0123abcd"
+    })
+  };
   assert.throws(() => acknowledgeResultAnimation(battle, premature), SettlementError);
 
   // One knockout is still not elimination, so the gate stays shut.
@@ -285,8 +318,25 @@ test("an acknowledgement before team elimination is refused", () => {
 
 test("an acknowledgement with the wrong token or shape is refused", () => {
   const { battle, settled } = eliminatedTwoOnTwo();
+  // The mirror image of the real result, correctly shaped, still refused.
   assert.throws(
-    () => acknowledgeResultAnimation(battle, { type: BATTLE_RESULT_ACK_TYPE, completionToken: "team-arena:blue:red:elimination" }),
+    () => acknowledgeResultAnimation(battle, {
+      type: BATTLE_RESULT_ACK_TYPE,
+      completionToken: completionTokenFor({
+        winnerTeamId: "blue",
+        loserTeamIds: ["red"],
+        reason: "elimination",
+        battleDiscriminator: battleDiscriminatorOf(ackFor(battle).completionToken)
+      })
+    }),
+    SettlementError
+  );
+  // And the pre-discriminator token shape, which every bout used to share.
+  assert.throws(
+    () => acknowledgeResultAnimation(battle, {
+      type: BATTLE_RESULT_ACK_TYPE,
+      completionToken: "team-arena:red:blue:elimination"
+    }),
     SettlementError
   );
   assert.throws(() => acknowledgeResultAnimation(battle, { type: "something-else", completionToken: "x" }), SettlementError);
@@ -322,9 +372,155 @@ test("a settled battle cannot be re-armed with a different result", () => {
   const { battle } = eliminatedTwoOnTwo();
   acknowledgeResultAnimation(battle, ackFor(battle));
   assert.throws(
-    () => battle.settlement.arm({ winnerTeamId: "blue", loserTeamIds: ["red"], reason: "elimination" }),
-    SettlementError
+    // A fully valid outcome, discriminator included, so this is refused by the
+    // latch rather than by the outcome's own validation.
+    () => battle.settlement.arm({
+      winnerTeamId: "blue",
+      loserTeamIds: ["red"],
+      reason: "elimination",
+      battleDiscriminator: combatStateHash(battle)
+    }),
+    (error) => error instanceof SettlementError && /already settled/.test(error.message)
   );
+});
+
+test("a settlement cannot be armed without a battle discriminator", () => {
+  const { battle } = eliminatedTwoOnTwo();
+  const fresh = createTeamBattle({
+    rngTape: hitTape(2),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40), brute("r2", 30)] },
+      { id: "blue", combatants: [brute("b1", 20), brute("b2", 10)] }
+    ]
+  });
+  const outcome = { winnerTeamId: "red", loserTeamIds: ["blue"], reason: "elimination" };
+  // Missing, and every shape that is not a state hash: a counter, a timestamp,
+  // a random-looking string. Each of them would discriminate; none of them is
+  // a function of the battle, so each would break deterministic replay.
+  for (const battleDiscriminator of [undefined, null, "", "1", "2", "0123ABCD", "0123abcde", "not-a-hash"]) {
+    assert.throws(
+      () => fresh.settlement.arm({ ...outcome, battleDiscriminator }),
+      (error) => error instanceof SettlementError && /battleDiscriminator/.test(error.message)
+    );
+  }
+  assert.equal(fresh.settlement.isArmed, false);
+  // The resolver supplies one, so the ordinary path never sees this refusal.
+  assert.match(battleDiscriminatorOf(ackFor(battle).completionToken), /^[0-9a-f]{8}$/);
+});
+
+/* ------------------------------------------------------------------ */
+/* Settlement: the token names one battle, not one result              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One bout of a campaign: red beats blue by elimination, every time.
+ *
+ * `seed` and `order` are the only things that vary. Every bout has the same
+ * team ids, the same winner, the same loser and the same reason — which is
+ * precisely the situation the old token could not tell apart, and precisely
+ * the situation the delivery target is: consecutive bouts between the same two
+ * teams in one networked campaign.
+ */
+function redBeatsBlue({ seed = 1, order = ["b1", "b2"] } = {}) {
+  const settled = [];
+  const battle = createTeamBattle({
+    seed,
+    rngTape: hitTape(2),
+    onCampaignSettled: (record) => settled.push(record),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40), brute("r2", 30)] },
+      { id: "blue", combatants: [brute("b1", 20), brute("b2", 10)] }
+    ]
+  });
+  // r1 always acts first (agility 40), r2 second; which of blue's two they
+  // fell is what `order` chooses.
+  applyAction(battle, melee("r1", order[0]));
+  applyAction(battle, melee("r2", order[1]));
+  return { battle, settled, token: battle.settlement.pendingResultEvent().completionToken };
+}
+
+test("two independent bouts with the same teams and the same result do not share a token", () => {
+  const outcome = { winnerTeamId: "red", loserTeamIds: ["blue"], reason: "elimination" };
+  const bouts = [
+    redBeatsBlue({ seed: 101 }),
+    redBeatsBlue({ seed: 202 }),
+    redBeatsBlue({ seed: 101, order: ["b2", "b1"] })
+  ];
+
+  for (const bout of bouts) {
+    assert.deepEqual(bout.battle.result, { winnerTeamId: "red", reason: "elimination" });
+    // Every bout agrees about the outcome...
+    assert.equal(completionTokenMatchesOutcome(bout.token, outcome), true);
+    assert.ok(bout.token.startsWith("team-arena:red:blue:elimination:"));
+  }
+  // ...and disagrees about which battle it was. Before the discriminator all
+  // three of these were the single string "team-arena:red:blue:elimination".
+  const tokens = bouts.map((bout) => bout.token);
+  assert.equal(new Set(tokens).size, tokens.length, tokens.join(" "));
+  assert.equal(new Set(tokens.map(battleDiscriminatorOf)).size, tokens.length);
+});
+
+test("bout 1's acknowledgement cannot settle bout 2", () => {
+  const boutOne = redBeatsBlue({ seed: 101 });
+  const boutTwo = redBeatsBlue({ seed: 202 });
+
+  // Bout 1 settles on its own acknowledgement, as it should.
+  assert.equal(
+    acknowledgeResultAnimation(boutOne.battle, { type: BATTLE_RESULT_ACK_TYPE, completionToken: boutOne.token }),
+    true
+  );
+  assert.equal(boutOne.settled.length, 1);
+
+  // Bout 2 is armed and waiting. Bout 1's acknowledgement is the one that used
+  // to settle it — same teams, same winner, same reason, therefore, until now,
+  // the same token — and settle it with bout 1's result.
+  assert.equal(boutTwo.battle.settlement.isArmed, true);
+  assert.throws(
+    () => acknowledgeResultAnimation(boutTwo.battle, {
+      type: BATTLE_RESULT_ACK_TYPE,
+      completionToken: boutOne.token
+    }),
+    (error) => error instanceof SettlementError && /does not match the armed battle result/.test(error.message)
+  );
+  assert.equal(boutTwo.settled.length, 0);
+  assert.equal(isCampaignSettled(boutTwo.battle), false);
+
+  // Its own acknowledgement still settles it, exactly once.
+  assert.equal(
+    acknowledgeResultAnimation(boutTwo.battle, { type: BATTLE_RESULT_ACK_TYPE, completionToken: boutTwo.token }),
+    true
+  );
+  assert.equal(boutTwo.settled.length, 1);
+  assert.notEqual(boutOne.settled[0].completionToken, boutTwo.settled[0].completionToken);
+});
+
+test("the token stays a pure function of the battle: a replay reproduces it exactly", () => {
+  const blueprint = {
+    seed: 909,
+    rngTape: hitTape(2),
+    teams: [
+      { id: "red", combatants: [brute("r1", 40), brute("r2", 30)] },
+      { id: "blue", combatants: [brute("b1", 20), brute("b2", 10)] }
+    ]
+  };
+  const actions = [melee("r1", "b1"), melee("r2", "b2")];
+
+  const live = replayTeamBattle(blueprint, actions);
+  const again = replayTeamBattle(blueprint, actions);
+  const liveToken = live.settlement.pendingResultEvent().completionToken;
+
+  // A counter or a random value would discriminate too, and would fail here.
+  assert.equal(again.settlement.pendingResultEvent().completionToken, liveToken);
+  assert.equal(combatStateHash(again), combatStateHash(live));
+  // The discriminator is this battle's arm-time state hash, so it is not the
+  // settled battle's hash — the pending event and the armed settlement land in
+  // the projection after it is taken.
+  assert.notEqual(battleDiscriminatorOf(liveToken), combatStateHash(live));
+
+  // And a bout that differs only in seed differs in the token, so the token is
+  // reproducible without being shared.
+  const elsewhere = replayTeamBattle({ ...blueprint, seed: 910 }, actions);
+  assert.notEqual(elsewhere.settlement.pendingResultEvent().completionToken, liveToken);
 });
 
 /* ------------------------------------------------------------------ */

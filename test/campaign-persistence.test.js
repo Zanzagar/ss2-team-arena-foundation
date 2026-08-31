@@ -11,14 +11,17 @@ import {
   acknowledgeResultAnimation,
   advanceAiTurns,
   applyAction,
+  battleDiscriminatorOf,
   campaignSettlement,
   combatStateHash,
+  completionTokenFor,
   createTeamBattle,
   currentCombatant,
   defineTeamRuleSet,
   isAiControlled,
   isCampaignSettled,
   legalActions,
+  outcomeTokenPrefix,
   pendingResultEvent,
   reassignController,
   RuleSetVerification
@@ -469,7 +472,7 @@ test("a record built on a runtime-verified rule set carries its build hash and g
   // this layer's; the record only carries the citation.
 });
 
-test("the completion token is recomputed from the outcome, so an edited result is refused", () => {
+test("the completion token's outcome half is recomputed, so an edited result is refused", () => {
   const record = sampleRecord();
   const draft = mutable(record);
   draft.settlement.winnerTeamId = "beta";
@@ -477,8 +480,67 @@ test("the completion token is recomputed from the outcome, so an edited result i
   assert.throws(() => reseal(draft), /completionToken does not match the recorded outcome/);
 
   const swapped = mutable(record);
-  swapped.settlement.acknowledgedToken = "team-arena:beta:alpha+none:elimination";
+  swapped.settlement.acknowledgedToken = completionTokenFor({
+    winnerTeamId: "beta",
+    loserTeamIds: ["alpha"],
+    reason: "elimination",
+    battleDiscriminator: battleDiscriminatorOf(record.settlement.completionToken)
+  });
   assert.throws(() => reseal(swapped), /acknowledgedToken must equal completionToken/);
+});
+
+test("a record whose token names only an outcome is refused by name", () => {
+  // The token this layer used to write and used to recompute. It identifies a
+  // *result*, so every bout between the same teams that ended the same way
+  // shared it — and shared the `recordId` derived from it.
+  const draft = mutable(sampleRecord());
+  const { winnerTeamId, loserTeamIds, reason } = draft.settlement;
+  const undiscriminated = outcomeTokenPrefix({ winnerTeamId, loserTeamIds, reason });
+  draft.settlement.completionToken = undiscriminated;
+  draft.settlement.acknowledgedToken = undiscriminated;
+  draft.recordId = campaignRecordIdFor({ battleId: draft.battleId, completionToken: undiscriminated });
+  assert.throws(() => reseal(draft), /carries no battle discriminator/);
+});
+
+test("two bouts between the same teams with the same result no longer collide", () => {
+  // The delivery target: consecutive bouts in one campaign, same two teams,
+  // same winner, same reason. `twoVsTwo()` fixes the seed, so the only thing
+  // separating these battles is that they are separate battles.
+  const first = buildCampaignRecord(settledBattle(twoVsTwo()), { battleId: "camp-bout-1", recordedAt: AT });
+  const second = buildCampaignRecord(
+    settledBattle({ ...twoVsTwo(), seed: 8 }),
+    { battleId: "camp-bout-2", recordedAt: AT }
+  );
+
+  const outcomeOf = (record) => ({
+    winnerTeamId: record.settlement.winnerTeamId,
+    loserTeamIds: record.settlement.loserTeamIds,
+    reason: record.settlement.reason
+  });
+  assert.deepEqual(outcomeOf(first), outcomeOf(second), "the two bouts must end the same way");
+  assert.equal(
+    outcomeTokenPrefix(outcomeOf(first)),
+    outcomeTokenPrefix(outcomeOf(second)),
+    "and must therefore share the outcome half of the token"
+  );
+
+  // What they no longer share: the token, its discriminator, or the record id
+  // derived from it. Before the discriminator these were equal strings, and a
+  // campaign store keyed on the record id kept one bout of the two.
+  assert.notEqual(first.settlement.completionToken, second.settlement.completionToken);
+  assert.notEqual(
+    battleDiscriminatorOf(first.settlement.completionToken),
+    battleDiscriminatorOf(second.settlement.completionToken)
+  );
+  assert.notEqual(first.recordId, second.recordId);
+
+  // Even under one battleId — the case a campaign would hit if it reused an
+  // id — the two records stay distinguishable.
+  const sameId = (record) => campaignRecordIdFor({
+    battleId: "camp-shared",
+    completionToken: record.settlement.completionToken
+  });
+  assert.notEqual(sameId(first), sameId(second));
 });
 
 test("recorded survival must agree with recorded health", () => {
@@ -511,7 +573,15 @@ test("a draw names every team as eliminated and cannot leave a survivor", () => 
   const base = mutable(sampleRecord());
   const asDraw = (loserTeamIds) => {
     const draw = { ...base };
-    const token = `team-arena:none:${[...loserTeamIds].sort().join("+")}:draw`;
+    // Reuse the real battle's discriminator rather than inventing one: the
+    // token's battle half is a state hash and this test is about its outcome
+    // half.
+    const token = completionTokenFor({
+      winnerTeamId: null,
+      loserTeamIds,
+      reason: "draw",
+      battleDiscriminator: battleDiscriminatorOf(base.settlement.completionToken)
+    });
     draw.settlement = {
       winnerTeamId: null,
       loserTeamIds: [...loserTeamIds].sort(),
