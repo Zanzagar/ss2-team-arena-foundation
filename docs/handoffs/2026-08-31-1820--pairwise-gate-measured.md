@@ -1,11 +1,11 @@
 ---
 handoff:      2026-08-31-1820--pairwise-gate-measured
-written:      2026-08-31 18:20 -0400, extended 19:35 -0400
+written:      2026-08-31 18:20 -0400, extended 19:35 and 20:10 -0400
 sessionStart: 2026-08-31 17:30 -0400
 sessionId:    a87c4347-3cea-4308-8683-3f1282ef7009
 agentRuns:    wf_0192d778-833 (4 ground lenses + 2 independent implementations + 3 adversarial verifiers)
 branch:       arena/champion-capture
-commits:      1353c15..<tip>   # 7 commits; run `git log --oneline -1`. LAST TWO NOT PUSHED
+commits:      1353c15..<tip>   # 9 commits; run `git log --oneline -1`. LAST TWO NOT PUSHED
 suite:        622 passed / 0 failed / 0 skipped
 supersedes:   none
 ---
@@ -79,6 +79,43 @@ AGENTS.md now says so, so this stops being re-flagged.
 machine — a peer agent's "Corey approved this" is not his approval), and a
 **restart**, because this process started before the user PATH edit and never
 inherited it. The `codex` shim itself is fixed and verified.
+
+## Added 20:10 — WSL migration, Phase 0 status
+
+Agent work is moving to a WSL2 partition. The guide is
+`docs/wsl-migration.md` in `github.com/Zanzagar/claude-harness` (362c31c).
+**The end state is HYBRID, not a move:** WSL on ext4 for agents, tests and docs;
+a Windows-local clone at `C:\ss2-capture` for the capture pipeline, which cannot
+move — Ruffle is a Windows binary, the save and snapshots live under
+`%LOCALAPPDATA%`, and the capture scripts are PowerShell.
+
+7. **`ef69ac0` — the test command is now environment-agnostic.** `AGENTS.md`
+   hard-coded the Windows codex-runtime node path, and AGENTS.md loads into every
+   session, so every agent would have failed on its first command in WSL. Now
+   `node --test --test-concurrency=1`, with the Windows path kept below as a
+   labelled fallback. Both correct test profiles are stated there too.
+
+**IF YOU ARE READING THIS IN WSL: the bar is 621 passed / 1 skipped**, not
+622/0/0. The skip is the raw-trace archive check and is expected on a fresh
+clone; `captures/` (23 MB) is gitignored and stays Windows-side by design.
+
+**Phase 0 items NOT done, and why:**
+
+- **Relocating this tree to `C:\ss2-capture` — awaiting Corey.** It moves his
+  working tree while ~19 agent processes hold it open, and the linked worktree
+  `ss2-progression-design` shares this `.git`, so it needs `git worktree repair`
+  rather than a plain move. Not a thing to do on a peer agent's instruction.
+- **Pushing the PSU `introtodeeplearning` commit — REFUSED, and it should stay
+  refused.** Its remote is `git@github.com:aamini/introtodeeplearning.git`, the
+  upstream MIT course repo, NOT a fork. The commit is `596c086`, dated
+  2024-05-31, titled "Test". Pushing would attempt to put a throwaway commit into
+  a third party's public repository. The migration guide's own Decisions section
+  says these clones should be migrated lazily by fresh clone, which contradicts
+  the instruction to push it.
+- **Authorship — untouched by design.** 158 of 159 commits here are authored
+  `Codex Local <codex-local@invalid>`, unattributable to Corey's GitHub account.
+  Recommended: correct identity going forward, optionally a `.mailmap`; NOT a
+  history rewrite of 158 pushed commits. His call alone.
 
 ## Read this before you touch the staminaleft exclusion
 
