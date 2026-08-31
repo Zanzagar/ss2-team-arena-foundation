@@ -44,8 +44,23 @@ function Invoke-Mirror([string] $source, [string] $destination) {
 }
 
 function Assert-TreesIdentical([string] $left, [string] $right) {
-    $leftFiles = @(Get-ChildItem $left -Recurse -File | Sort-Object { $_.FullName.Substring($left.Length) })
-    $rightFiles = @(Get-ChildItem $right -Recurse -File | Sort-Object { $_.FullName.Substring($right.Length) })
+    $leftFiles = @(Get-ChildItem -LiteralPath $left -Recurse -File | Sort-Object { $_.FullName.Substring($left.Length) })
+    $rightFiles = @(Get-ChildItem -LiteralPath $right -Recurse -File | Sort-Object { $_.FullName.Substring($right.Length) })
+    # AN EMPTY TREE IS NOT A VERIFIED TREE. `0 -ne 0` passes, so this function
+    # printed "Verified: 0 file(s) identical." for a snapshot of nothing - and
+    # then run-arena.ps1 accepted that as a restore point and mutated the
+    # licensed save behind it.
+    #
+    # The restore direction is worse. Invoke-Mirror uses robocopy /MIR, which
+    # DELETES at the destination, so restoring an empty snapshot would not fail
+    # to help - it would destroy the save it was taken to protect. This is the
+    # safety net for every save-mutating run in the project, and it could have
+    # been the thing that lost the gladiator.
+    if ($leftFiles.Count -eq 0 -or $rightFiles.Count -eq 0) {
+        throw "Verification failed: one side holds NO files ($($leftFiles.Count) vs $($rightFiles.Count)). " +
+            'A snapshot of nothing is not a restore point, and restoring it would mirror the emptiness ' +
+            'onto the real save.'
+    }
     if ($leftFiles.Count -ne $rightFiles.Count) {
         throw "Verification failed: $($leftFiles.Count) vs $($rightFiles.Count) files."
     }
@@ -66,7 +81,7 @@ function Assert-TreesIdentical([string] $left, [string] $right) {
 
 switch ($Command) {
     'list' {
-        if (Test-Path $snapshotRoot) {
+        if (Test-Path -LiteralPath $snapshotRoot) {
             Get-ChildItem $snapshotRoot -Directory | Select-Object Name, LastWriteTime
         } else {
             Write-Host 'No snapshots yet.'
@@ -74,12 +89,15 @@ switch ($Command) {
     }
     'snapshot' {
         if (-not $Name) { throw 'snapshot requires a name.' }
-        if (-not (Test-Path $saveRoot)) { throw "No Ruffle save data exists yet at $saveRoot." }
+        if (-not (Test-Path -LiteralPath $saveRoot)) { throw "No Ruffle save data exists yet at $saveRoot." }
+        if (@(Get-ChildItem -LiteralPath $saveRoot -Recurse -File).Count -eq 0) {
+            throw "$saveRoot holds no files; a snapshot of nothing is not a restore point."
+        }
         if (Get-Process ruffle -ErrorAction SilentlyContinue) {
             throw 'Ruffle is running; close every capture window before snapshotting.'
         }
         $dest = Join-Path $snapshotRoot $Name
-        if (Test-Path $dest) { throw "Snapshot '$Name' already exists; pick a new name." }
+        if (Test-Path -LiteralPath $dest) { throw "Snapshot '$Name' already exists; pick a new name." }
         Invoke-Mirror $saveRoot $dest
         Assert-TreesIdentical $saveRoot $dest
         Write-Host "Snapshotted Ruffle saves to $dest"
@@ -87,7 +105,10 @@ switch ($Command) {
     'restore' {
         if (-not $Name) { throw 'restore requires a name.' }
         $source = Join-Path $snapshotRoot $Name
-        if (-not (Test-Path $source)) { throw "Snapshot '$Name' does not exist." }
+        if (-not (Test-Path -LiteralPath $source)) { throw "Snapshot '$Name' does not exist." }
+        if (@(Get-ChildItem -LiteralPath $source -Recurse -File).Count -eq 0) {
+            throw "Snapshot '$Name' holds no files. Restoring it would MIRROR THAT EMPTINESS onto the real save, because Invoke-Mirror uses robocopy /MIR, which deletes at the destination."
+        }
         if (Get-Process ruffle -ErrorAction SilentlyContinue) {
             throw 'Ruffle is running; close every capture window before restoring.'
         }

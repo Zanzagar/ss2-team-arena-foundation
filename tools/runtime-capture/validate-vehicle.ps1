@@ -48,9 +48,24 @@ function Build-Movie([string] $shell, [string] $source, [string] $outSwf) {
     if ($LASTEXITCODE -ne 0) { throw "FFDec script import failed for $source (exit $LASTEXITCODE)." }
 }
 
+# A PASS must name a REVISION, not a moment. This script compiles whatever is
+# on disk at the instant it runs, and under the parallel-agent working agreement
+# a save landing mid-build would compile a half-written file - so "the vehicle
+# check passed" previously attributed to nothing at all. The source is hashed
+# before and after the copy, a mid-build change is refused, and the hash is
+# printed with the PASS.
+$wrapperSource = 'tools\runtime-capture\ss2-capture-wrapper.as'
+$sourceHashBefore = (Get-FileHash -LiteralPath $wrapperSource -Algorithm SHA256).Hash
+
 Write-Host 'Building wrapper and stub from source...'
-Build-Movie (Join-Path $work 'wrapper-shell.swf') 'tools\runtime-capture\ss2-capture-wrapper.as' (Join-Path $work 'ss2-capture-wrapper.swf')
+Build-Movie (Join-Path $work 'wrapper-shell.swf') $wrapperSource (Join-Path $work 'ss2-capture-wrapper.swf')
 Build-Movie (Join-Path $work 'stub-shell.swf') 'tools\runtime-capture\stub-game.as' (Join-Path $work 'stub-game.swf')
+
+$sourceHashAfter = (Get-FileHash -LiteralPath $wrapperSource -Algorithm SHA256).Hash
+if ($sourceHashBefore -ne $sourceHashAfter) {
+    throw "ss2-capture-wrapper.as changed while it was being compiled ($($sourceHashBefore.Substring(0,16)) -> " +
+        "$($sourceHashAfter.Substring(0,16))). This PASS would not name any revision; re-run it."
+}
 
 $tape = & $nodeExe tools/capture-session.mjs tape --fixture $FixturePath
 if ($LASTEXITCODE -ne 0) { throw 'Reading the fixture tape failed.' }
@@ -82,6 +97,22 @@ $observation = Join-Path $work "stubcheck-$stamp-observation.json"
 if ($LASTEXITCODE -ne 0) { throw 'delog failed - no trace lines captured.' }
 & $nodeExe tools/capture-session.mjs ingest --trace $jsonl --fixture $FixturePath --out $observation
 if ($LASTEXITCODE -ne 0) { throw 'ingest failed - see the raw trace for the divergence.' }
-& $nodeExe tools/capture-session.mjs verify --fixture $FixturePath --observation $observation
+# --divergence-dir is overridden because verify DEFAULTS to the committed
+# test/fixtures/ss2-1v1-divergences tree. A failing gate would otherwise drop
+# stub-derived evidence into the committed evidence store - which this script's
+# own header forbids ("never place their observation records under
+# test/observations/"). It has never fired only because the gate has always
+# passed.
+& $nodeExe tools/capture-session.mjs verify --fixture $FixturePath --observation $observation `
+    --divergence-dir $workRelative
 if ($LASTEXITCODE -ne 0) { throw 'VEHICLE CHECK FAILED: the stub round trip does not match the fixture.' }
-Write-Host 'VEHICLE CHECK PASSED: wrapper -> Ruffle -> delog -> ingest -> verify round trip matches.'
+Write-Host "VEHICLE CHECK PASSED for wrapper source $($sourceHashBefore.Substring(0,16)): wrapper -> Ruffle -> delog -> ingest -> verify round trip matches."
+Write-Host ''
+Write-Host 'WHAT THIS DOES NOT PROVE. Audited coverage: this gate never enters the'
+Write-Host 'navigator, the arena state machine, the four gates, staging, the shop,'
+Write-Host 'the fight policy or the capture gate, and isNum has ZERO reachable call'
+Write-Host 'sites in a stub run. It caught 0 of the 6 defects found live on this'
+Write-Host 'route. It proves the wrapper compiles, wraps and re-wraps overlay'
+Write-Host 'functions, serves an injected tape, and round-trips one lethal action'
+Write-Host 'through the pipeline. Save corruption is outside its observable'
+Write-Host 'universe entirely - it compares a trace to a fixture, never a save.'
