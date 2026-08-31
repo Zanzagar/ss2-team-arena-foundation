@@ -123,6 +123,7 @@ var rawNavigate = _root.navigate;
 var rawArenaTarget = _root.arenaTarget;
 var rawArenaPolicy = _root.arenaPolicy;
 var rawArenaCapture = _root.arenaCapture;
+var rawArenaStagedLevel = _root.arenaStagedLevel;
 var rawTimeOfDayCeiling = _root.timeOfDayCeiling;
 var rawSessionLimitSec = _root.sessionLimitSec;
 var config = {
@@ -536,6 +537,10 @@ if (rawArenaTarget != undefined && rawArenaTarget != "") {
 // fight nobody chose. "champion" arms only for the tournament rank-1 bout,
 // which is the one reproducible armoured opponent in the build.
 var arenaCaptureMode = (rawArenaCapture == undefined || rawArenaCapture == "") ? "never" : rawArenaCapture;
+// The herolevel a champion capture is staged for. 0 means "do not check", which
+// is weaker evidence, so a tournament capture run should always set it.
+var arenaStagedLevel = Number(rawArenaStagedLevel);
+if (!(arenaStagedLevel > 0)) arenaStagedLevel = 0;
 // The policy is arena-route-only, and forced off elsewhere rather than merely
 // left unset: a stray arenaPolicy on a prisoner run would replace that route's
 // explicit step list with a greedy fight, and every one of the twenty-two
@@ -558,13 +563,40 @@ var arenaMirrorZeroTicks = 0;
 var arenaPointsSpent = 0;
 var arenaBoutsFought = 0;
 
+// AVM1 NaN handling, and why every numeric test on this route goes through
+// these two helpers.
+//
+// AS2 compiles `a >= b` to `!(a < b)`, and EVERY comparison involving NaN is
+// false - so `NaN >= 150` evaluates to TRUE. `NaN != NaN` is not reliable here
+// either. That is not a hypothetical: the first live arena run aborted on
+// GATE A at 430 ms with `time_of_day` still undefined, because the ceiling test
+// was written `tod >= ceiling` behind a `tod == tod` guard and both misfired.
+//
+// Every value this navigator reads out of the game is undefined until the frame
+// that initialises it, so the safe test is a POSITIVE one that NaN cannot pass:
+// `n > 0 || n <= 0` is true for every real number and false only for NaN.
+// ONLY `<` IS PRIMITIVE. AVM1 has one comparison opcode; `>` is it with the
+// operands swapped, and `>=` and `<=` are it negated. Every comparison with NaN
+// is false, so the negated forms - `>=` and `<=` - both return TRUE for NaN.
+//
+// This bit twice in one run. First `tod >= ceiling` aborted the route at 430 ms
+// with time_of_day still undefined. Then the guard written to prevent that,
+// `n > 0 || n <= 0`, did it again: `NaN <= 0` is `!(0 < NaN)` = `!false` = true,
+// so the guard passed the exact value it existed to reject.
+//
+// The only safe shape is un-negated `<`, twice. Every real number satisfies at
+// least one; NaN satisfies neither.
+function isNum(value) {
+    var n = Number(value);
+    return (n < 1) || (0 < n);
+}
+
 // String(Number(undefined)) is "NaN", which is not JSON. Diagnostic lines are
 // stripped by delog, but a malformed one is unreadable by any tool, so every
 // numeric field goes through here.
 function jnum(value) {
-    var n = Number(value);
-    if (n != n) return "null";
-    return String(n);
+    if (!isNum(value)) return "null";
+    return String(Number(value));
 }
 
 function arenaLog(step, extra) {
@@ -628,10 +660,30 @@ function arenaLogLadder(root) {
 /** Every-tick hazard checks. False means the run is over. */
 function arenaGuards(root) {
     var frame = root._currentframe;
-    // GATE B - the special event screens. A generic advance step here would
-    // press special_button1/special_button2 and take a permanent stat change.
+    // GATE B - the special event screens.
+    //
+    // Two things the precondition that produced this gate got wrong, both
+    // byte-verified since. special_button1/special_button2 are not buttons at
+    // all - they are variable names for the option label text. The actual
+    // mutators are buttons 1819 and 1820, which apply
+    // special_event_good_effect_N / bad_effect_N. And entering frame 160
+    // mutates no hero stat by itself, so aborting here is genuinely safe.
+    //
+    // What the precondition MISSED is the dominant trigger, and it cannot be
+    // prevented from outside the game. Root frame 150 draws
+    // `special_event_chance = 1 + RandomNumber(100)` and jumps here when it is
+    // <= 2 - a flat 2% chance on EVERY town-square entry, wholly independent of
+    // time_of_day, through the RandomNumber opcode no instrumentation can
+    // intercept. A level 1 -> 4 run makes three to six town-square entries, so
+    // roughly 6-12% of otherwise healthy runs end here. That is a budgeted
+    // failure rate, not a defect: re-run from the snapshot.
+    //
+    // The jump happens AFTER save_character at frame 150 +0x0585, so the flush
+    // has already occurred when this aborts - which is exactly why aborting is
+    // safe rather than merely early.
     if (frame >= 160 && frame <= 169) {
-        arenaAbort("special-event-screen", "\"frame\":" + jnum(frame));
+        arenaAbort("special-event-screen", "\"frame\":" + jnum(frame) +
+            ",\"note\":\"2pct-per-townsquare-entry-or-time-of-day\"");
         return false;
     }
     // Terminal screens: gameover (235), bugs (242), gameover_demo (252),
@@ -642,11 +694,15 @@ function arenaGuards(root) {
     }
     // GATE A - both halves. The clock ceiling is the game's own state; the
     // wall clock catches a stall that never advances it.
-    var tod = Number(_global.time_of_day);
-    if (tod == tod && tod >= arenaTimeCeiling) {
-        arenaAbort("time-of-day-ceiling",
-            "\"tod\":" + jnum(tod) + ",\"ceiling\":" + jnum(arenaTimeCeiling));
-        return false;
+    // Only tested once the game has actually initialised the clock: before
+    // that it is undefined, and `undefined >= ceiling` is TRUE in AVM1.
+    if (isNum(_global.time_of_day)) {
+        var tod = Number(_global.time_of_day);
+        if (!(tod < arenaTimeCeiling)) {
+            arenaAbort("time-of-day-ceiling",
+                "\"tod\":" + jnum(tod) + ",\"ceiling\":" + jnum(arenaTimeCeiling));
+            return false;
+        }
     }
     if (getTimer() - arenaStartMs > arenaSessionLimitMs) {
         arenaAbort("session-wall-clock", "\"limitMs\":" + jnum(arenaSessionLimitMs));
@@ -658,7 +714,10 @@ function arenaGuards(root) {
 function arenaReachedTarget(root) {
     if (arenaWantTournament) return false;
     if (!(arenaTargetLevel > 0)) return false;
-    return Number(root.game.hero.herolevel) >= arenaTargetLevel;
+    // An undefined herolevel must NOT read as "target reached" - which is what
+    // a bare >= would do here.
+    if (!isNum(root.game.hero.herolevel)) return false;
+    return !(Number(root.game.hero.herolevel) < arenaTargetLevel);
 }
 
 /** A fresh bout re-arms the fight policy; the prisoner route never loops. */
@@ -710,10 +769,17 @@ function stepArenaNavigator() {
         // undefined or a non-number - the playhead would then run on into the
         // dungeon span and play the prologue regardless. Refuse to jump until
         // the value is a number.
-        var loadedLevel = Number(root.game.hero.herolevel);
-        if (loadedLevel != loadedLevel || loadedLevel < 1) {
+        // `loadedLevel != loadedLevel` is NOT a working NaN test in AVM1, and
+        // `loadedLevel < 1` is false for NaN - so the original pair of checks
+        // let exactly the value they exist to catch straight through.
+        if (!isNum(root.game.hero.herolevel)) {
             arenaAbort("herolevel-not-a-number",
                 "\"raw\":\"" + String(root.game.hero.herolevel) + "\"");
+            return;
+        }
+        var loadedLevel = Number(root.game.hero.herolevel);
+        if (loadedLevel < 1) {
+            arenaAbort("herolevel-below-one", "\"level\":" + jnum(loadedLevel));
             return;
         }
         arenaLog("hero-loaded", "\"props\":" + heroProps +
@@ -721,13 +787,17 @@ function stepArenaNavigator() {
             ",\"vitality\":" + jnum(root.game.hero.vitality) +
             ",\"gold\":" + jnum(root.game.hero.goldpieces));
         if (arenaReachedTarget(root)) { arenaFinish(root, "already-at-level"); return; }
-        // button 1669, verbatim.
+        // button 1669, verbatim - including the clicksound2.start() an earlier
+        // revision of this step dropped. save_character writes
+        // so_local["character" + _global.current_character], so the assignment
+        // below is what keeps a flush from minting a "characterundefined" slot.
         _global.current_character = root.char_to_load;
         root.delete_tooltips();
         _global.gamephase = 1;
         root.hero.removeMovieClip();
         _global.time_of_day = 24;
         root.game.hero.score = 0;
+        root.clicksound2.start();
         root.gotoAndPlay("daybreak");
         arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 10; return;
     }
@@ -771,7 +841,10 @@ function stepArenaNavigator() {
             ",\"gold\":" + jnum(root.game.hero.goldpieces) +
             ",\"bouts\":" + arenaBoutsFought);
         if (arenaReachedTarget(root)) { arenaFinish(root, "level"); return; }
-        root.clicksound2.start();
+        // Button 1800's ENTIRE body is this one call - 42 bytes, no sound. An
+        // earlier revision of this step added clicksound2.start() here, which
+        // this file has no licence to do while claiming to replicate a button
+        // body statement for statement.
         root.gotoAndPlay("foyer");                        // button 1800
         arenaPhase = "foyer"; arenaCooldown = 20; return;
     }
@@ -779,6 +852,16 @@ function stepArenaNavigator() {
         if (frame != 208) return;
         var foyer = root.foyer;
         if (foyer == undefined) return;
+        // A tournament ALREADY IN PROGRESS never shows the browse screen.
+        // Foyer frame 1 branches on tournament_in_progress and jumps straight
+        // to "tournament" (frame 22, resting at 36); "browse" (11, resting at
+        // 21) is the other arm. Waiting for frame 21 here parked every
+        // between-bout return for the full session limit - observed live: bout
+        // one was won, the reward arm sent the root to foyer, and the run then
+        // sat until GATE A's ceiling 180 seconds later.
+        if (_global.tournament_in_progress == true) {
+            arenaPhase = "ladder"; return;
+        }
         if (foyer._currentframe != 21) return;            // browse has settled
         var required = Number(foyer.tournament_level_required);
         var heroLevel = Number(root.game.hero.herolevel);
@@ -791,7 +874,11 @@ function stepArenaNavigator() {
         if (arenaWantTournament) {
             // The tournament button refuses with a bubble message below the
             // gate, so the check is the game's own and must pass first.
-            if (!(heroLevel >= required)) {
+            // Both sides must be real numbers before the comparison means
+            // anything: an undefined required level would otherwise read as
+            // "gate met" and enter a tournament the hero does not qualify for.
+            if (!isNum(root.game.hero.herolevel) || !isNum(foyer.tournament_level_required) ||
+                heroLevel < required) {
                 arenaAbort("tournament-gate-not-met",
                     "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
                 return;
@@ -961,13 +1048,23 @@ function stepArenaNavigator() {
             arenaCooldown = 2;
             return;
         }
-        // GATE C. Button 2283 reads _root.statpoints, the display mirror an
-        // enterFrame clip action maintains - not game.hero.statpoints. Require
-        // the mirror to read zero on two consecutive later frames before
-        // pressing; taking the refusal arm parks the run forever, and a run
-        // parked on the level-up screen holds a half-levelled gladiator.
+        // GATE C. Button 2283 reads _root.statpoints - byte-verified as a bare
+        // GetVariable resolving on _root, NOT a member access on
+        // _root.game.hero, which is what the eight stat buttons use. The mirror
+        // is maintained by an enterFrame clip action on character 2265, placed
+        // at root frame 227 and removed at 235, so it refreshes every frame
+        // across the whole level-up span and one frame is genuinely enough.
+        //
+        // Correction to the audit that produced this gate: taking the refusal
+        // arm does NOT park the run. That arm sets inspirato_text and jumps to
+        // the end - it is idempotent and retryable. The gate is still right,
+        // because pressing into it wastes frames and muddies the log, but the
+        // consequence is a retry, not a hang.
         arenaMirrorWaitTicks++;
-        if (Number(root.statpoints) == 0) arenaMirrorZeroTicks++;
+        // isNum first: AVM1's == is loose enough that an undefined mirror
+        // comparing equal to 0 is not a risk worth taking on the one press that
+        // decides whether four spent points are committed.
+        if (isNum(root.statpoints) && Number(root.statpoints) == 0) arenaMirrorZeroTicks++;
         else arenaMirrorZeroTicks = 0;
         if (arenaMirrorZeroTicks < 2) {
             if (arenaMirrorWaitTicks == 1 || arenaMirrorWaitTicks == 600) {
@@ -1007,7 +1104,14 @@ function stepArenaNavigator() {
                 _global.time_of_day = 24;
                 root.gotoAndPlay("daybreak");
             } else if (_global.tournament_in_progress == true) {
-                root.backup_character(levelHero);
+                // Replicated because button 2283's body contains it, but note that
+            // `backup_character` DOES NOT EXIST in this build - a whole-build
+            // function-name search finds only `backup_char`. This call is a
+            // no-op, and nothing may depend on it. What actually preserves the
+            // four spent points is backup_char above, which calls constructDNA
+            // and serialises them into charDNA before save_character rebuilds
+            // the hero from it.
+            root.backup_character(levelHero);
                 root.gotoAndPlay("foyer");
             } else {
                 root.gotoAndPlay("townsquare");
@@ -1022,6 +1126,13 @@ function stepArenaNavigator() {
             arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 20; return;
         }
         if (_global.tournament_in_progress == true) {
+            // Replicated because button 2283's body contains it, but note that
+            // `backup_character` DOES NOT EXIST in this build - a whole-build
+            // function-name search finds only `backup_char`. This call is a
+            // no-op, and nothing may depend on it. What actually preserves the
+            // four spent points is backup_char above, which calls constructDNA
+            // and serialises them into charDNA before save_character rebuilds
+            // the hero from it.
             root.backup_character(levelHero);
             root.gotoAndPlay("foyer");
             arenaPhase = "foyer"; arenaCooldown = 20; return;
@@ -1402,8 +1513,54 @@ function captureAllowedNow() {
     if (arenaCaptureMode == "champion") {
         var hero = gameRoot().game.hero;
         if (hero == undefined) return false;
+        if (!isNum(hero.tournament_ranking)) return false;
         var ranking = Number(hero.tournament_ranking);
-        return (ranking == ranking && ranking <= 2 && _global.tournament_in_progress == true);
+        if (!(ranking <= 2 && _global.tournament_in_progress == true)) return false;
+
+        // The rank-1 OPPONENT is reproducible; the rank-1 BOUT is not, and the
+        // difference is the whole reason this check exists.
+        //
+        // unleash_hell builds the champion from hard-coded DNA with no RNG at
+        // all, so the villain side is fixed. But reaching rank 1 means first
+        // beating ranks 3 and 2, who ARE randomise_gladiator opponents drawn
+        // through the un-interceptable RandomNumber opcode. Two hero-side
+        // fields carry out of those bouts into this one:
+        //
+        //   staminaleft - battlevalues resets it ONLY when it is already <= 0
+        //     (`if (!(staminaleft > 0)) staminaleft = staminamax`), arena
+        //     initbattle resets the VILLAIN's only, restore_char does not carry
+        //     it, and root frame 214 resets hitpoints alone. Different
+        //     opponents mean different turn counts mean different residual
+        //     stamina.
+        //   herolevel - experience per bout is the generated opponent's
+        //     character_xp, so whether a level-up lands mid-ladder is itself
+        //     RNG-decided, and herolevel moves hitpointsmax.
+        //
+        // Both are projected fields, so two sessions that differ in either
+        // cannot match and can never clear the two-session promotion gate. The
+        // wrapper injects only the RNG tape - it stages no combatant state - so
+        // there is nothing to force here, only something to refuse.
+        //
+        // Refusing turns a silent non-match into a visible low success rate,
+        // which is the right trade: a session that cannot be evidence should
+        // produce no trace rather than a trace nobody can reproduce.
+        var stamina = Number(hero.staminaleft);
+        var staminaMax = Number(hero.staminamax);
+        var level = Number(hero.herolevel);
+        // Unreadable is unstaged: a field the wrapper cannot read is a field it
+        // cannot certify, and this gate exists to refuse rather than to guess.
+        var readable = isNum(hero.staminaleft) && isNum(hero.staminamax) && isNum(hero.herolevel);
+        var staminaStaged = readable && (stamina == staminaMax);
+        var levelStaged = readable && (!(arenaStagedLevel > 0) || (level == arenaStagedLevel));
+        if (!staminaStaged || !levelStaged) {
+            arenaLog("capture-refused-unstaged",
+                "\"staminaleft\":" + jnum(stamina) +
+                ",\"staminamax\":" + jnum(staminaMax) +
+                ",\"herolevel\":" + jnum(level) +
+                ",\"stagedLevel\":" + jnum(arenaStagedLevel));
+            return false;
+        }
+        return true;
     }
     return false;
 }
