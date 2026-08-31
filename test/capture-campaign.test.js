@@ -42,6 +42,7 @@ import {
 import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 import { buildSs2CaptureManifest } from "../tools/runtime-capture/build-manifest.mjs";
 import {
+  actionIdentityBandFor,
   actionIdentityFor,
   campaignShapeFor,
   captureVehicles,
@@ -82,6 +83,7 @@ const observationEntries = await readJsonDir("test", "observations", "ss2-1v1");
 const manifestEntries = await readJsonDir("test", "manifests");
 const goldenEntries = await readJsonDir("test", "fixtures", "ss2-1v1-golden");
 const candidateEntries = await readJsonDir("test", "fixtures", "ss2-1v1");
+const divergenceEntries = await readJsonDir("test", "fixtures", "ss2-1v1-divergences");
 
 const observationById = new Map(observationEntries.map((entry) => [entry.value.observationId, entry.value]));
 const observationFileById = new Map(observationEntries.map((entry) => [entry.value.observationId, entry.filePath]));
@@ -166,7 +168,7 @@ after(async () => {
  * reads the seeded data and nothing else. The code is copied unmodified: this
  * controls the driver's inputs, never its behaviour.
  */
-async function createCampaignSandbox({ candidates = [], goldens = [], observations = [] }) {
+async function createCampaignSandbox({ candidates = [], goldens = [], observations = [], divergences = [] }) {
   const root = await mkdtemp(path.join(os.tmpdir(), "ss2-capture-campaign-"));
   sandboxRoots.push(root);
 
@@ -194,6 +196,24 @@ async function createCampaignSandbox({ candidates = [], goldens = [], observatio
   await seed(path.join("test", "fixtures", "ss2-1v1"), candidates, "fixtureId");
   await seed(path.join("test", "fixtures", "ss2-1v1-golden"), goldens, "fixtureId");
   await seed(path.join("test", "observations", "ss2-1v1"), observations, "observationId");
+
+  // Divergence reports carry no single unique key — the driver names them
+  // `<fixtureId>--<observationId>-<hash>.json` — so they are seeded under the
+  // pair that identifies one. The directory is created only when reports are
+  // supplied, which is deliberate: a sandbox with no divergence directory at
+  // all is the fresh-clone shape, and the driver must report nothing about
+  // sampling there rather than claiming to have checked.
+  if (divergences.length > 0) {
+    const divergenceDir = path.join(root, "test", "fixtures", "ss2-1v1-divergences");
+    await mkdir(divergenceDir, { recursive: true });
+    for (const report of divergences) {
+      await writeFile(
+        path.join(divergenceDir, `${report.fixtureId}--${report.observationId}.json`),
+        `${JSON.stringify(report, null, 2)}\n`,
+        "utf8"
+      );
+    }
+  }
 
   const campaign = await import(pathToFileURL(path.join(root, "tools", "runtime-capture", "campaign.mjs")).href);
   return { root, campaign };
@@ -1794,4 +1814,377 @@ test("watch-fields is a registered subcommand and takes the same flags as plan",
     family: "armoured-removal-destroys-helmet",
     json: true
   });
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the vehicle table has a floor
+//
+// `captureVehicles` used to swallow ENOENT per script, so a launcher it could
+// not open became a launcher with no capabilities. That is a SILENT
+// under-report and it points the wrong way. With all four gone, plan printed
+// `pass -WatchFields "..."` and, three lines later, "Exposed by: nothing." —
+// exit 0, no contradiction flagged. With only run-arena.ps1 gone it was worse:
+// the staging line then named launch-capture.ps1, the route with NO snapshot
+// guard, as the only vehicle for a staged capture on a save-mutating route.
+//
+// The two tests below are the floor. Reverting the throw to
+// `if (error.code === "ENOENT") continue;` turns both red.
+// ---------------------------------------------------------------------------
+
+const LAUNCHER_NAMES = ["run-campaign.ps1", "run-capture.ps1", "run-arena.ps1", "launch-capture.ps1"];
+
+test("captureVehicles refuses when a launcher it derives from cannot be read, and names it", async () => {
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [candidateById.get("candidate-champion-power-hat-removal")]
+  });
+  const family = "champion-power-hat-removal";
+
+  // Positive control. Without it, a sandbox broken for any other reason would
+  // make the refusal below pass while proving nothing, and the answer being
+  // controlled here is exactly the one plan's staging line is built from.
+  const present = await sandbox.captureVehicles();
+  assert.deepEqual(present.map((vehicle) => path.posix.basename(vehicle.script)), LAUNCHER_NAMES);
+  assert.deepEqual(
+    present
+      .filter((vehicle) => vehicle.watchFields && vehicle.staging)
+      .map((vehicle) => path.posix.basename(vehicle.script)),
+    ["run-arena.ps1", "launch-capture.ps1"]
+  );
+
+  // The realistic trigger is a rename, a move, or a relocation of campaign.mjs
+  // — LAUNCHER_DIR is derived from import.meta.url and cannot be misconfigured
+  // by an argument.
+  await rm(path.join(root, "tools", "runtime-capture", "run-arena.ps1"));
+
+  await assert.rejects(() => sandbox.captureVehicles(), (error) => {
+    assert.match(error.message, /Cannot read 1 of the 4 capture launchers/);
+    assert.match(error.message, /run-arena\.ps1/);
+    // The refusal has to say why silence was the wrong answer, or the next
+    // person to hit it widens it back out.
+    assert.match(error.message, /refuses rather than under-reporting/);
+    return true;
+  });
+
+  // The floor is on the path `plan` takes, not only on the helper: a report
+  // that recommends a vehicle must not be printable from a launcher set the
+  // driver could not read.
+  await assert.rejects(
+    () => sandbox.computeCoverage(family),
+    /Cannot read 1 of the 4 capture launchers/
+  );
+  await assert.rejects(
+    () => sandbox.commandPlan({ family }),
+    /Cannot read 1 of the 4 capture launchers/
+  );
+});
+
+test("the vehicle floor names EVERY launcher it could not read, not just the first", async () => {
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [candidateById.get("candidate-champion-power-hat-removal")]
+  });
+  for (const name of LAUNCHER_NAMES) {
+    await rm(path.join(root, "tools", "runtime-capture", name));
+  }
+
+  await assert.rejects(() => sandbox.computeCoverage("champion-power-hat-removal"), (error) => {
+    assert.match(error.message, /Cannot read 4 of the 4 capture launchers/);
+    for (const name of LAUNCHER_NAMES) {
+      assert.ok(
+        error.message.includes(name),
+        `the refusal must name ${name}, got: ${error.message}`
+      );
+    }
+    return true;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the sampling note, and why it is a note
+//
+// `plan --family armoured-deflection-threshold-cleared --json` used to return
+// `observations: []`, `sessionCount: 0`, `blockers: []` — byte-identical to
+// the report for a fixture nobody has ever run — while six divergence reports
+// for that exact fixtureId, written by this driver's own `ingest-round`, sat
+// committed in test/fixtures/ss2-1v1-divergences.
+//
+// What those reports say is a SAMPLING fact, not a tooling one. The direction
+// this fixture stages is reachable: one of its own six reports records it and
+// diverges elsewhere, and the candidate engine resolves it through a band of
+// four. So the remedy is more rounds, and reporting it as a blocker would send
+// an operator to write code where the answer is to book time. It is therefore
+// a note — and the tests below pin that it is a note, not merely that it
+// exists.
+// ---------------------------------------------------------------------------
+
+const ARMOURED_TARGET = "candidate-armoured-deflection-threshold-cleared";
+const armouredReports = divergenceEntries
+  .map((entry) => entry.value)
+  .filter((report) => report.fixtureId === ARMOURED_TARGET);
+const identityDifferenceIn = (report) =>
+  report.differences.find((entry) => entry.path === "/scenario/attackDirection");
+
+/**
+ * One committed report, re-aimed at a different round: a new observation and
+ * session, and either a different recorded direction or none at all.
+ *
+ * The note tests are driven from these rather than from the live archive, and
+ * the reason is the defect class this suite exists to refuse. Asserting the
+ * note's exact text against however many reports the archive holds TODAY makes
+ * a snapshot of the present into an invariant: the next armoured round files a
+ * seventh report and the test goes red on success. The floors below say the
+ * archive really has this shape; the controlled input says what the driver
+ * does with it.
+ */
+function divergenceVariant(base, { observationId, sessionId, actual }) {
+  const report = cloneJson(base);
+  report.observationId = observationId;
+  report.sessionId = sessionId;
+  if (actual === undefined) {
+    report.differences = report.differences.filter((entry) => entry !== identityDifferenceIn(report));
+  } else {
+    identityDifferenceIn(report).actual = actual;
+  }
+  return report;
+}
+
+test("the committed divergence archive really holds the rounds these tests are built on", () => {
+  // Floors, never counts. The archive is meant to grow — HANDOFF's next step
+  // is more rounds of this very fixture — so an equality here would break on
+  // the intended future.
+  assert.ok(divergenceEntries.length > 0, "the committed divergence archive is empty");
+  assert.ok(armouredReports.length >= 6, `only ${armouredReports.length} armoured reports survive`);
+  assert.ok(
+    new Set(armouredReports.map((report) => report.sessionId)).size >= 6,
+    "the armoured reports no longer come from independent sessions"
+  );
+
+  // The two populations the note is built out of, and both must be non-empty:
+  // rounds that recorded another direction, and at least one that recorded the
+  // direction this fixture stages and diverged for some other reason. That
+  // second one is the repository's own evidence that the identity is REACHABLE,
+  // which is what makes the note a note instead of a blocker.
+  const diverged = armouredReports.filter((report) => identityDifferenceIn(report) !== undefined);
+  assert.ok(diverged.length >= 5, `only ${diverged.length} armoured rounds missed the identity`);
+  assert.ok(
+    armouredReports.length - diverged.length >= 1,
+    "no archived armoured round ever recorded attack direction 5, so the note's reachability " +
+    "claim has lost its evidence and this should be a blocker instead"
+  );
+  for (const report of diverged) {
+    assert.equal(identityDifferenceIn(report).expected, 5, report.observationId);
+  }
+});
+
+test("plan reports the rounds a fixture has already burned, as a note and never as a blocker", async () => {
+  const target = candidateById.get(ARMOURED_TARGET);
+  const family = "armoured-deflection-threshold-cleared";
+  const base = armouredReports.find((report) => identityDifferenceIn(report) !== undefined);
+  const matched = armouredReports.find((report) => identityDifferenceIn(report) === undefined);
+  assert.ok(base && matched, "the archive no longer holds both shapes this test is built from");
+
+  // Six controlled rounds: five that drew another direction (two of them from
+  // outside the normal band entirely) and one that drew this fixture's own.
+  const seeded = [
+    divergenceVariant(base, { observationId: "obs-s1", sessionId: "session-s1", actual: 4 }),
+    divergenceVariant(base, { observationId: "obs-s2", sessionId: "session-s2", actual: 8 }),
+    divergenceVariant(base, { observationId: "obs-s3", sessionId: "session-s3", actual: 8 }),
+    divergenceVariant(base, { observationId: "obs-s4", sessionId: "session-s4", actual: 10 }),
+    divergenceVariant(base, { observationId: "obs-s5", sessionId: "session-s5", actual: 11 }),
+    divergenceVariant(matched, { observationId: "obs-s6", sessionId: "session-s6" })
+  ];
+
+  // The two sandboxes differ in ONE thing: whether the archive holds this
+  // fixture's reports. Everything else — candidates, goldens, observations,
+  // wrapper, launchers — is identical, so any difference between the two rows
+  // is the archive being read.
+  const { campaign: unrun } = await createCampaignSandbox({ candidates: [target] });
+  const { campaign: attempted } = await createCampaignSandbox({
+    candidates: [target],
+    divergences: seeded
+  });
+  const [never] = (await unrun.computeCoverage(family)).rows;
+  const [burned] = (await attempted.computeCoverage(family)).rows;
+
+  // The defect: these two rows used to be indistinguishable.
+  assert.equal(never.divergenceReports, 0);
+  assert.equal(burned.divergenceReports, 6);
+  // The unrun row still carries the fight-mode note both rows share, so
+  // "no sampling note" below is a real absence and not an empty derivation.
+  assert.deepEqual(never.notes.map((note) => note.code), ["unobserved-fight-mode"]);
+  assert.deepEqual(burned.notes.map((note) => note.code), [
+    "unobserved-fight-mode",
+    "action-identity-not-sampled"
+  ]);
+
+  const sampling = burned.notes.find((note) => note.code === "action-identity-not-sampled");
+  assert.ok(sampling, `expected a sampling note, got ${JSON.stringify(burned.notes)}`);
+  assert.deepEqual(sampling.fields, ["4", "8", "8", "10", "11"]);
+  assert.match(sampling.detail, /6 committed divergence report\(s\) for this fixture, across 6 session\(s\)/);
+  assert.match(sampling.detail, /5 recorded attack direction 4, 8, 8, 10, 11/);
+  // The reachability evidence, which is what decides note-versus-blocker.
+  assert.match(sampling.detail, /1 recorded that identity and diverged for another reason/);
+  // The expected round count, and the remedy it implies.
+  assert.match(sampling.detail, /attack direction 5, 6, 7, 8 through one profile/);
+  assert.match(sampling.detail, /about one round in 4/);
+  assert.match(sampling.detail, /the remedy is more rounds, not a code change/);
+  // Three of the five landed outside the band entirely (10, 11 and 4), so the
+  // band's odds do not account for them and the note must not pretend they do.
+  assert.match(sampling.detail, /3 of the 5 recorded an identity OUTSIDE that band/);
+
+  // A NOTE. The archive may add to what an operator is told and must never add
+  // to what the driver claims will refuse: `blockers` is byte-identical across
+  // the two sandboxes.
+  assert.deepEqual(burned.blockers, never.blockers);
+  assert.equal(
+    burned.blockers.some((blocker) => blocker.code === "action-identity-not-sampled"),
+    false,
+    "a sampling problem is not a refusal waiting to happen"
+  );
+
+  // And it reaches the operator's actual report, not only --json.
+  const printed = await withCapturedLog(() => attempted.commandPlan({ family }));
+  assert.equal(printed.value, 0);
+  assert.ok(
+    printed.lines.some((line) => line.includes("note (action-identity-not-sampled)")),
+    `plan must print the sampling note:\n${printed.lines.join("\n")}`
+  );
+  assert.equal(
+    printed.lines.some((line) => line.includes("blocked (action-identity-not-sampled)")),
+    false,
+    "plan must not print a sampling fact as a blocker"
+  );
+});
+
+test("a member that already has evidence gets no sampling note, though its archive was read", async () => {
+  // candidate-prisoner-normal-kill is promoted AND still carries the reports
+  // of the rounds that missed its direction on the way there. The pairing is
+  // what makes this non-vacuous: a non-zero divergenceReports proves the
+  // archive was consulted, so the empty notes list is a decision rather than a
+  // failure to look.
+  const coverage = await computeCoverage(FAMILY);
+  const dir7 = coverage.rows.find((row) => row.fixtureId === "candidate-prisoner-normal-kill");
+  assert.equal(dir7.hasGolden, true);
+  assert.ok(dir7.divergenceReports > 0, "this fixture's own rounds are in the archive");
+  assert.deepEqual(dir7.notes, [], "a captured fixture needs no sampling budget");
+
+  // The archive count is per fixture, not per family: its three siblings have
+  // reports of their own or none, and the row must say which.
+  const counted = coverage.rows.map((row) => [row.fixtureId, row.divergenceReports]);
+  assert.equal(counted.length, 4);
+  for (const [fixtureId, count] of counted) {
+    const actual = divergenceEntries.filter((entry) => entry.value.fixtureId === fixtureId).length;
+    assert.equal(count, actual, fixtureId);
+  }
+});
+
+test("a divergence report written against an earlier version of a fixture is not counted", async () => {
+  // The report says `expected: 9` and the fixture stages 5, so the report is
+  // evidence about a scenario that no longer exists. Counting it would tell an
+  // operator their fixture keeps missing an identity it does not claim.
+  const target = candidateById.get(ARMOURED_TARGET);
+  const stale = cloneJson(armouredReports.find((report) =>
+    report.differences.some((entry) => entry.path === "/scenario/attackDirection")));
+  const difference = stale.differences.find((entry) => entry.path === "/scenario/attackDirection");
+  assert.equal(target.scenario.attackDirection, 5);
+  assert.notEqual(difference.expected, 9);
+  difference.expected = 9;
+
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [target],
+    divergences: [stale]
+  });
+  const [row] = (await sandbox.computeCoverage("armoured-deflection-threshold-cleared")).rows;
+
+  // Read — the count proves the file was opened — but not counted as sampling
+  // evidence for a fixture whose identity it never tested. The fight-mode note
+  // is still there, so this is an absence rather than an empty derivation.
+  assert.equal(row.divergenceReports, 1);
+  assert.deepEqual(row.notes.map((note) => note.code), ["unobserved-fight-mode"]);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the band the expected round count comes from
+//
+// The band is PROBED out of src/golden/ss2-attack-candidate.js rather than
+// transcribed from the battle map: two directions are in one band exactly when
+// the engine's own `calculation` is identical for both apart from
+// `attackDirection`.
+//
+// The mutation that breaks the test below is `delete profile.attackDirection`
+// — without it every direction is its own band and the "one round in 4" the
+// note offers becomes "one round in 1". Recorded here because a NEARBY
+// mutation does NOT break it and the difference matters: driving the probe at
+// the top of the roll range instead of the bottom, so that every direction
+// hits, leaves every band on the committed corpus unchanged. The armour-group
+// branch that cuts across the bands reaches the mutation trace, not
+// `calculation`, so the forced miss buys a short path through the engine
+// rather than a correct band. Do not read it as the guard.
+// ---------------------------------------------------------------------------
+
+const bandOf = (fixtureId) => {
+  const fixture = candidateById.get(fixtureId);
+  return actionIdentityBandFor(fixture, actionIdentityFor(fixture.scenario, fixtureId));
+};
+
+test("the action-identity band is probed out of the engine and agrees with the committed bands", async () => {
+  // The independent cross-check. Three committed candidate families were
+  // authored one fixture per direction, straight off the battle map, and their
+  // members are the band. If the probe were finding the wrong equivalence —
+  // splitting a band on armour group, or merging two — the two sources would
+  // disagree here.
+  for (const [family, expected] of [
+    ["prisoner-quick-kill", [1, 2, 3, 4]],
+    ["prisoner-normal-kill", [5, 6, 7, 8]],
+    ["prisoner-power-kill", [9, 10, 11, 12]]
+  ]) {
+    const members = await readFamilyMembers(family);
+    assert.deepEqual(
+      members.map((member) => member.action.id).sort((a, b) => a - b),
+      expected,
+      `${family}: the committed family is not the band it is being checked against`
+    );
+    for (const member of members) {
+      assert.deepEqual(
+        actionIdentityBandFor(member.fixture, member.action),
+        expected,
+        `${member.fixture.fixtureId}: probed band`
+      );
+    }
+  }
+
+  // The single-identity directions really are single. A taunt is not drawn
+  // from a band of four, and the note must not offer "one round in 4" for one.
+  for (const [fixtureId, expected] of [
+    ["candidate-taunt-charisma-floor", [20]],
+    ["candidate-bombard-threshold", [21]],
+    ["candidate-snipe-shield-boost", [22]],
+    ["candidate-bash-inherited-critical", [23]],
+    ["candidate-grievous-knockback", [30]]
+  ]) assert.deepEqual(bandOf(fixtureId), expected, fixtureId);
+
+  // A spell id is not drawn over a range of directions at all, so there is no
+  // band to report and the driver says nothing rather than guessing.
+  assert.equal(bandOf("candidate-spell-lethal-slain"), undefined);
+});
+
+test("every committed candidate's band contains its own identity and nothing the engine refuses", () => {
+  assert.ok(candidateEntries.length > 0, "no candidates to probe");
+  let probed = 0;
+  for (const entry of candidateEntries) {
+    const fixture = entry.value;
+    const action = actionIdentityFor(fixture.scenario, fixture.fixtureId);
+    const band = actionIdentityBandFor(fixture, action);
+    if (action.ingress === "spell") {
+      assert.equal(band, undefined, fixture.fixtureId);
+      continue;
+    }
+    probed += 1;
+    assert.ok(band.includes(action.id), `${fixture.fixtureId}: the band omits its own direction`);
+    assert.deepEqual(band, [...band].sort((a, b) => a - b), `${fixture.fixtureId}: bands are ordered`);
+    assert.equal(new Set(band).size, band.length, `${fixture.fixtureId}: bands do not repeat`);
+    // Every band is one of the engine's, so no candidate probes into a band
+    // whose size would make the note's round count meaningless.
+    assert.ok(band.length >= 1 && band.length <= 4, `${fixture.fixtureId}: band ${band.join(",")}`);
+  }
+  assert.ok(probed >= 40, `expected the physical candidate set to be probed, got ${probed}`);
 });

@@ -29,6 +29,10 @@ usually sound and only its premise moved.
 | mid-battle armour wear needs an extra uncontrolled exchange | directly stageable; the refill sits behind a `battle_started` guard | [runbook §0.3](ss2-staging-runbook.md) |
 | the spell trace carries no `spell_id` | the wrapper emits it; the blocker is now the missing `magic-damage` event | [runbook §10](ss2-staging-runbook.md) |
 | a tournament loss ends the character | false — no flush site is reachable from a bout, the ladder or the loss path | [arena route §3, §12](ss2-arena-route.md) |
+| `run-arena.ps1` cannot pass `-WatchFields` | it can, and it is the only save-guarded vehicle that also stages | its own `param()` block, re-read here |
+| the wrapper has no attacker-side gate | it has one, and the gate is **dead** — it reads a path the game never writes | this revision, *Direction attrition* under Group H |
+| the fifteen impossible-hero fixtures fail an exhaustive weapon search | they fail a **proof** — the damage spread is strength-free and pins one weapon row | this revision, *The weapon spread is a table lookup* |
+| snapshots are a procedure the operator has to remember | `run-arena.ps1` snapshots itself, and `save-state.ps1` refuses a damaged save in **both** directions | this revision, *What a session costs* |
 
 **And one thing this page got right that later documents did not.** The
 derivation constraint below has always read `round(strength * 2) + weapon_min`.
@@ -143,10 +147,43 @@ the build has `[3] = 2` with `[4] = 10`.** The closest is `weapon41`, `4 / 12`,
 whose spread of 8 is the same — so `min 12 / max 20` is producible, but only at
 `strength` **4**, and `min 20 / max 28` only at `strength` **8**.
 
-Both `strength` and `min_damage` are projected fields, and `battlevalues`
-recomputes `min_damage` on every phase transition, so a fixture asserting
+**Upgraded — this is now a proof, not a failed search.** The earlier revision
+said only that no matching row *was found*, which is the weaker claim a reader
+is entitled to distrust: a search can miss a row. Three facts close it, and all
+three were re-read for this revision.
+
+1. **The damage spread is strength-free.** `battlevalues` writes the two fields
+   with the identical leading term — `+0x3356` is
+   `min_damage = Math.round(strength * 2) + weapon_min_damage` and `+0x3386` is
+   `max_damage = Math.round(strength * 2) + weapon_max_damage`, both in
+   `root/frame:35/DoAction@0x3fa9dc`, both `Push register:3, "strength";
+   GetMember; Push 2; Multiply; Math.round; … Add2; SetMember`. Subtracting,
+   `max_damage − min_damage = weapon[4] − weapon[3]` exactly, for every
+   gladiator, at every strength. So the spread a fixture asserts *names the
+   weapon row* on its own, before strength is considered at all.
+2. **Exactly one row in ninety has spread 8.** Counted over all 90 authored
+   `Array` literals — the 80 shop ids of item tables §2.3 plus the 10 off-shop
+   rows of §2.4 (`0`, `201`–`207`, `210`, `220`) — the only `[4] − [3] = 8` is
+   `weapon41` (bashing 1, `4 / 12`, gate `strength >= 3`). The fifteen fixtures
+   assert `12 / 20` and `20 / 28`, both of spread 8, so `weapon41` is not the
+   closest candidate: it is the **only** one, and the fixtures' strengths then
+   contradict it directly (`12 = round(2s) + 4` gives `s = 4`, not 5;
+   `20 = round(2s) + 4` gives `s = 8`, not 9).
+3. **Staging cannot escape the contradiction either.** `min_damage` and
+   `max_damage` are outputs, and `nextphase` recomputes them for **both**
+   combatants at every phase transition: `sprite:862[overlay]/frame:52/
+   DoAction@0x240c7f` calls `battlevalues(game_attacker)` at `+0x35eb`/`+0x35f1`
+   and `battlevalues(game_defender)` at `+0x35ff`/`+0x3605`, on the straight-line
+   path (the `If` at `+0x35d5` jumps *to* `+0x35eb`, so neither call sits inside
+   the branch). Every approach walk is a phase transition, so a staged
+   `min_damage` is gone several times over before the action arms. There is no
+   staging string, no shop purchase and no snapshot that satisfies both members
+   of the pair at once.
+
+Both `strength` and `min_damage` are projected fields, so a fixture asserting
 `strength 5` **and** `min_damage 12` cannot be satisfied by any weapon id, by
-any staging, in this build. **Fifteen uncaptured candidates carry that pair** —
+any staging, in this build — and now for a reason that does not depend on
+having looked at every row. **Fifteen uncaptured candidates carry that pair** —
 every legacy physical candidate outside the duel, armoured, tournament and
 champion families. They are marked below and the fix is a fixture edit, not a
 staging plan.
@@ -161,6 +198,19 @@ For contrast, every other uncaptured family's implied weapon *does* exist:
 | `candidate-duel-*` (hero, strength 7, 18/26) | 4 / 12 | **41** (bashing, gate `strength >= 3`) |
 | `candidate-duel-absorbed-normal-hit` (villain, strength 2, 8/16) | 4 / 12 | **41** |
 | `candidate-duel-firstblood-normal-kill` (villain, strength 2, 8/20) | 4 / 16 | **2**, **21** or **61** (61 is on no shop page; for a staged villain that does not matter) |
+
+**That table is a derivation, not a list of guesses, and the spread is what
+derives it.** Because `max − min` is strength-free, every row above is found by
+looking up one number. Over all 90 authored rows there are 55 distinct spreads,
+of which 30 name exactly one weapon — and every spread these fixtures need
+falls in that set or resolves to a short list: spread **2** is `weapon0` alone,
+spread **8** is `weapon41` alone, spread **24** is `weapon24` alone, and spread
+**12** is exactly `{2, 21, 61}`, which is precisely the three-way choice the
+last row already names. The ids in this table were originally derived a
+different way and land on the same answers, which is the cross-check worth
+having. Use the spread first whenever a new fixture's weapon has to be
+identified; the strength then either confirms the row or falsifies the fixture,
+as it does for the fifteen.
 
 A fixture only stages the fields it names, and `capture-session.mjs ingest`
 projects an observation onto exactly those fields
@@ -282,18 +332,47 @@ before the session.
 staging cannot fake**, which after the `battlevalues` audit is a short list:
 `weapon` and `secondary_weapon` ids can be staged (they are inputs), the damage
 spreads they imply cannot. Which script carries which flag is the runbook's §1,
-and it is the one operational fact that decides how each fixture is run:
+and it is the one operational fact that decides how each fixture is run.
 
-| Script | `-Stage*` | `-WatchFields` | `-Autopilot` |
-| --- | :---: | :---: | :---: |
-| `run-arena.ps1` | yes | **no** | **no** |
-| `run-capture.ps1` | **no** | yes | yes |
-| `run-campaign.ps1` | **no** | **no** | yes |
-| `launch-capture.ps1` | yes | yes | yes |
+Every cell below was read out of the script's own `param()` block for this
+revision, not carried over. An invented flag costs a supervised session, so
+re-read the block rather than this table if the two ever disagree.
 
-A fixture that stages a `<piece>_defence` name **and** needs a staged opponent
-has to go through `launch-capture.ps1`, which has no snapshot guard — take the
-snapshot by hand first.
+| Script | `-Stage*` | `-StageGold`/`-Shop*` | `-WatchFields` | `-Autopilot` | snapshots the save |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| `run-arena.ps1` | yes | yes | **yes — new** | **no** | **yes, itself** |
+| `run-capture.ps1` | **no** | **no** | yes | yes | no |
+| `run-campaign.ps1` | **no** | **no** | **no** | yes | no |
+| `launch-capture.ps1` | yes | yes | yes | yes | **no** |
+
+**Corrected — `run-arena.ps1` now carries `-WatchFields`.** This table used to
+read **no** in that cell, and the sentence under it sent every
+`<piece>_defence` fixture to `launch-capture.ps1`. The flag exists
+(`[string] $WatchFields = ''` in the `param()` block, forwarded verbatim only
+when non-empty so an empty value leaves the launcher's default alone), and its
+own comment says why it lives there rather than on `launch-capture.ps1`: the
+snapshot guard is deliberately kept on the one save-mutating script, and moving
+it down to the shared bottom layer would have made it opt-out. So a fixture
+that stages a `<piece>_defence` name **and** needs a staged opponent now has a
+save-guarded vehicle, and Group H's two `removal-destroys-*` members no longer
+need the hand-snapshot detour.
+
+`run-arena.ps1` also exposes `-StageGold`, `-ShopWeapon` and `-ShopArmour`,
+which the earlier table omitted entirely. That matters more than it looks:
+`weapon` staged at battle time is restored from `charDNA` at the next turn
+boundary, so the shop path is the only durable way to change the weapon id —
+see *The weapon spread is a table lookup* below.
+
+What `run-arena.ps1` still does **not** have is `-Autopilot`. Its in-battle
+decisions come from `-ArenaPolicy`, and `arenaPolicyStep` returns the literal
+`"normal_attack"` whenever the controller offers it, so the arena route can
+only ever produce hero directions **5–8**. Passing `-ArenaPolicy ''` to it does
+not open that up: the wrapper re-arms the default when the policy is empty
+*and* the autopilot step list is empty, which on this script it always is. Any
+non-`normal_attack` direction on the arena route therefore needs
+`launch-capture.ps1`, which is the only script exposing `-Autopilot` alongside
+the arena flags — and which has no snapshot guard, so take the snapshot by hand
+with `save-state.ps1 snapshot <new-name>` first.
 
 ### The twenty-two goldens, and what the probe pairs measured
 
@@ -394,12 +473,49 @@ on is most of this page:
   SharedObject, so a mutated save will never surface as a verification
   failure. It has to be handled by procedure, not by the pipeline.
 - Use a **dedicated capture slot**, and copy `ss2_data.sol` before the session
-  and restore it after. `tools/runtime-capture/save-state.ps1` snapshots and
-  restores it, and `run-arena.ps1` refuses to start without a fresh snapshot
-  name and takes the snapshot itself. Without that, session 2 of a family is
-  staged differently from session 1 — which is exactly the class of divergence
-  this pipeline already had to chase once, over five walks' worth of stamina
-  drift.
+  and restore it after. Without that, session 2 of a family is staged
+  differently from session 1 — which is exactly the class of divergence this
+  pipeline already had to chase once, over five walks' worth of stamina drift.
+
+  **This is now largely mechanised, and the mechanism is worth knowing exactly**,
+  because its guarantees are narrower than "the save is protected".
+
+  - `run-arena.ps1` takes the snapshot **itself**, before anything is launched:
+    `-Snapshot <name>` is `Mandatory`, `save-state.ps1` refuses a name that
+    already exists, and a non-zero exit throws
+    `Snapshotting failed; refusing to run a save-mutating session.` It is the
+    only launcher that calls `save-state.ps1` at all — `run-capture.ps1`,
+    `run-campaign.ps1` and `launch-capture.ps1` do not, by design, because the
+    guard is deliberately kept on the one save-mutating script rather than made
+    opt-out on the shared bottom layer.
+  - `save-state.ps1` now **refuses a damaged save in both directions**, which
+    the earlier text did not record. `snapshot` runs `Test-SaveIntact` on the
+    live root *before* mirroring and again on the mirrored copy afterwards, so a
+    snapshot cannot be reported as taken unless the thing worth restoring is in
+    it. `restore` runs `Test-SaveIntact` on the source, and `Test-WipedSave` on
+    it as well, both before `Invoke-Mirror` — which matters because that mirror
+    is `robocopy /MIR` and deletes at the destination, so a post-hoc check would
+    arrive after the gladiator was gone. Both `restore` guards are bypassable
+    with `-Force`; the empty-tree guard and the Ruffle-running check are not.
+  - **What `Test-SaveIntact` actually proves is the first 78 bytes plus one
+    arithmetic identity**, and no more: the `00 BF` prefix, the four ASCII
+    markers `TCSO` / `ss2_data` / `max_gladiators` / `character1` (the last of
+    which ends at byte 78), a 128-byte floor, and `declared == length − 6` read
+    big-endian from bytes 2–5. The gladiator's DNA string begins after that, so
+    a save whose body is destroyed while its header stays self-consistent —
+    a tail overwrite, or a truncation whose length field was rewritten to
+    match — passes in both directions. Do not read a clean `snapshot` as a
+    statement that the gladiator survived; read it as "the header is not
+    obviously wrong".
+  - Two smaller edges, both worth recognising rather than working around.
+    `snapshot` applies `Test-SaveIntact` but **not** `Test-WipedSave`, so an
+    already-blanked save can still be snapshotted under a reassuring name (it
+    will be refused on the way back out). And the intactness check runs *before*
+    the `Get-Process ruffle` check, so a healthy save that is merely open reads
+    as an I/O error, and one caught mid-flush reads as `TRUNCATED` — a false
+    diagnosis whose obvious next step, a restore, would overwrite a healthy
+    save. If `run-arena.ps1` refuses to start with a truncation message, close
+    every Ruffle window and re-run the snapshot before believing it.
 - **Corrected — a tournament loss does NOT end the character.** This bullet
   used to read "a tournament **loss ends the character**", and treated it as
   the reason a backup mattered. The byte fact it rested on is real and
@@ -571,9 +687,9 @@ and one runnable command line each — read it for *how*, and this table for
 | Group | Fixtures | Uncaptured | Binding constraint, as it stands |
 | --- | --- | ---: | --- |
 | A | prisoner kills + probes | 0 | **none** — all 22 promoted, all three bands complete |
-| **H** | `candidate-armoured-*` | 5 | **none. Reachable now** with `-StageVillain`; runbook §3 |
+| **H** | `candidate-armoured-*` | 5 | **no staging blocker** — reachable with `-StageVillain`, runbook §3 — but 22 live rounds produced 0 matches. Attrition, `staminaleft` and the dead wrong-side gate; see below |
 | **I** | `candidate-tournament-*` | 3 | **none. Reachable now**; runbook §4. `tournament-nonlethal-normal-hit` is the cheapest capture in the set |
-| **J** | `candidate-champion-*` | 5 | conditional — the ladder reaches rank 2 reliably and the opponent is reproducible, but the hero must enter at a staged level with full stamina or the wrapper refuses to arm |
+| **J** | `candidate-champion-*` | 5 | conditional, and **possibly the same 2/10-hero problem in another costume** — the opponent is reproducible, but four of the five hero values the fixtures assert have no writer in the tooling. Open; see below |
 | B | duel | 2 | **no longer the opponent.** A second, *lower*-level gladiator (`herolevel < tournament_level_required`), plus two weapon ids that this revision names |
 | C | legacy armour | 6 | **the hero build does not exist** — implied weapon 2/10 |
 | D | ranged and bash | 3 | same 2/10 hero; plus a secondary weapon and an unproven `swap_weapons` autopilot |
@@ -584,18 +700,30 @@ and one runnable command line each — read it for *how*, and this table for
 (The runbook letters its families differently; when cross-reading, match on the
 fixture prefix rather than the letter.)
 
-**Scoreboard.** 8 uncaptured candidates are reachable with the tooling exactly
-as it stands (H and I). 5 more are conditional on the champion gate (J). 2 are
-reachable in principle but need a second gladiator (B). 8 are blocked in the
-wrapper (G). **15 cannot be captured as written at all** (C, D, E, F), and the
-blocker is not staging — it is that their hero's `strength` / `min_damage` /
-`max_damage` triple corresponds to no weapon row in the build. That is a
-fixture edit, and it is not this document's to make.
+**Scoreboard.** 8 uncaptured candidates have no *staging* blocker (H and I).
+5 more are conditional on the champion gate (J). 2 are reachable in principle
+but need a second gladiator (B). 8 are blocked in the wrapper (G). **15 cannot
+be captured as written at all** (C, D, E, F), and the blocker is not staging —
+it is that their hero's `strength` / `min_damage` / `max_damage` triple
+corresponds to no weapon row in the build. That is a fixture edit, and it is
+not this document's to make.
+
+**Read the H and I line carefully, because it has been over-read once.** "No
+staging blocker" is not "a session will produce a golden". Twenty-two live
+arena rounds against one Group H fixture on 2026-08-31 produced **zero**
+matches and six committed divergence reports, and none of the six failed on
+staging: five failed on the observed `attack_direction`, one (`adc18`) matched
+the direction and failed on `/mutationTrace/0/path` because the villain had
+swung, and all six carried a `staminaleft` difference underneath. Those are
+sampling and attribution costs, not staging costs, and the distinction is the
+one this table exists to make — but a reader planning a supervised window needs
+both numbers. The per-fixture arithmetic is under Group H.
 
 The runbook's own scoreboard says "9 more behind one read-only weapon-table
 sweep". **That sweep has been done** — [the item tables](ss2-item-tables.md)
-decodes all 90 weapon rows — and its answer for those fixtures is negative.
-See *The weapon spread is a table lookup* above.
+decodes all 90 weapon rows — and its answer for those fixtures is negative,
+now as a proof rather than as a search. See *The weapon spread is a table
+lookup* above.
 
 No committed fixture *resolves* on a path that is entirely opcode-rolled. The
 only `RandomNumber` opcode samples inside a fixture's own roll stream are the
@@ -715,16 +843,128 @@ drift.
   — but ingest refuses a trace whose staged dump lacks a field the fixture
   stages, and the wrapper must dump it.
 - `-WatchFields` is additive onto a 28-name default that omits the defence
-  names. Only the two `removal-destroys-*` fixtures in this family need it
-  (`helmet_defence,shoulderguard_defence`), which is why **three of the five
-  run on `run-arena.ps1` unmodified** and two must go through
-  `launch-capture.ps1`.
+  names (counted from `DEFAULT_WATCH_FIELDS` for this revision: 18 projected
+  fields plus 10 staged-scenario inputs). Only the two `removal-destroys-*`
+  fixtures in this family need it (`helmet_defence,shoulderguard_defence`).
+  **Corrected: all five now run on `run-arena.ps1`.** This bullet used to end
+  "three of the five run on `run-arena.ps1` unmodified and two must go through
+  `launch-capture.ps1`"; `run-arena.ps1` has since gained `-WatchFields`, so the
+  two `removal-destroys-*` members no longer have to leave the save-guarded
+  vehicle. Nothing else about them changes.
 - **Direction attrition is the dominant cost, not the staging.**
   `normal_attack` draws `randomBetween(5, 8)` *before* the tape is served, so a
-  direction-5 fixture matches roughly one bout in four; with the
-  two-observation gate that is about eight successful bouts per fixture. The
-  wrapper has no attacker-side gate either, so a bout where the villain swings
-  first arms on his attack and diverges. Both cost a restore and a rerun.
+  direction-5 fixture matches roughly one bout in four. **Both halves of that
+  sentence are confirmed for this revision, and the second half is the one
+  worth reading twice**, because a tape that *could* dictate the direction
+  would make every injected-tape observation of it worthless.
+
+  - The **range** is byte-verified: `normal_attack` calls
+    `randomBetween` with `numArgs 2, arg1 5, arg2 8` at overlay `+0x61f1`, and
+    `randomBetween` is `a + Math.floor(Math.random() * (b - a + 1))`, inclusive
+    at both ends. `P(5) = 0.25` exactly. The neighbouring bands are power
+    `(9, 12)` at `+0x608a` and quick `(1, 4)` at `+0x635c`; direction 20 is not
+    a band at all but the taunt constant at `+0x6981`.
+  - **"Before the tape is served" is a property of the arming latch, not a
+    guess.** `tappedRandom()` returns the real `Math.random` while `!armed` and
+    only consults the tape afterwards; `armed` is set in exactly one place,
+    `beginAction()`, reachable only from the `checkattackroll` wrap and the
+    `attack_chances` wrap. In every dispatcher branch the direction assignment
+    *precedes* that branch's `checkattackroll` call — normal `+0x61f1` →
+    `+0x62ad`, power `+0x608a` → `+0x6146`, quick `+0x635c` → `+0x6418`, bash
+    `+0x64c3` → `+0x64e2`, taunt `+0x6981` → `+0x698c` — and `attack_chances`
+    is itself called from inside `checkattackroll` at `+0x2c44`. The wrapper
+    never writes `attack_direction`; it only reads it. So the direction in a
+    trace is an observation even on a fully injected session, it consumes no
+    tape slot, and a direction-5 observation from an injected-tape run counts
+    for exactly as much as one from a passive run.
+
+  With the two-observation gate a 1-in-4 direction is about **eight** bouts per
+  fixture *if the hero is the one swinging*. On the arena route he is not,
+  about half the time — see the next bullet — so budget nearer **sixteen**.
+
+- **Corrected — the wrapper does have an attacker-side gate, and it is dead.**
+  This bullet used to read "the wrapper has no attacker-side gate either". It
+  has one: `captureAllowedNow` refuses when the observed attacker disagrees with
+  the launcher's `attackerSide`. The refusal has **never fired anywhere**, and
+  the reason is a scope mismatch rather than anything about this route:
+
+  - the guard reads `gameRoot().game_attacker`, and `gameRoot()` returns
+    `_level1`;
+  - the game writes `game_attacker` with a bare `SetVariable` at
+    `sprite:862[overlay]/frame:52/DoAction@0x240c7f` `+0x2ba2` (villain) and
+    `+0x2c18` (hero) — an AVM1 scope-chain write that resolves on the **overlay
+    clip**, which is where the wrapper correctly reads its sibling
+    `attack_direction` from;
+  - so `attacker` is `undefined`, and the guard's `if (attacker != undefined)`
+    skips the comparison wholesale rather than refusing.
+
+  Measured, not inferred. Of 268 archived `.rufflelog` files, **zero** contain
+  `capture-refused-wrong-side`, and so do zero `.jsonl` traces. A whole-tree
+  grep of `captures/` returns exactly six paths, and they are three archived
+  wrapper *sources* plus the three `.swf` binaries compiled from them — not six
+  log lines, and all three are arena-era builds. The twenty-two `session-adc*`
+  arena rounds
+  ran build `F636F80A433486D1`, which carries the guard at line 1978, and split
+  by which combatant the first `damagecharacter` write actually landed on:
+
+  | Who swung | n | `attack_direction` values |
+  | --- | ---: | --- |
+  | hero | 11 | 8, 8, 7, 8, 7, 6, 8, 8, 6, 7, 7 — **never 5** |
+  | **villain** | **9** | 4, 10, 11, 20, 3, 2, **5**, 20, 10 |
+
+  All twenty-two meta lines read `"attackerSide":"hero"`, and the guard logged
+  nothing. Nine mislabelled traces with a live guard present is a direct proof
+  that the read is undefined at arming time on this route; the byte fact above
+  is why it is undefined on every other route too. **Treat the guard as absent
+  when planning.** (The live half of that proof is arena-only: the prisoner
+  route never gives the villain a turn, so a *working* guard would also have
+  logged zero there. It is the scope mismatch, not the log census, that
+  generalises.)
+
+  Two planning consequences. A villain swing is not a wasted round, it is a
+  **poisoned** one — it produces a complete trace labelled `hero`. Today those
+  are caught only because `/mutationTrace/0/path` diverges, which holds only
+  while every reachable fixture expects a villain-side mutation; `session-adc18`
+  is a villain swing at direction **5**, so the direction alone must never be
+  used to attribute a swing. And the wrong-side rate is what turns eight bouts
+  into sixteen: of the twenty rounds that produced an attributable swing, 11
+  were the hero's, so `0.55 × 0.25 ≈ 0.14` — about one usable bout in seven.
+  Observed: **0 usable direction-5 hero swings in 22 rounds** (one aborted
+  before arming, one armed without a `damagecharacter` write). At that rate a
+  clean sweep of twenty is a ~5% outcome, so it is bad luck rather than a
+  contradiction — but plan for the measured rate, not for the 1-in-4.
+- **New, and measured: `staminaleft 105` diverges on every arena round so far.**
+  All five fixtures assert `staminaleft 105` on **both** sides. All six
+  committed divergence reports for this family — the
+  `candidate-armoured-deflection-threshold-cleared--obs-adc{1,2,3,4,5,18}-a1-*`
+  files under `test/fixtures/ss2-1v1-divergences/` — carry a
+  `/scenario/villain/staminaleft` difference, and three of them carry the
+  hero's too. Every observed value, expected 105 in each case:
+
+  | round | hero | villain |
+  | --- | ---: | ---: |
+  | `adc1` | 104 | 94 |
+  | `adc2` | 98 | 102 |
+  | `adc3` | — | 102 |
+  | `adc4` | — | 90 |
+  | `adc5` | — | 110 |
+  | `adc18` | 100 | 96 |
+
+  No two rounds agree, and the villain's value straddles 105 in both
+  directions. Two of the six — `adc2` and `adc5`, both correct-side hero swings
+  at direction 8 — diverged on **nothing but** `attackDirection` and
+  `staminaleft`, so this is the field that will still be standing between this
+  family and a match on the day the direction finally lands. Stamina is a
+  per-phase quantity, re-read from the bytes for this revision: `nextphase`
+  does `staminaleft -= staminacost` at `+0x32a7`–`+0x32c2` and then
+  `staminaleft += 1 + Math.round(stamina / 3)` at `+0x32c3`–`+0x3304`, with
+  `check_stats` clamping afterwards. So the value at arming is a function of
+  how many approach turns the bout happened to take — which the arena policy
+  does not fix, and which staging before the walks does not survive.
+  **This row is open**, and it is the cheapest thing a next session could
+  settle: either re-author the fixtures' `staminaleft` from an observed arena
+  bout (route 3, *capture first, author second*), or establish that the turn
+  count can be pinned. Do not plan Group H as though staging alone clears it.
 - **The clamp race is the one genuinely unproven part.** Staging `vitality:2`
   and `hitpoints:80` together is correct only if `battlevalues(villain)` runs
   before the last `check_stats(villain)` inside the 20-frame staging window.
@@ -788,6 +1028,36 @@ on:
   and closes the trace on that call's return, so the evidence is one action.
   A vitality-only gladiator is 0 for 12 against this opponent and it does not
   matter.
+
+> **Open, and it may be worse than "conditional": four of the five hero values
+> these fixtures assert have no writer in the tooling.** This is the same shape
+> as the fifteen impossible-hero fixtures above, and it was not checked when
+> this section was written. Compared against the project's actual gladiator, as
+> it dumps itself in `captures/session-adc1/obs-adc1-a1.jsonl`:
+>
+> | Fixture asserts | The gladiator reads | Who could write it |
+> | --- | --- | --- |
+> | `attack 3` | **1** | nothing — the town-square staging path filters to `strength`, `speed`, `charisma` only, and the level-up spends every point into `vitality` |
+> | `defence 3` | **1** | nothing, same |
+> | `staminamax 150` (⇒ `stamina 5`) | **110** (⇒ `stamina 1`) | nothing durable — `stamina` is restored from `charDNA` at each turn boundary |
+> | `hitpointsmax 250` | **300** | `10·herolevel + 20·vitality`, and the level-up's forced +1/+4 walks this gladiator 300 → 390 → 480; 250 falls between reachable values |
+> | `min_damage 68` / `max_damage 92` | 21 / 23 | **this one is producible** — `strength 30` made durable in town plus `-ShopWeapon 24`, which is `8/32` at `strength >= 12` |
+>
+> `attack` and `defence` are not cosmetic here: the fixtures' `chance 50 /
+> rollNeeded 50` is exactly the unit ratio of hero `attack 3` to the champion's
+> hard-coded `defence 3`. At `attack 1` the chance moves, and with it the
+> dispatch, the calculation block and the mutation trace — so every session
+> would diverge identically, and the two-session gate could never close.
+> **Unverified by a live run**, because no champion capture has yet armed; the
+> table above is read from the wrapper's staging paths and one live dump, not
+> from a refusal. But do not spend a supervised window on this family until
+> either a run contradicts it or the fixtures are re-derived from a gladiator
+> the tooling can actually build.
+>
+> The bullet above about `-ArenaStagedLevel` compounds it: the gate tests
+> `herolevel`, while the fixture constrains `hitpointsmax`, and for this
+> gladiator those are not the same condition. A bout can pass the gate at
+> `herolevel 5` and still read `hitpointsmax 390` against the fixture's 250.
 
 Only three bands are reachable for this hero — quick (1–4), normal (5–8) and
 power (9–12) — because nothing can start him in close range and the approach
@@ -854,12 +1124,21 @@ The fifteen fixtures in these four groups all carry the same hero build —
 `[3]`/`[4]` are **2 and 10**, and *The weapon spread is a table lookup* above
 shows no such row exists in the build.
 
-`min_damage` is recomputed from `strength` and the weapon table on every phase
-transition, and `strength` is projected too, so no staging and no purchase can
-satisfy both at once. **These fifteen cannot be captured as written.** The
-group-by-group blockers below are all still real and still worth reading — they
-are what remains once the hero is fixed — but none of them is the first thing
-in the way any more.
+**Sharpened for this revision: the contradiction is now a proof, not a failed
+search**, and a reader should stop looking for a way round it. Both fixture
+builds assert a `max_damage − min_damage` of **8**; that difference is
+strength-free (`min` and `max` share the identical `Math.round(strength * 2)`
+term, `+0x3356` and `+0x3386`), so it names the weapon row on its own; and
+exactly one of the ninety authored rows has spread 8 — `weapon41`, `4 / 12`.
+`weapon41` then forces `strength` **4** and **8**, not the 5 and 9 the fixtures
+declare. `min_damage` is recomputed from `strength` and the weapon table by
+`battlevalues`, which `nextphase` calls on **both** combatants at every phase
+transition (`+0x35f1` attacker, `+0x3605` defender), so no staging survives to
+the action and `strength` is projected too. **These fifteen cannot be captured
+as written**, and no amount of shopping, staging or re-running changes that.
+The group-by-group blockers below are all still real and still worth reading —
+they are what remains once the hero is fixed — but none of them is the first
+thing in the way any more.
 
 The fix is a fixture edit and is outside this document's ownership. For the
 record, the arithmetic that would work: `weapon41` (`4 / 12`) gives
@@ -897,7 +1176,19 @@ behind the `battle_started` guard the staged pool survives the whole bout. Read
 every row above as "stage it" instead — with the caveat that the prisoner route
 has no `-Stage*` script, so even `armour-removal-debris`, which needs no
 tournament at all because its 12 damage is fully absorbed by 34 armour, has to
-go through `launch-capture.ps1`.
+leave that route.
+
+**Which script, now that `run-arena.ps1` carries `-WatchFields` too.** The two
+staging vehicles are `run-arena.ps1` and `launch-capture.ps1`, and the choice is
+decided by the direction, not by the watch fields. `run-arena.ps1` snapshots the
+save itself but has no `-Autopilot`, and its policy issues only
+`normal_attack` — so it can drive the direction-5 rows here
+(`armour-overflow-burning`, `armour-equality-quirk`, `armour-removal-debris`,
+`deflection-threshold-discriminator`, `frozen-enchantment-proc`) and cannot
+drive `power-critical-armour-bypass` at direction 9. That one needs
+`launch-capture.ps1 -Autopilot … -ArenaPolicy ''`, which has no snapshot guard —
+snapshot by hand first. All of this is moot until the 2/10 hero is fixed;
+it is recorded so the fix is not followed by a second wrong-vehicle session.
 
 Four of the six also need extra `-WatchFields`, because they stage
 `<piece>_defence` names the wrapper's 28-name default omits:
@@ -908,10 +1199,19 @@ Four of the six also need extra `-WatchFields`, because they stage
 two enchantment rows.
 
 `power-critical-armour-bypass` is direction **9**, and the arena route's
-`aggressive` policy only ever issues `normal_attack`. Reaching the power band
-needs an explicit autopilot **and** an empty policy — and no session has ever
-driven the arena route from an autopilot. That is open, and it is shared with
-Groups D, E and F.
+`aggressive` policy only ever issues `normal_attack` (`arenaPolicyStep` returns
+that literal whenever the controller offers it). Reaching the power band needs
+an explicit autopilot **and** an empty policy — and no session has ever driven
+the arena route from an autopilot. That is open, and it is shared with Groups D,
+E and F.
+
+Two mechanics to get right before spending a window on it, both re-read for this
+revision. **`-ArenaPolicy ''` is a no-op unless an autopilot is also given**: the
+wrapper restores `"aggressive"` when the policy is empty *and* the step list is
+empty, so the pair has to be passed together. And **only `launch-capture.ps1`
+can pass them together** — `run-arena.ps1` has `-ArenaPolicy` but no
+`-Autopilot`, so `run-arena.ps1 -ArenaPolicy ''` silently reverts to the
+default. `launch-capture.ps1` has no snapshot guard; take the snapshot by hand.
 
 ### Group D — needs a secondary weapon and a `swap_weapons` turn
 
@@ -964,7 +1264,11 @@ neither the map nor the controller vocabulary records which
 `candidate-bash-inherited-critical` leaves Group D entirely and becomes
 reachable with the tutorial gladiator. One unattended round with
 `-Autopilot 'walkright*5,shove'` settles it, because the wrapper records
-`attack_direction` passively.
+`attack_direction` passively. On the tutorial gladiator that is a prisoner-route
+round, so `run-capture.ps1 -Navigate prisoner -Autopilot 'walkright*5,shove'` —
+which carries both flags. It does not snapshot, and the prisoner route still
+flushes the store twice on the way in, so take the snapshot by hand, exactly as
+*What a session costs* says to for every session.
 
 ### Group E — needs a tournament fight, a non-lethal finish, or both
 
@@ -1010,6 +1314,28 @@ the 60-tick `taunttimer` watchdog. One unattended round with
 `-Autopilot 'taunt' -ArenaPolicy ''` still resolves it: either the trace
 records `attack_direction = 20` with the mapped rolls, or it records no
 `randomBetween` call and the fixture is genuinely unreachable.
+
+**Which script.** That pair only takes effect together — the wrapper restores
+`"aggressive"` when the policy is empty *and* the step list is empty — and only
+`launch-capture.ps1` exposes both, so it is
+`launch-capture.ps1 -Autopilot 'taunt' -ArenaPolicy '' …` with the arena
+`-Navigate`/`-ArenaTarget` flags, and a hand-taken snapshot first because that
+script has no guard. Passing `-ArenaPolicy ''` to `run-arena.ps1` instead does
+nothing at all: it has no `-Autopilot`, so the wrapper puts the default back.
+
+**The arena archive has already narrowed this, on the villain's side.** Three of
+the twenty-two `session-adc*` rounds recorded `attack_direction = 20` — `adc7`,
+`adc20`, `adc21`, all villain swings. Arming happens at `checkattackroll`, so
+direction 20 demonstrably reaches `checkattackroll`; and each of those three
+armed windows served exactly four tape samples with `"overdraw":0`, the same
+count as the direction-8 rounds, so the path makes four `randomBetween` calls
+after arming rather than none. That kills the "records no `randomBetween` call"
+branch of the question above. It does **not** settle the fixture, for two
+reasons that must not be elided: the `label`, `min`, `max` and `value` of those
+roll lines are echoed from the injected tape and are not observations of what
+the game drew, so they cannot tell you *which* four calls those were; and all
+three are the villain's taunt, so whether a **hero-side** `getphase("taunt")`
+arms at all is exactly what the unattended round still has to show.
 
 ### Group F — needs the `psyche_up` discharge chain
 
@@ -1075,7 +1401,12 @@ phase machine never consults the controller frame, so a driver calling
 wrapper's own readiness model assumes the opposite and would report a stall.
 **Open**, and cheap — one unattended round on the tutorial gladiator, which is
 level 1 and therefore below both gates, distinguishes the two outcomes
-outright.
+outright. That is a prisoner-route round:
+`run-capture.ps1 -Navigate prisoner -Autopilot 'walkright*5,psyche_up*3'`.
+The `label*N` form is the parser's own (`autopilot=walkright*5,normal_attack`),
+so the three presses do not have to be written out. It is the same vehicle as
+the `shove` round above and can share a window; neither needs `-Stage*`, so
+neither needs the arena route. Snapshot the save first, as for any session.
 
 `cast_whirlwind` also writes 30, at `+0x79d0`/`+0x7a49` behind the same range
 gate, but it is a `cast_*` phase label with no autopilot route (Group G,
@@ -1171,6 +1502,29 @@ injected sample while sharing `attackDirection 5`, so a two-member family both
 collides on the action key and disagrees about its tape: **run each as a
 one-member family**, using the full fixture id as `--family`.
 
+**Do not hand-transcribe a `-WatchFields` value from this page.**
+`node tools/runtime-capture/campaign.mjs watch-fields --family <f>` derives it,
+by diffing the fixture's staged field names against the wrapper's own
+`DEFAULT_WATCH_FIELDS` read out of the source — so it cannot drift from either
+the fixture or the 28-name default the way a table here can. Empty output is a
+real answer, and exit 0, meaning the default list is enough. It refuses when a
+family's members disagree, for the same reason `seed` does: a watch fires per
+assignment, so a field watched for member A can add a mutation line to member
+B's trace. Every list this page names was re-derived through it for this
+revision and all of them agree (up to ordering, which the tool sorts):
+
+| `--family` | derived `-WatchFields` |
+| --- | --- |
+| `armoured-deflection-threshold-cleared` | *(empty — default is enough)* |
+| `armoured-removal-destroys-helmet` | `helmet_defence,shoulderguard_defence` |
+| `tournament-nonlethal-normal-hit`, `tournament-boundary-at-max` | *(empty)* |
+| `armour-removal-debris` | `helmet_defence,shield_defence` |
+| `armour-equality-quirk` | `boot_defence` |
+| `deflection-threshold-discriminator` | `greaves_defence,helmet_defence` |
+| `armour-overflow-burning`, `frozen-enchantment-proc` | `equipped_weapon,weapon_enchantment_potency,weapon_enchantment_type` |
+| `power-critical-armour-bypass` | *(empty)* |
+| `champion-deflection-threshold-discriminator` | the eleven names `run-arena.ps1`'s header example carries |
+
 ## What is still genuinely unreachable, and what would unblock it
 
 | Fixtures | Needs |
@@ -1181,10 +1535,21 @@ one-member family**, using the full fixture id as `--family`.
 | `candidate-taunt-charisma-floor` | proof that direction 20 arms at all — `taunt_effect` is drawn pre-arm |
 | `candidate-grievous-knockback` | proof that `getphase("psyche_up")` reaches the phase below `herolevel 7` |
 | `candidate-bash-inherited-critical` | a secondary weapon, or proof that `shove` produces direction 23 |
-| every non-`normal_attack` direction on the arena route | one run proving `-Autopilot` with `-ArenaPolicy ''` drives it. Never done |
+| every non-`normal_attack` direction on the arena route | one run proving `-Autopilot` with `-ArenaPolicy ''` drives it, through `launch-capture.ps1` — `run-arena.ps1` cannot pass the pair. Never done |
 | the duel pair | a second gladiator at `herolevel` 2–3 |
+| the 5 `candidate-champion-*` | **open** — either a run that contradicts the hero table under Group J, or fixtures re-derived from `attack 1` / `defence 1` / `stamina 1` and a reachable `(herolevel, vitality)` pair |
+| the 5 `candidate-armoured-*` | nothing in staging, but a `staminaleft` the fixtures and the arena route disagree about, plus ~7 bouts per usable direction-5 hero swing |
 
 Nothing on this page any longer claims a fixture is unreachable because its
 opponent cannot be chosen, because parallel capture is impossible, or because
 `fight_mode == "tournament"` cannot be reached. All three were true once and
 none is true now.
+
+**And one caution about this page's own genre.** Three separate claims here have
+now been overturned in the same direction — a blocker that was recorded as
+permanent turned out to be a capability that had not been built yet. The
+correction that is not symmetrical: this revision found two claims overturned
+the *other* way (a fixture family recorded as "reachable now" that twenty-two
+live rounds could not reach, and a wrapper guard recorded as absent that exists
+and does nothing). Prefer a measured rate to a verdict wherever this page offers
+both.

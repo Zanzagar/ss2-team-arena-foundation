@@ -48,7 +48,11 @@ import {
   PromotionError,
   promoteSs2CandidateToGolden
 } from "../src/golden/promote-1v1-golden.js";
-import { GoldenClassification, validateSs2OneVsOneFixture } from "../src/golden/run-1v1-fixture.js";
+import {
+  GoldenClassification,
+  GoldenFixtureValidationError,
+  validateSs2OneVsOneFixture
+} from "../src/golden/run-1v1-fixture.js";
 import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 
 import { loadSs2Fixtures } from "./ss2-fixture-files.js";
@@ -81,6 +85,37 @@ const committedById = new Map(
 
 const parseTrace = (trace) => trace.trim().split("\n").map((line) => JSON.parse(line));
 const writeTrace = (lines) => `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
+
+/**
+ * Every attestation moves the record's digest, so none can be edited into or
+ * out of a committed record without breaking it.
+ *
+ * That sentence used to sit above `assert.equal(record.digest,
+ * computeSs2ObservationDigest(record))`, which does not establish it and in
+ * fact cannot fail. `validateSs2Observation` recomputes and compares the digest
+ * itself, and `ingestSs2CaptureTrace` returns THROUGH it, so on any ingested
+ * record that equality holds by construction: an implementation that broke it
+ * would throw at the ingest call and the assertion would never be reached in a
+ * failing state. Worse, it is blind to the thing it was cited for — a digest
+ * that dropped `capture.launchNonce` before hashing would drop it on both sides
+ * and agree, which is exactly the shape that would let a nonce be edited in or
+ * out and defeat the promotion independence gate.
+ *
+ * So the claim is tested directly: add or remove each attestation and require
+ * the digest to move.
+ */
+function assertDigestCoversAttestations(record, label) {
+  for (const key of SS2_CAPTURE_ATTESTATION_KEYS) {
+    const edited = cloneJson(record);
+    if (Object.hasOwn(edited.capture, key)) delete edited.capture[key];
+    else edited.capture[key] = key === "overdraw" ? 0 : `${key}-probe`;
+    assert.notEqual(
+      computeSs2ObservationDigest(edited),
+      record.digest,
+      `${label}: the observation digest does not cover capture.${key}`
+    );
+  }
+}
 
 /**
  * A raw trace for `fixture` with a chosen capture method and a chosen `end`
@@ -164,11 +199,11 @@ test("ingest carries the over-draw count and the launch nonce into capture.*", (
 
   assert.equal(record.capture.overdraw, 0);
   assert.equal(record.capture.launchNonce, "417238-1900311477");
+  // Validation recomputes the digest and compares it, so this covers the
+  // record's own integrity; what it does not cover is WHICH fields the digest
+  // is taken over, which is the next line's job.
   assert.equal(validateSs2Observation(record), record);
-  // The digest covers the whole record, so a reviewer recomputing it is
-  // recomputing over the attestations too: they cannot be edited into a
-  // committed record after the fact without breaking it.
-  assert.equal(record.digest, computeSs2ObservationDigest(record));
+  assertDigestCoversAttestations(record, "obs-carry");
   // And carrying them changes nothing about what the observation is evidence
   // for: the fixture comparison never reads the capture block.
   assert.equal(matchSs2ObservationToFixture(baseFixture, record).match, true);
@@ -606,9 +641,7 @@ test("ingest carries the staging declaration into capture.staged, and its absenc
   const staged = stagedRecord({ observationId: "obs-staged", sessionId: "session-staged" });
   assert.equal(staged.capture.staged, STAGED_DECLARATION);
   assert.equal(validateSs2Observation(staged), staged);
-  // The digest covers it, so the claim cannot be added to or removed from a
-  // committed record after the fact.
-  assert.equal(staged.digest, computeSs2ObservationDigest(staged));
+  assertDigestCoversAttestations(staged, "obs-staged");
 
   // Staging is a scenario INPUT: the game still resolved the action, so the
   // observation is still evidence for the same fixture.
@@ -617,7 +650,9 @@ test("ingest carries the staging declaration into capture.staged, and its absenc
   const unstaged = injectedTapeRecord({ observationId: "obs-unstaged", sessionId: "session-unstaged" });
   assert.equal(Object.hasOwn(unstaged.capture, "staged"), false);
   assert.equal(validateSs2Observation(unstaged), unstaged);
-  assert.equal(unstaged.digest, computeSs2ObservationDigest(unstaged));
+  // Absence is a claim too, so it has to be digest-covered in the same way:
+  // adding `staged` to a record that says it staged nothing must break it.
+  assertDigestCoversAttestations(unstaged, "obs-unstaged");
   assert.equal(matchSs2ObservationToFixture(baseFixture, unstaged).match, true);
 });
 
@@ -785,21 +820,54 @@ test("the end line's key set is still closed, so an unknown attestation cannot s
  * `staged`. Probed rather than hard-coded so the tests below assert the rule —
  * a promoted golden must state that its scenario was wrapper-staged — and not a
  * snapshot of which day the schema change landed.
+ *
+ * The probe decides which of two UNEQUAL arms the test below takes, so it has
+ * to be able to tell "the schema rejects this key" from "something else broke".
+ * It could not: it used to end `catch { return false }`, and the arm that
+ * selects only has to witness a refusal — which a validator broken in any way
+ * at all also produces. Demonstrated, not argued. Teach the schema `staged` but
+ * give it a validator that rejects every value of the field — the single most
+ * likely regression, since the promotion gate's own error message tells the
+ * next author to add the key and validate it — and the pre-fix file reported 29
+ * passed / 0 failed, with the one test that exists to prove a staged golden
+ * says so on its own face reporting success by taking the "not yet" branch.
+ *
+ * So exactly one error selects that branch now and every other throw is
+ * rethrown. Evaluated lazily rather than at module load, so the rethrow is
+ * attributed to the test that consumes it instead of taking the other 28 down
+ * with it as an uncaught exception.
  */
-const goldenSchemaAdmitsStaged = (() => {
+const STAGED_KEY_REFUSED_BY_SCHEMA = /^golden provenance has unsupported fields: staged\.$/;
+
+function goldenSchemaAdmitsStaged() {
   const observations = ["p1", "p2"].map((suffix) =>
     producedRecord({ observationId: `obs-probe-${suffix}`, sessionId: `session-probe-${suffix}` })
   );
   const { golden } = promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
+  // The probe reads the schema only if its own baseline is sound. A validator
+  // that rejects this golden for any OTHER reason rejects the mutated probe
+  // too, and the probe would report that as "the schema has not learned
+  // `staged` yet" — so the baseline is checked before the mutation is made.
+  assert.equal(
+    validateSs2OneVsOneFixture(golden),
+    golden,
+    "the staging probe's baseline golden does not validate, so the probe measures nothing"
+  );
   const probe = cloneJson(golden);
   probe.provenance.staged = "hero.strength=40";
   try {
     validateSs2OneVsOneFixture(probe);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (
+      error instanceof GoldenFixtureValidationError &&
+      STAGED_KEY_REFUSED_BY_SCHEMA.test(error.message)
+    ) {
+      return false;
+    }
+    throw error;
   }
-})();
+}
 
 test("the scenario comparison cannot see staging, which is why the gate has to", () => {
   // The load-bearing demonstration. These two observations agree on every
@@ -903,7 +971,7 @@ test("a golden promoted from staged evidence must say so on its own face", () =>
   const promote = () =>
     promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations));
 
-  if (goldenSchemaAdmitsStaged) {
+  if (goldenSchemaAdmitsStaged()) {
     const promotion = promote();
     assert.equal(promotion.staged, STAGED_DECLARATION);
     // A reader opening the golden sees the staging without chasing observation
@@ -917,6 +985,23 @@ test("a golden promoted from staged evidence must say so on its own face", () =>
   // dropping it. Emitting a golden that silently read as game-produced is the
   // exact outcome `staged` exists to prevent, so failing loudly with the
   // required change is the only honest option left to this track.
+  //
+  // NOT also asserted here: that `error.cause` is the schema's refusal of this
+  // one key. It reads like the natural companion to the narrowed probe above,
+  // and it is decoration — `assertAllowedKeys(provenance, GOLDEN_PROVENANCE_KEYS)`
+  // runs BEFORE every other golden check, so while `staged` is an unsupported
+  // key that refusal masks any other defect in the golden and the cause matches
+  // by construction; and once the key is supported this arm is not taken at
+  // all. An assertion that cannot fail in either state is worth less than the
+  // comment saying why, so this is the comment.
+  //
+  // The real hazard it looked like it was covering lives in
+  // src/golden/promote-1v1-golden.js and is reported, not patched from here:
+  // `assertGoldenCanRecordStaging` relabels ANY golden validation failure as
+  // "the schema does not admit provenance.staged" whenever staging is present.
+  // Harmless today for the ordering reason above; the day `staged` joins
+  // GOLDEN_PROVENANCE_KEYS it will start telling the next author to make a
+  // change they have already made.
   assert.throws(
     promote,
     (error) =>

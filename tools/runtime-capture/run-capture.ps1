@@ -68,6 +68,47 @@ function Show-Diagnostics {
         Select-Object -Last 14 | ForEach-Object { $_.Line -replace '^.*avm_trace: ', '' }
 }
 
+# -WatchFields is a comma list of ActionScript identifiers and nothing else,
+# and it is checked HERE, before anything is launched, because the way it fails
+# without the check is silent.
+#
+# The comma is safe either way, and that is worth stating so nobody adds
+# quoting for the wrong reason: `powershell -File` passes each argument through
+# as a literal string, so `-WatchFields a,b` binds the single string "a,b" and
+# is NOT parsed as an array. Measured on this host (PS 5.1) with this script's
+# exact argument array: the eleven-name champion list arrives byte-identical
+# quoted and unquoted, as do ';', '$', '@' and a backtick.
+#
+# A SPACE is not safe. Start-Process joins -ArgumentList with plain spaces and
+# adds no quoting of its own, so the tail of an unquoted value becomes its own
+# token and binds POSITIONALLY to the first unbound parameter of
+# launch-capture.ps1 - which is -AttackerSide. Measured, same argument array:
+#
+#   -WatchFields boot_defence villain  ->  $WatchFields  = "boot_defence"
+#                                          $AttackerSide = "villain"
+#                                          exit 0, nothing on stderr
+#
+# That is the trace's entire attacker label, rewritten by a typo, with the
+# watch list silently truncated in the same stroke, and no error anywhere. The
+# natural human spelling "boot_defence, weapon" fails differently and no less
+# confusingly: a ValidateSet error naming -AttackerSide, a parameter this
+# script never passes.
+#
+# So the value is BOTH quoted below (like every other string forward, and like
+# run-arena.ps1 already does) and refused here. Quoting alone would only move
+# the corruption one hop: launch-capture.ps1 builds "-PwatchFields=$WatchFields"
+# into its own Start-Process array and joins that with plain spaces too. And a
+# space could not do anything useful even if it arrived - the wrapper parses
+# with `rawWatchFields.split(",")` and does not trim, so " weapon" matches no
+# field name Object.watch could bind. Nothing legitimate is refused: no field
+# the wrapper can watch contains whitespace or a quote.
+if ($WatchFields -match '[\s"]') {
+    throw ("-WatchFields must be a comma-separated list of field names with no " +
+        "whitespace and no quotes; got '$WatchFields'. The wrapper splits on ',' " +
+        "and does not trim, and a space here is forwarded as a separate token " +
+        "that binds to launch-capture.ps1's -AttackerSide.")
+}
+
 # One session at a time is a consequence of SHARING one SharedObject store and
 # nothing else, so the guard lifts exactly when this session has its own. A
 # session given -SaveDirectory reads and writes a private seeded copy and
@@ -126,8 +167,14 @@ $launcherArgs = @(
     '-Navigate', "`"$Navigate`""
 )
 if ($SkipPipeline) { $launcherArgs += '-SkipPipeline' }
+# -FrameRate is deliberately NOT quoted and -WatchFields is: the rule is quote
+# the [string]s, not quote everything. An [int]'s interpolation is digits with
+# no separator under every culture, so it cannot split; a string can, and the
+# guard above says what happens when it does. run-arena.ps1 forwards its own
+# numerics bare and its own strings quoted for the same reason - the two
+# scripts now agree, and -WatchFields was the one string forward that did not.
 if ($FrameRate -gt 0) { $launcherArgs += @('-FrameRate', "$FrameRate") }
-if ($WatchFields) { $launcherArgs += @('-WatchFields', "$WatchFields") }
+if ($WatchFields) { $launcherArgs += @('-WatchFields', "`"$WatchFields`"") }
 if ($SaveDirectory) { $launcherArgs += @('-SaveDirectory', "`"$SaveDirectory`"") }
 $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $launchOut -RedirectStandardError "$launchOut.err" `

@@ -455,7 +455,16 @@ test("every combatant declares the same canonical resources, on both sides of th
     if (size > 1) {
       assert.equal(host.combatant("blue-fill-2").aiFilled, true);
       assert.equal(host.combatant("blue-fill-2").resources.armourclass.value, 44);
-      assert.deepEqual(host.diagnostics.aiFillResourceGaps, []);
+      // The whole bag, value for value, is that slot's own vanilla template
+      // read through `canonicalResourcesFrom` — the same reading the supplied
+      // gladiator beside it gets from an identical combat object. A bag
+      // assembled from anywhere else (a default, a subset, another slot's
+      // template) would land here rather than only on a key list.
+      assert.deepEqual(
+        host.combatant("blue-fill-2").resources,
+        host.combatant("blue-1").resources,
+        "an AI-filled slot's bag is its own template, not a default and not a neighbour's"
+      );
     }
     // Both sides of the layout, not just the hero side.
     const sides = new Set(host.layout.placements.map((placement) => placement.side));
@@ -497,31 +506,52 @@ test("an armour write lands on an AI-filled ally at 3v3, which is what declaring
   assert.equal(host.layout.placementFor(filled.id).stateObjectPath, "_root.arena.team_arena.state.villain_2");
 });
 
-test("the roster's one-fill-template-per-team limit is reported, never guessed around", () => {
+/**
+ * THE WORKAROUND THIS REPLACES.
+ *
+ * `src/team/roster.js` used to build every filled slot from one `team.aiFill`,
+ * so two slots mirroring two different gladiators had nowhere to put the second
+ * resource bag. The host's answer was to declare **none** on either slot and
+ * report `diagnostics.aiFillResourceGaps`; the consequence it named is that a
+ * rule set's write to such a slot was refused by the resolver. The roster
+ * carries a per-slot fill source now, and the host puts each slot's bag on that
+ * slot's own empty-slot marker, so there is nothing left to disagree about and
+ * nothing left to report.
+ */
+test("two AI-filled slots that mirror different gladiators each carry their own armour", () => {
   const host = createVanillaBattleHost({
     teams: [
       { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
       {
         id: "blue",
         members: [
-          { fill: "ai", vanilla: vanillaGladiator({ speed: 4, armourclass: 44 }) },
-          { fill: "ai", vanilla: vanillaGladiator({ speed: 3, armourclass: 12 }) }
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 4, armourclass: 88, armourclass_max: 88 }) },
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 3, armourclass: 66, armourclass_max: 66 }) }
         ]
       }
     ],
+    rules: armourFirstRules,
     rngTape: hitTape(8)
   });
 
-  // `src/team/roster.js` builds every filled slot from one `team.aiFill`, so
-  // two templates that disagree about armour have nowhere to both live.
-  // Picking a winner would put an invented number in the state hash.
-  assert.deepEqual(host.diagnostics.aiFillResourceGaps.map((gap) => gap.teamId), ["blue"]);
-  assert.match(host.diagnostics.aiFillResourceGaps[0].reason, /one AI-fill template per team/);
-  for (const combatant of host.battle.teams.find((team) => team.id === "blue").combatants) {
-    assert.deepEqual(combatant.resources, {}, "the filled slots declare nothing rather than the wrong thing");
-  }
+  const [guard, scout] = host.battle.teams.find((team) => team.id === "blue").combatants;
+  assert.deepEqual([guard.aiFilled, scout.aiFilled], [true, true]);
+  assert.deepEqual(
+    [resourceValue(guard, "armourclass"), resourceValue(scout, "armourclass")],
+    [88, 66],
+    "each filled slot reads its own template — not the first one, and not nothing at all"
+  );
 
-  // A caller that says what it wants is obeyed instead.
+  // The write lands on that slot's own number. A 60-point blow leaves 6 of the
+  // scout's 66, which neither an empty bag (the resolver refuses the write and
+  // this throws) nor the guard's 88 (which would leave 28) can produce.
+  host.submit({ actorId: "red-1", type: "strike", targetId: scout.id });
+  assert.equal(resourceValue(host.combatant(scout.id), "armourclass"), 6);
+  assert.equal(host.vanillaState()[scout.id].combatObject.armourclass, 6);
+  assert.equal(resourceValue(host.combatant(guard.id), "armourclass"), 88, "and only on that slot");
+});
+
+test("a caller's own aiFill resources outrank the template bag the host would supply", () => {
   const declared = createVanillaBattleHost({
     teams: [
       { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
@@ -536,8 +566,60 @@ test("the roster's one-fill-template-per-team limit is reported, never guessed a
     ],
     rngTape: hitTape(8)
   });
-  assert.deepEqual(declared.diagnostics.aiFillResourceGaps, []);
-  assert.equal(declared.combatant("blue-fill-1").resources.armourclass.value, 7);
+
+  // The roster treats the empty-slot marker as the nearest fill source, so a
+  // bag put there unconditionally would silently outrank the caller's own
+  // declaration. Both filled slots read 7, from neither template.
+  for (const id of ["blue-fill-1", "blue-fill-2"]) {
+    assert.equal(resourceValue(declared.combatant(id), "armourclass"), 7, id);
+    assert.deepEqual(Object.keys(declared.combatant(id).resources), ["armourclass"], id);
+  }
+});
+
+/**
+ * THE DEFECT THIS CLOSES.
+ *
+ * The retired workaround carried its shared bag by spreading the team's fill
+ * declaration into an object literal, `{ ...team.aiFill, resources }`. Once
+ * `team.aiFill` was allowed to be an array of per-slot templates that became
+ * lossy in a way nothing reported: `{ ...[a, b] }` is `{ 0: a, 1: b }`, which
+ * the roster reads as one nameless, statless template applying to every slot,
+ * so every per-slot declaration the caller made was discarded and the filled
+ * fighters came out as anonymous reserves.
+ *
+ * The two mirror templates here AGREE about their resources on purpose: that
+ * is the branch the workaround took, and the only one in which it collapsed
+ * the array.
+ */
+test("a per-slot aiFill array reaches the roster whole, one template per filled slot", () => {
+  const host = createVanillaBattleHost({
+    teams: [
+      { id: "red", members: [{ id: "red-1", controller: "local", vanilla: vanillaGladiator({ speed: 30 }) }] },
+      {
+        id: "blue",
+        aiFill: [
+          { name: "Vanguard", stats: { agility: 7 } },
+          { name: "Skirmisher", stats: { agility: 2 } }
+        ],
+        members: [
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 4 }) },
+          { fill: "ai", vanilla: vanillaGladiator({ speed: 3 }) }
+        ]
+      }
+    ],
+    rngTape: hitTape(8)
+  });
+
+  const blue = host.battle.teams.find((team) => team.id === "blue").combatants;
+  assert.deepEqual(
+    blue.map((combatant) => combatant.name),
+    ["Vanguard", "Skirmisher"],
+    "a collapsed array leaves no name to read and the roster falls back to `<team> Reserve n`"
+  );
+  assert.deepEqual(blue.map((combatant) => combatant.stats.agility), [7, 2]);
+  // And the bag still arrives, from each slot's own vanilla template, without
+  // anything having been merged into the array to carry it.
+  assert.deepEqual(blue.map((combatant) => resourceValue(combatant, "armourclass")), [44, 44]);
 });
 
 test("there is no second code path: one resolver, one adapter pipeline, four globals, at every size", () => {

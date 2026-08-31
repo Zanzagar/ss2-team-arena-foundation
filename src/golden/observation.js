@@ -169,6 +169,70 @@ export class ObservationError extends Error {
 
 export class ObservationValidationError extends ObservationError {}
 
+/** A fixture mutation reason that no wrapper hook is mapped to. */
+export class HookAttributionError extends ObservationError {}
+
+/**
+ * The hook `capture-ingest.js` stamps on the `/result` entry it synthesizes.
+ *
+ * `/result` is a pipeline convention rather than a watched game field, so no
+ * `set` line ever carries it; ingest mints the entry from the observed `death`
+ * and `overlay-label` events and labels it with this constant. The literal
+ * lives in `capture-ingest.js` (another track's file, and importing it here
+ * would be a cycle), so the two are pinned by checking this value against the
+ * `/result` rows of the committed observation records — output ingest really
+ * produced — rather than against a second copy of the same literal, which
+ * would move with it and assert nothing.
+ */
+export const SS2_RESULT_BRIDGE_HOOK = "result-bridge";
+
+/**
+ * Wrapper hook attribution per static mutation reason — the physical
+ * (`damagecharacter`) ingress.
+ *
+ * A fixture names each mutation by the STATIC REASON the candidate model
+ * assigns it; a wrapper reports the INGRESS FUNCTION the write happened
+ * inside. This table is the translation between them, and it is what makes
+ * `matchSs2ObservationToFixture` able to compare an attribution instead of
+ * discarding it. The convention is the ingress that owns the assignment, not
+ * the innermost helper: `stat-clamp` is `check_stats`' arithmetic but is
+ * attributed to whichever ingress called it.
+ *
+ * `src/golden/simulate-capture-trace.js` holds a second copy under the names
+ * `HOOK_FOR_STATIC_REASON`/`SPELL_HOOK_FOR_STATIC_REASON`, because that module
+ * imports this one and the reverse import would be a cycle. The copies are
+ * pinned equal by a test, and the reference simulator's own end-to-end
+ * self-check would fail on every fixture if they ever drifted. The canonical
+ * home is here, with the matcher that consumes it.
+ */
+export const SS2_HOOK_FOR_STATIC_REASON = Object.freeze({
+  "physical-damage": "damagecharacter",
+  "magic-damage": "magic-damage-character",
+  "psyche-up": "magic-damage-character",
+  "breastplate-stamina": "damagecharacter",
+  "stat-clamp": "damagecharacter",
+  "weapon-enchantment": "damagecharacter",
+  "remove-armour-piece": "remove-armour",
+  "remove-armour-clamp": "remove-armour",
+  "death-status-clear": "death",
+  "death-taunt-clear": "death"
+});
+
+/**
+ * The same table as seen from the spell ingress.
+ *
+ * Two reasons are shared with the physical path but belong to a different
+ * function there: the breastplate stamina join and `check_stats` are steps 5
+ * and 6 of `magic_damage_character` itself, so a wrapper attributing by call
+ * frame reports `magic-damage-character` for both during a spell action.
+ * `death-*` stays `death`, which really is the shared function.
+ */
+export const SS2_SPELL_HOOK_FOR_STATIC_REASON = Object.freeze({
+  ...SS2_HOOK_FOR_STATIC_REASON,
+  "breastplate-stamina": "magic-damage-character",
+  "stat-clamp": "magic-damage-character"
+});
+
 /**
  * Parse a staging declaration into its ordered entries, or throw naming the
  * exact reason.
@@ -577,6 +641,41 @@ export function validateSs2Observation(record) {
       `${record.capture.method} captures must contain at least one injected sample.`
     );
   }
+  /*
+   * `injected-tape-runtime` is the one method that names a tape, and it means
+   * EVERY recorded roll came off it — "at least one" was too weak for it.
+   *
+   * Three facts close the gap with nothing left over. The wrapper's sole roll
+   * emitter stamps `injected: true` unconditionally. A draw made after the tape
+   * ran out is never emitted at all — it increments `capture.overdraw`, which
+   * ingest refuses non-zero. And `assertNoUncapturableSamples` has already
+   * refused the only source that could honestly be uninjected here, the
+   * RandomNumber opcode. So a sample claiming `injected: false` on this method
+   * claims the wrapper WATCHED a roll it did not force, which is a stronger
+   * kind of evidence than the method can produce, and the field is not compared
+   * anywhere else: `comparableSamples` drops it before matching. All 407
+   * samples across the committed records are injected, so requiring it refuses
+   * nothing real.
+   *
+   * Its sibling `callSite` is deliberately NOT pinned. The wrapper has one roll
+   * emitter and stamps one compile-time constant, so any check on the value
+   * compares a hard-coded constant to a hard-coded constant: it could not fail
+   * on a real capture and would attest nothing about where the roll came from.
+   * The honest statement is that `callSite` — like `label`, `min`, `max` and
+   * `value` on an injected sample — is the pipeline's own input read back, not
+   * an observation, and that belongs in the record's documentation rather than
+   * in a check that looks like verification.
+   */
+  if (
+    record.capture.method === ObservationCaptureMethod.INJECTED_TAPE &&
+    injectedCount !== record.samples.length
+  ) {
+    throw new ObservationValidationError(
+      `${ObservationCaptureMethod.INJECTED_TAPE} captures must have every sample injected; ` +
+      `${record.samples.length - injectedCount} of ${record.samples.length} claim to be rolls the ` +
+      "wrapper observed rather than served, which its single roll emitter cannot produce."
+    );
+  }
   assertSs2MutationTraceShape(record.mutationTrace, "mutationTrace", ObservationValidationError);
   if (record.mutationTrace.length > 500) {
     throw new ObservationValidationError("mutationTrace must contain at most 500 entries.");
@@ -750,21 +849,84 @@ function candidateIdFor(fixtureId) {
   return fixtureId.startsWith("golden-") ? `candidate-${fixtureId.slice("golden-".length)}` : fixtureId;
 }
 
-function stripTraceReasons(trace) {
-  return trace.map((entry) => ({
+/**
+ * One mutation projected for matching: ordering, the write itself, and the
+ * hook the write must be attributed to.
+ *
+ * The two sides speak different vocabularies and the key is named `hook`
+ * rather than `reason` to keep that visible in a divergence path. A fixture
+ * entry carries a STATIC reason (`physical-damage`, `stat-clamp`) — the
+ * candidate model's name for the assignment. An observation entry carries the
+ * WRAPPER's attribution: the ingress function the write happened inside,
+ * copied from the raw trace's `set.hook` by `capture-ingest.js`. Translating
+ * the first into the second is what makes them comparable; see
+ * `hookForFixtureMutation`.
+ */
+function projectTraceForMatching(trace, hookAt) {
+  return trace.map((entry, index) => ({
     sequence: entry.sequence,
     path: entry.path,
     before: entry.before,
-    after: entry.after
+    after: entry.after,
+    hook: hookAt(entry, index)
   }));
 }
 
 /**
+ * The hook a wrapper must report for one fixture mutation.
+ *
+ * Which table applies is a property of the STAGED ACTION, not of the derived
+ * calculation, so it is keyed on `scenario.spellId !== undefined` — the same
+ * discriminator `deriveExpectedEventsFromSs2Fixture` above and
+ * `simulate-capture-trace.js` already use, and the same one the fixture schema
+ * enforces by requiring exactly one action identity.
+ *
+ * An unmapped reason THROWS rather than producing a difference. A difference
+ * would report "this observation diverges" when the real fault is a gap in
+ * this table, sending the reader to re-capture evidence that was never wrong.
+ * Nothing in the repository reaches it today: every static reason in every
+ * committed fixture is mapped.
+ */
+function hookForFixtureMutation(fixture, entry, index) {
+  // `/result` is not a game write. It is a pipeline convention that ingest
+  // synthesizes from the observed `death` + `overlay-label` pair, stamping its
+  // own constant. Comparing it therefore proves nothing about instrumentation
+  // — both sides are constants on the honest path — and it is included only so
+  // the projection needs no special case. The evidence on this row is its
+  // payload (`before`/`after`), which is derived from the observed events and
+  // is compared in full.
+  if (entry.path === "/result") return SS2_RESULT_BRIDGE_HOOK;
+  const table = fixture.scenario.spellId !== undefined
+    ? SS2_SPELL_HOOK_FOR_STATIC_REASON
+    : SS2_HOOK_FOR_STATIC_REASON;
+  if (!Object.hasOwn(table, entry.reason)) {
+    throw new HookAttributionError(
+      `${fixture.fixtureId} expected.mutationTrace[${index}] gives reason ${JSON.stringify(entry.reason)}, ` +
+      "which no wrapper hook is mapped to, so no observation could ever be compared against it. " +
+      "Add the reason to SS2_HOOK_FOR_STATIC_REASON (and, if the spell ingress owns the write, to " +
+      "SS2_SPELL_HOOK_FOR_STATIC_REASON) in src/golden/observation.js, naming the AS2 ingress function " +
+      "the assignment lives inside."
+    );
+  }
+  return table[entry.reason];
+}
+
+/**
  * Match one runtime observation against a fixture's runtime-observable
- * projection: scenario, ordered samples, ordered mutations (reasons are
- * annotations, not part of the contract), semantic events, the result event,
- * and the final state. `expected.calculation`/`expected.mutation` stay
- * candidate-derived and are not directly observable.
+ * projection: scenario, ordered samples, ordered mutations (each one's static
+ * reason TRANSLATED into the hook a wrapper must attribute it to), semantic
+ * events, the result event, and the final state. `expected.calculation`/
+ * `expected.mutation` stay candidate-derived and are not directly observable.
+ *
+ * The mutation `reason` used to be stripped from BOTH sides before comparison,
+ * on the grounds that the two vocabularies could not be compared. The cost of
+ * that convenience was a forgery: a record attributing the hitpoint write to
+ * `remove-armour`, or to `unattributed`, or to nothing the wrapper can produce,
+ * matched, promoted, and yielded a golden the committed suite accepted — while
+ * the hook is the record's only statement about WHERE in the game the write
+ * came from, which is exactly the claim a golden rests on. Translating instead
+ * of stripping costs no re-capture: all 22 promoted goldens' cited observations
+ * already carry the hooks their fixtures' reasons map to.
  */
 export function matchSs2ObservationToFixture(fixture, observation) {
   validateSs2OneVsOneFixture(fixture);
@@ -801,8 +963,11 @@ export function matchSs2ObservationToFixture(fixture, observation) {
   }
 
   collectDifferences(
-    stripTraceReasons(fixture.expected.mutationTrace),
-    stripTraceReasons(observation.mutationTrace),
+    projectTraceForMatching(
+      fixture.expected.mutationTrace,
+      (entry, index) => hookForFixtureMutation(fixture, entry, index)
+    ),
+    projectTraceForMatching(observation.mutationTrace, (entry) => entry.reason),
     "/mutationTrace",
     differences
   );

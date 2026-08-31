@@ -1,7 +1,7 @@
 # SS2 first integration checkpoint
 
 Status: read-only static map, first recorded 2026-08-29, last revised
-2026-08-30. This is interoperability research for the locally licensed Steam
+2026-08-31. This is interoperability research for the locally licensed Steam
 build identified in
 [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json). It contains no game
 code, artwork, audio, exported scripts, or game binaries.
@@ -753,6 +753,201 @@ consecutive `psyche_up` presses would settle it. Every non-`psyche_up`
 decision resets the counter through `nextphase` (`+0x35e0`), and taking damage
 resets the defender's through `damagecharacter` (`+0x1be4`).
 
+**Runtime-resolved 2026-08-31 — the three melee bands, and what a live 1–12
+spread does *not* mean.** Twenty-two `run-arena.ps1` rounds
+(`captures/session-adc1` … `session-adc22`) produced twenty-one armed actions,
+each carrying a direction. The split below is derived from which combatant the
+first `damagecharacter` write landed on — the defender takes the damage — and
+not from the traces' own `attackerSide`, which is an operator-declared launcher
+string that reads `hero` on all twenty:
+
+| Who actually swung | n | `attack_direction` values observed |
+| --- | ---: | --- |
+| hero | 11 | 8, 8, 7, 8, 7, 6, 8, 8, 6, 7, 7 |
+| villain | 9 | 4, 10, 11, **20**, 3, 2, **5**, **20**, 10 |
+
+The twenty-first armed round, `session-adc21`, also drew 20 but has no
+`damagecharacter` write at all, so it is not attributed above. The
+twenty-second, `session-adc15`, aborted on a special-event screen and never
+armed.
+
+Every hero swing on that route is a `normal_attack` — the capture wrapper's
+arena autopilot issues that verb and no other attack, its only other steps
+being `walkright` and `walkleft` — and **all eleven landed inside
+`randomBetween(5, 8)`, none outside**. That confirms the `+0x61f1` row of the
+table above from a source with no freedom to be fitted to it: the range was
+read off the opcode and written down here before this route existed, and
+nothing in a run can select the direction.
+
+It also retires a reading the archive's 1–12 spread previously invited. **The
+out-of-band values are not a wider hero range; they are the villain's
+attacks**, drawn by the same three sites in the same phase machine, which
+serves whoever is swinging. A direction therefore never identifies the
+combatant on its own — `session-adc18` is a villain swing at direction 5,
+inside the hero's own band.
+
+**Runtime-resolved 2026-08-31 — direction 5 is attainable, and eleven hero
+swings without one are not evidence otherwise.** This is the most
+operationally load-bearing number in the table: 26 of the 60 committed 1v1
+candidates stage direction 5. `randomBetween` is inclusive at *both* bounds,
+byte-verified at the definition rather than inferred from behaviour. The
+overlay's copy at `sprite:862/frame:52/DoAction@0x23f835` `+0x026a` is
+
+```text
+DefineFunction2 randomBetween(a, b)
+  +0x0288  Push register:1                       // a  — the addend
+  +0x028e  Math.random()
+  +0x029f  Push register:2, register:1; Subtract // b - a
+  +0x02a7  Push 1; Add2                          // b - a + 1
+  +0x02b0  Multiply
+  +0x02b1  Math.floor(...)
+  +0x02c2  Add2                                  // a + floor(...)
+  +0x02c3  Return
+```
+
+`register:1` is the low bound and the addend, `register:2` the high bound, and
+`Math.random()` is bounded above by 1, so the floor spans `0 … b - a` and the
+result spans `a … b` inclusive. The call at `+0x61f1` pushes `numArgs 2,
+arg1 5, arg2 8`, so **`P(direction 5) = 0.25` exactly**. The build agrees with
+itself: the instruction right after each band's draw tests that band's *low*
+bound first — `== 5` → `Attack5` at `+0x6209`, `== 9` → `Attack9` at `+0x60a2`,
+`== 1` → `Attack1` at `+0x6374` — so any reading that excluded the low bound
+would leave the first animation branch of every band unreachable.
+
+Eleven consecutive hero swings without a 5 is a `0.75^11 = 4.2%` event, which
+is unremarkable; and the archive settles it directly. **Eighteen committed
+observation records carry `scenario.attackDirection` 5**
+(`test/observations/ss2-1v1/`), and sixteen of them put their first mutation on
+`/villain/…` — the defender took the damage, so the hero swung. The other two
+are misses with an empty mutation trace and carry no evidence either way;
+`scenario.attackerSide` is an operator-declared string and settles nothing
+here. Those eighteen are genuine live draws even though the runs were
+tape-injected, because the direction is assigned *before* the branch's own
+`checkattackroll()` call in every band — `+0x6208` before `+0x62ad` for normal,
+`+0x608a` before `+0x6146` for power, `+0x635c` before `+0x6418` for quick —
+and `checkattackroll` is where the capture window opens. No tape slot can reach
+the direction. It is recorded, never dictated.
+
+### Direction 20 is the taunt path (byte-verified; runtime-resolved 2026-08-31)
+
+Direction 20 has exactly one producer in the assignment table above, and the
+arena rounds now put a live trace behind it. It is not a special, a spell, a
+bow or a critical path.
+
+*The producer.* Inside the `taunt` branch (`+0x679c`) the phase rolls
+`diceroll = randomBetween(1, 100)` at `+0x6921` and succeeds when
+`diceroll < game_attacker.taunt_percentage` (`+0x694b`), then draws
+`taunt_effect = randomBetween(1, 2)` at `+0x6952`. **Only `taunt_effect == 1`
+reaches `+0x6981`**, which sets `attack_direction = 20` and calls
+`checkattackroll` at `+0x698c`; `taunt_effect == 2` takes the charisma-scaled
+knockback / `taunted1` arm and never reaches the dispatcher. Both draws precede
+`checkattackroll`, so neither can be observed or injected inside the capture
+window — but note that both are `randomBetween`, **not** the `RandomNumber`
+opcode, and a successful taunt does **not** skip `checkattackroll`. Its
+`+0x698c` call is one of the build's thirteen `checkattackroll` calls (fourteen
+references in all: the `DefineFunction2` at `+0x2c2b` plus thirteen calls), and
+three arena rounds armed on it. Any capture-side note that describes taunts as
+opcode-driven and therefore uncapturable is contradicted by both the bytes and
+the traces; that note lives outside this document and is flagged here rather
+than corrected.
+
+*Who can issue it.* `taunt` is a `getphase` label three of the four hero
+controllers wire — every one but `closerange_warrior`, and on the two long-range
+frames only while `staminaleft / staminamax * 100 >= 50` (§Buttons wired per
+controller frame) — and `villainChooseAction` writes it from two arms
+(byte-verified in that function's own block,
+`sprite:862/frame:52/DoAction@0x23f835`):
+
+- in the in-position attack chain, `choices` in `80 … 89` picks `shove` when the
+  villain's `equipped_weapon == 1` and `taunt` otherwise (`+0x0746` selecting
+  between `+0x074b` and `+0x0758`);
+- in **both** out-of-position movement chains — the arm taken while the
+  opponent is still closing the distance — `choices` in `85 … 95` picks `taunt`
+  when the villain's `staminaleft / staminamax * 100 >= 40` and `rest` below
+  that (`+0x0b0f`–`+0x0b74` for one facing, `+0x0e0f`–`+0x0e63` for the other).
+  This arm carries **no weapon test**, so a melee villain reaches `taunt` here.
+
+`choices` is itself a `randomBetween(1, 100)` drawn before the phase is
+dispatched, so **which arm fired in any given round is not recorded and is not
+established here.** The out-of-position arm is the one consistent with the
+observed rounds — the hero was still walking in — but that is an inference, not
+a measurement, and must not be promoted.
+
+Note the two gates differ: the villain's out-of-position arm needs 40% stamina,
+the hero's long-range button 50%. Because the hero can issue `taunt` at all,
+direction 20 discriminates the combatant no better than direction 5 does. On
+the arena route it happens to be villain-only, but only because the capture
+wrapper's arena autopilot never issues the verb — a property of the capture
+vehicle, not of the build.
+
+*The live trace.* Three armed rounds recorded direction 20: `session-adc7`,
+`session-adc20` and `session-adc21`. In adc7 and adc20 the hero's last
+`phase_action` was `walkright`, never an attack verb, and the villain took the
+turn; both dispatched `{"t":"event","type":"defender-hurt","method":"taunt"}`
+and both wrote `/hero/hitpoints 300 → 297`. Villain `charisma` 1 against hero
+`charisma` 1 gives `round(1 * 4) - 1 = 3`, exactly the damage observed. adc21
+additionally emitted the forced `criticalhit` sentinel **21** as a raw value.
+Between them the three cells of the dispatcher table's direction-20 row —
+charisma damage, sentinel 21, `taunt_percentage` — are each corroborated live.
+
+*What the arm draws, which is what a taunt fixture needs.* The dispatcher arm
+is short enough to read out in full (`DoAction@0x240c7f`, inside
+`checkattackroll`):
+
+```text
++0x2dcc  if (attack_direction == 20) {
++0x2de1    criticalhit = 21;                                   // constant, no draw
++0x2dec    damage = Math.round(game_attacker.charisma * 4)
+                      - game_defender.charisma;
++0x2e22    if (damage < 1)
++0x2e37      damage = randomBetween(1, 3);                     // CONDITIONAL draw
++0x2e4f    rollneeded = 100 - game_attacker.taunt_percentage;
+         }
+```
+
+So the taunt band's arm draws **nothing** when the charisma term lands at 1 or
+above and **exactly one** `randomBetween(1, 3)` when it does not — unlike the
+5–8 band, whose arm always draws two, and the 1–4 and 9–12 bands, whose arms
+draw one. The armed windows measured that: each dispatched direction-20 round
+consumed **four** samples against the normal band's seven, and every one of the
+three missing draws is separately byte-accounted (§Attack roll dispatcher, the
+runtime draw ledger) — the damage draw was skipped because the charisma term
+was 3, the critical draw does not exist on this arm, and the knockback block
+excludes direction 20 outright. The deflection draw survives because
+`deflect_critical = randomBetween(1, 100)` at `+0x3030` sits on the hit branch
+unconditionally, ahead of any test of `criticalhit`; and `remove_armour` is
+called on this path yet draws nothing, because direction 20 matches none of its
+three piece groups.
+
+That is the first runtime evidence bearing on `candidate-taunt-charisma-floor`,
+which models the *other* case — hero `charisma` 5 against villain `charisma`
+30, so `20 - 30 < 1` and the floor draw fires — with a five-sample tape ordered
+hit, taunt-floor damage, deflection, armour-removal, enchantment potency.
+Remove the second of those and what is left is exactly the four-sample order
+the live rounds consumed.
+
+*Reading those traces.* Every `roll` line in the direction-20 rounds is
+labelled `normal-damage-roll [21..23]` and `normal-critical-roll [1..20]`.
+**Those are the fixture's tape entries, not the game's arguments**
+(§What a capture can and cannot confirm) — the direction-20 arm asked for
+neither. Only the *count*, four against the normal band's seven, is an
+observation, and the slot-to-call-site mapping in that ledger is read off
+emission order, not off any recorded call site.
+
+*Still unresolved.* `session-adc21` carries direction 20, the sentinel 21 and
+four served samples, but no `defender_hurt` or `defender_blocked` event, no
+`damagecharacter` call and no `remove_armour` call; its four state writes land
+on `/villain/…` and are recorded as `"hook":"unattributed"`. It is the one
+round of the twenty-one whose draw count is not reconstructed by the ledger
+above, and it is not counted as a taunt confirmation here.
+
+Two further things this section does **not** settle. The `taunt_effect == 2`
+arm — the charisma-scaled knockback and the `taunted1` write — has no live
+trace at all, because it never reaches `checkattackroll` and so never arms.
+And the charisma-floor case is still unobserved: every round here had the
+attacker's `round(charisma * 4) - defender.charisma` land at 3, so the
+`randomBetween(1, 3)` at `+0x2e37` has never actually been drawn in a capture.
+
 ### Spell-path reuse of `attack_direction` (byte-verified 2026-08-30)
 
 `cast_weaken_armour` is the only cast path that reuses `attack_direction` as an
@@ -869,6 +1064,11 @@ which side of the bracket each arm landed on.
 | 23 | `ceil(min_damage / 2)` | unchanged; inherits the prior transient value | `bash_percentage` |
 | 30 | `ceil(max_damage * 1.5)` with a level-based fallback | forced 20 | `normal_percentage` |
 
+The direction-20 row is the one row of this table now corroborated by a live
+trace on all three of its cells, and its damage draw turns out to be
+conditional rather than unconditional — see §Direction 20 is the taunt path,
+which also reads the arm out opcode by opcode and settles its tape length.
+
 On a hit, direction 30 dispatches `defender_hurt("grievous")`, direction 20
 dispatches `defender_hurt("taunt")`, a surviving critical sample of 20
 dispatches `defender_hurt("critical")`, and all other hits dispatch
@@ -919,6 +1119,65 @@ and 30 paths, so a quick-band fixture's tape is genuinely one sample shorter
 than a power-band or normal-band fixture's; and the sample is still **drawn**
 on direction 30 even though its value cannot change the outcome, so it must
 still occupy a tape slot there.
+
+**Runtime-resolved 2026-08-31 — the whole physical draw ledger, reconstructed
+with no free parameter.** Draw count is one of the very few things a capture
+observes directly rather than echoes (§What a capture can and cannot confirm),
+and the twenty-two arena rounds of 2026-08-31 supply an unusually clean sample:
+**every one of them ran the same seven-entry normal-band tape**
+(`candidate-armoured-deflection-threshold-cleared`) while the game drew the
+direction itself, so the direction varied and the input did not. Twenty rounds
+reached a dispatch, and their `roll` counts are a perfect function of the band:
+
+| Band | Directions seen | Rounds | `roll` lines | `remove_armour` called |
+| --- | --- | ---: | ---: | --- |
+| quick | 2, 3, 4 | 3 | **6** | 3 of 3 |
+| normal | 5, 6, 7, 8 | 12 | **7** | 0 of 12 |
+| power | 10, 11 | 3 | **7** | 3 of 3 |
+| taunt | 20 | 2 | **4** | 2 of 2 |
+
+Each count is reproduced exactly by the opcodes, with the served fraction
+`(value - min + 0.5) / (max - min + 1)` re-scaled into whatever range the game
+actually asked for:
+
+| # | Draw | quick | normal | power | taunt |
+| --- | --- | :---: | :---: | :---: | :---: |
+| 1 | `diceroll = randomBetween(1, 100)` | ✔ | ✔ | ✔ | ✔ |
+| 2 | band damage draw | — (`min_damage`) | ✔ `(min, max)` | — (`max_damage`) | — (charisma) |
+| 3 | band critical draw | ✔ `(-20, 20)` | ✔ `(1, 20)` | ✔ `(5, 20)` | — (const 21) |
+| 4 | `deflect_critical` (`+0x3030`, hit branch, unconditional) | ✔ | ✔ | ✔ | ✔ |
+| 5 | armour-removal chance in `damagecharacter` | ✔ → **93** | ✔ → **12** | ✔ → **93** | ✔ → **98** |
+| 6 | `remove_armour` group selector | ✔ (93 > 66) | — (12 ≤ 66) | ✔ (93 > 66) | — (dir 20 maps to no group) |
+| 7 | `randosmash = randomBetween(1, 4)` (`+0x1aaa`) | — (gate) | ✔ | ✔ | — (gate) |
+| 8 | enchantment potency | ✔ | ✔ | ✔ | ✔ |
+| | **total** | **6** | **7** | **7** | **4** |
+
+Three static claims are settled by that arithmetic, each because changing it
+alone would move a count that was measured:
+
+- **The knockback gate is confirmed live.** If `randosmash` were drawn for
+  directions 1–4 the quick rounds would read 7, and for direction 20 the taunt
+  rounds would read 5. They read 6 and 4.
+- **The `> 66` removal gate is confirmed at both ends, in the same tape.**
+  Because the band's draw count shifts the tape position, the armour-removal
+  chance lands on a different fixture entry per band — 93 for quick and power,
+  12 for normal, 98 for taunt — and `called:remove-armour` appears in exactly
+  the rounds where that value exceeds 66, in all twenty.
+- **"Directions outside 1–12 consume nothing in `remove_armour`" is confirmed**
+  — at direction 20 rather than the direction-30 case the map flagged as
+  needing runtime confirmation. The taunt rounds call `remove_armour` (98 > 66)
+  and still draw no group selector, which is the only reason their total is 4
+  and not 5.
+
+What this does *not* establish is which served slot belongs to which call site:
+the `label`, `min` and `max` on every one of those lines are the fixture's tape
+entries, so the row assignment above is read off emission order and off the
+re-scaled value, never off a recorded call site.
+
+`session-adc21` is excluded from the table. It drew direction 20 and consumed
+four samples but dispatched no `defender_hurt` / `defender_blocked` event and
+called neither `damagecharacter` nor `remove_armour`; see §Direction 20 is the
+taunt path.
 
 Physical knockback force is signed
 `damage + game_attacker.strength * 6` and forced to a minimum magnitude of
@@ -1109,7 +1368,9 @@ hero/villain chances, evaluates distance, stamina, ammunition, weapon mode,
 taunts, and damage-over-time flags, and writes `villaindecisionA` labels such as
 `quick_attack`, `normal_attack`, `power_attack`, `bombardleft/right`,
 `snipeleft/right`, `shove`, `taunt`, movement/charge/jump, `rest`,
-`swap_weapons`, and `psyche_up`.
+`swap_weapons`, and `psyche_up`. The two arms that write `taunt` — and so the
+only routes by which a villain reaches `attack_direction` 20 — are byte-read in
+§Direction 20 is the taunt path.
 
 It uses multiple random rolls and ends by calling `villain_cast_spells()`.
 That function searches `inventory1`–`inventory6`, calls `use_item`, and can

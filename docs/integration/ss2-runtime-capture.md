@@ -10,6 +10,14 @@ threshold, and the armour-selection draw. Each cleared the same gate — at leas
 two matching observations from at least two independent sessions. The other 33
 committed fixtures are still `classification: "candidate"`.
 
+Two things a reader must not take from that status, both corrected in place
+below: the mutation trace's **hook attribution** is a much weaker claim than the
+trace itself, and was compared to nothing at all until 2026-08-31
+([what an attributed mutation means](#what-an-attributed-mutation-means)), and
+**`attackerSide` is a launcher FlashVar that the arena route got wrong nine
+times in twenty armed rounds**
+([the attacker side is declared, not observed](#the-attacker-side-is-declared-not-observed)).
+
 This document is the operating procedure
 for Stage 3 of [the roadmap](../roadmap.md): promoting static candidates to
 runtime-observed goldens with repeated evidence from the licensed local build
@@ -200,7 +208,11 @@ stating precisely, because everything downstream rests on it.
 a candidate:
 
 - the ordered mutation trace, from `Object.watch` on the persistent combat
-  objects (this is the substantive evidence);
+  objects — precisely, the ordered `(sequence, path, before, after)` tuples.
+  **Those tuples are the substantive evidence.** The `hook` attribution stamped
+  on each one is a claim of a different and much weaker kind, and it is not part
+  of what a match establishes; see
+  [what an attributed mutation means](#what-an-attributed-mutation-means);
 - the semantic events — `defender-hurt` with its dispatched method,
   `defender-blocked`, `death`, and the overlay label — so, in particular,
   whether an attack **hit or missed** is measured, not assumed;
@@ -213,11 +225,22 @@ a candidate:
 **Not observed** — these are echoed or derived, and a match cannot contradict
 them:
 
-- every `roll` line's label, bounds, value and call site (copied from the
-  tape, hence from the candidate);
+- every `roll` line's label, bounds, value, call site and `injected` flag
+  (copied from the tape, hence from the candidate — and `callSite`/`injected`
+  are additionally hard-coded constants in the wrapper's single emitter, so all
+  407 sample entries across all 67 committed records carry the identical pair);
+- the `hook` on every `set` line, and therefore the `reason` on every mutation
+  entry of every observation. It is the wrapper's report about the *wrapper's
+  own* call stack, so it constrains where in the action a write happened without
+  establishing which game function performed it. Nothing compared it at all
+  before 2026-08-31; see
+  [what an attributed mutation means](#what-an-attributed-mutation-means);
 - `howDied`, which `capture-ingest.js` synthesizes with the same static rule
   the candidate uses;
-- `attackerSide`, which is a launcher FlashVar;
+- `attackerSide`, which is a launcher FlashVar the game never sees. This one is
+  not merely unverified: it has been observed **wrong**, in nine of twenty
+  armed arena rounds on 2026-08-31. See
+  [the attacker side is declared, not observed](#the-attacker-side-is-declared-not-observed);
 - whether the scenario is one the game's own progression can *reach*. A capture
   observes what the build does with the state in front of it, never how that
   state could have arisen — which is why a wrapper-staged scenario has to be
@@ -311,6 +334,221 @@ example of the other half of the discipline — its candidates were derived from
 the map before any power session existed, so the twelve sessions that matched
 them confirmed a prediction rather than a fit.
 
+#### What an attributed mutation means
+
+Every `set` line carries a `hook`, and ingest copies it onto the observation
+record's mutation entry as `reason` (`src/golden/capture-ingest.js:372`). It is
+natural to read that token as saying *which game function performed the write*.
+It does not say that.
+
+**The mechanism.** `currentHook` is one global in the wrapper
+(`tools/runtime-capture/ss2-capture-wrapper.as:1734`), set on entry to and
+restored on exit from every function the wrapper wraps (`makeHookMaker`,
+`:1829-1841`); the `Object.watch` callback stamps whatever value it happens to
+hold at the instant the assignment fires (`:1774`). The label is therefore a
+**dynamic-extent** fact — *the innermost wrapped function on the AVM1 call stack
+when the write happened* — and three consequences follow directly:
+
+- a write performed by an unwrapped callee is attributed to its nearest wrapped
+  ancestor. `"hook":"damagecharacter"` means "during `damagecharacter`'s call",
+  never "by `damagecharacter`'s own bytecode";
+- `"hook":"unattributed"` is a real and reachable value, not a defect marker: it
+  means the write landed inside the armed window but outside every wrapped
+  function. `captures/session-adc21` is a complete armed arena trace whose four
+  mutations are all `unattributed`;
+- the label is an observation about the **wrapper**, and only an inference about
+  the **build**;
+- and one entry in a lethal record's trace is not a watched write at all.
+  `capture-ingest.js:447` mints `{path: "/result", …, reason: "result-bridge"}`
+  from the observed `death` and `overlay-label` events; no `set` line carries
+  `/result`. Its `winnerSide`/`loserSide` are evidence-derived — the `death`
+  event's side is read off the real clip — which makes it the one place in the
+  whole chain where a side comes from the game rather than from the operator.
+  It exists only when somebody dies.
+
+**What compares it, and what used to.** Until 2026-08-31 the answer was
+*nothing*. `matchSs2ObservationToFixture` — the function `verify` and the
+promotion gate both call (`src/golden/promote-1v1-golden.js:373`) — ran both
+traces through a `stripTraceReasons` that kept `sequence`, `path`, `before` and
+`after` and dropped `reason`, on the reasonable-sounding grounds that the two
+vocabularies are not comparable as strings. They are not: across the committed
+corpus, observations carry hook names (`damagecharacter` ×121, `elimination`
+×180, `result-bridge` ×61, `first-blood` ×3) while fixtures carry
+static-analysis labels (`physical-damage` ×19, `stat-clamp` ×19,
+`battle-result-pending` ×19, `elimination` ×57). The cost of that convenience
+was a working forgery, HANDOFF's third: a record attributing the hitpoint write
+to `remove-armour`, or to `unattributed`, or to a hook no wrapper can emit,
+ingested, verified, promoted, and yielded a golden the committed suite accepted.
+
+It is now **translated rather than stripped**. `matchSs2ObservationToFixture`
+projects both sides through `projectTraceForMatching`
+(`src/golden/observation.js:863`), taking the observation's `reason` as-is and
+mapping each fixture entry's static reason through `hookForFixtureMutation`
+(`:888`) into the hook a wrapper must report for it —
+`SS2_HOOK_FOR_STATIC_REASON` (`:206`), or `SS2_SPELL_HOOK_FOR_STATIC_REASON`
+(`:229`) when the scenario stages a `spellId`. An unmapped reason **throws**
+(`HookAttributionError`, `:173`) rather than becoming a difference, so a gap in
+the table can never be misread as a divergent capture. It cost no re-capture:
+re-running the comparison over the 44 golden-cited observation records that are
+committed, all 44 still match — each already carried the hook its fixture's
+reason maps to. Two things the translation deliberately does not reach:
+`projectSs2ObservationForComparison` (`:732`), which keeps `reason` untranslated
+and is called by no code on the capture path (its only caller is a test), and
+the `/result` row, which `hookForFixtureMutation` short-circuits to the
+`result-bridge` constant on both sides (`:896`) — a constant compared to a
+constant, included so the projection needs no special case, with the real
+evidence on that row being its `before`/`after` payload.
+
+What a reader may conclude from an attributed mutation:
+
+- **The write itself is evidence, and always was.** Path, before, after and
+  order are observed and can contradict a candidate. It is the tuple, not the
+  label, that carries the weight; the translation adds a constraint, it does not
+  relocate the evidence.
+- **May now** conclude that the write happened inside the dynamic extent the
+  candidate's static analysis predicts — a write that moved to a different phase
+  of the action, or was attributed to a function that never ran, diverges
+  instead of matching silently. That is a real added constraint on the trace,
+  and it closes the forgery.
+- **May not** conclude that the named game function performed the write.
+  Nearest-wrapped-ancestor attribution cannot distinguish a function from
+  anything it calls, and the table's own convention is the *ingress that owns
+  the assignment* rather than the innermost helper (`stat-clamp` is
+  `check_stats`' arithmetic, attributed to whichever ingress called it).
+- **May not** conclude anything new about the **build**. The fixture label, the
+  wrapper label, and the table mapping one to the other are all authored by this
+  project; their agreement constrains the tooling's self-consistency, not the
+  game's structure. That `damagecharacter` exists and is called at that site is
+  byte evidence from read-only static inspection, and stays byte evidence.
+- **May not** read the 22 promoted goldens as having *passed* this check. They
+  were promoted under the stripping gate; their fixtures still carry the
+  *candidate's* static labels, not any observed hook, because no observed
+  attribution is ever copied into a golden. Re-running the comparison over their
+  committed evidence is a retrospective check, and it passes — but it is a check
+  run after the fact, not a gate they cleared.
+
+**Do not "strengthen" this by comparing `callSite` or `injected`.** Both are
+compile-time constants in the wrapper's single roll emitter
+(`ss2-capture-wrapper.as:1898`, with `OVERLAY_CALL_SITE` defined at `:1701`), so
+every one of the 407 committed sample entries carries the same
+`overlay:862/frame:52/DoAction@0x240c7f` and the same `injected: true`.
+`comparableSamples` (`src/golden/observation.js:704-714`) drops both before
+comparing, which is correct: a comparison of one hard-coded constant against
+another manufactures the appearance of verification while asserting nothing.
+That is this project's signature defect, and it has now been found six times.
+The hook translation above is not an instance of it — the observation's hook is
+produced at runtime by a mechanism that can and does emit other values, including
+`unattributed`, so a wrong attribution reddens. The `/result` row is the one
+exception inside it, and the code says so on its own face.
+
+#### The attacker side is declared, not observed
+
+`attackerSide` is a launcher FlashVar. The wrapper reads it off `_root`
+(`ss2-capture-wrapper.as:144`), ingest checks only that it spells `hero` or
+`villain` and copies it through (`src/golden/capture-ingest.js:106-107`, `:505`),
+and matching compares `/scenario/attackerSide` — an operator-declared string on
+the fixture side against an operator-declared string on the observation side.
+**The game never sees this value, and no repository artefact derived from an
+observation can contradict it.** The single exception is a lethal record: the
+`death` event's side is read off the real clip, and ingest derives
+`loserSide`/`winnerSide` from it (`capture-ingest.js:437-447`) while the fixture
+derives its own from the *declared* `attackerSide`, so a fatal mislabelled swing
+diverges at `/resultEvent`. That covers kills and nothing else — and none of the
+twenty arena rounds below was a kill.
+
+That is not a theoretical gap. On 2026-08-31, twenty-two `run-arena.ps1` rounds
+were run against `candidate-armoured-deflection-threshold-cleared`
+(`captures/session-adc1` … `session-adc22`). Twenty-one armed — `session-adc15`
+aborted at the special-event screen and never armed — and twenty of those
+produced a `damagecharacter` write. Split by which combatant that first write
+landed on:
+
+| Who actually swung | n | `attack_direction` values observed |
+| --- | ---: | --- |
+| hero (first write on `/villain/…`) | 11 | 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 8 |
+| **villain** (first write on `/hero/…`) | **9** | 2, 3, 4, **5**, 10, 10, 11, 20, 20 |
+
+**All twenty carry `"attackerSide":"hero"` in their meta line. Nine of the
+twenty are false on that field.** They are not near-misses or edge cases; they
+are ordinary rounds of the route the next families are meant to run through.
+
+The guard that exists for this did not fire. `captureAllowedNow` wraps the side
+check in `if (attacker != undefined)` (`ss2-capture-wrapper.as:1978`), and
+`gameRoot().game_attacker` is undefined at that moment, so the check is skipped
+rather than failed — an undefined read taking the permissive branch, the same
+class as the `isNum` trap. `capture-refused-wrong-side` appears **zero** times
+across all 268 archived `.rufflelog` files and zero times in any `.jsonl`; its
+sibling `capture-refused-unstaged`, later in the same function body, appears
+1091 times, so emission works and the count is a real zero. Two independent
+read-only audits on 2026-08-31 byte-mapped `game_attacker` to *overlay-clip*
+scope (bare `SetVariable` inside `changeCombatants`), which would make
+`gameRoot().game_attacker` undefined on **every** route rather than only this
+one — consistent with a marker that has never fired anywhere in this archive. So
+do not read the zero as "the guard checked and approved": nothing here shows the
+guard has ever run to completion on any route. The wrapper is not this
+document's to change; the correction and its consequences are HANDOFF's item.
+
+**The discriminator that actually worked: which side the first
+`damagecharacter`-hooked `set` line wrote to.** The candidate engines record
+damage on the defender only, so the first damage write names the defender and
+therefore the attacker. That is how the nine were found, and it re-derives from
+the raw logs in one pass. Two limits on it, both load-bearing:
+
+- **it needs a damage write.** `session-adc21` armed, drew direction 20,
+  produced a complete trace with both `final` lines and an `end` line, and made
+  no `damagecharacter` write at all — its four mutations are `unattributed` — so
+  the discriminator cannot classify it. A **miss** produces no damage write by
+  construction, and three promoted goldens
+  (`golden-probe-{normal,power,quick}-rollneeded-miss`) have an empty
+  `expected.mutationTrace`. For a miss, no channel in the compared projection
+  carries an attacker identity at all. This is not a corner: **53 of the 193
+  armed sessions in the archive made no `damagecharacter` write**, so the
+  discriminator is silent on more than a quarter of them;
+- **it is not a check anybody runs.** It is something a reader can do to a raw
+  log. Nothing in ingest, matching, promotion or the test suite compares the
+  declared `attackerSide` against the observed mutation paths. The two
+  assertions that look like side verification —
+  `test/ss2-probe-fixtures.test.js:184` and
+  `test/ss2-post-tutorial-fixtures.test.js:252`, both
+  `assert.equal(scenario.attackerSide, "hero", id)` — compare a *fixture* field
+  to a hard-coded literal. They never read an observation, so no mislabelled
+  trace can redden them. That is the project's signature defect sitting in the
+  exact place a reader would look for the check that matters.
+
+**`attack_direction` does NOT discriminate, and must not be used as if it did.**
+Both combatants dispatch through the same overlay code and therefore the same
+bands, so the ranges do not separate them. `session-adc18` is the demonstration:
+a **villain** swing that drew **direction 5** — inside the hero's own
+`normal_attack` band `randomBetween(5, 8)` — with its damage landing on
+`/hero/hitpoints` and its method `critical`. Its divergence report
+(`test/fixtures/ss2-1v1-divergences/candidate-armoured-deflection-threshold-cleared--obs-adc18-a1-b3360b98.json`)
+records no difference at `/scenario/attackDirection`: the direction **matched
+the fixture**. What caught it were the side-bearing paths —
+`/mutationTrace/0/path` (`/villain/armourclass` expected, `/hero/hitpoints`
+observed) and the `/finalState/hero/*` entries.
+
+That catch is **incidental, not a designed defence**. It holds only because
+every currently reachable fixture happens to expect a villain-side mutation. A
+fixture expecting a hero-side mutation, or any of the three miss fixtures, would
+have taken adc18 as a match — and the promotion gate needs only two such, from
+two sessions, which each arena round supplies for free (its own process, its own
+`launchNonce`, its own `sessionId`).
+
+Until an evidence-derived attacker identity reaches the record, read
+`attackerSide` on any observation as **an operator's assertion about a round, of
+the same evidential kind as the capture-method string.** In particular, do not
+read the 22 promoted goldens as having been protected by the guard and found
+clean. They were not screened by it at all: each golden-cited session preserves
+the exact wrapper it ran under `captures/<session-id>/`, and across the 44 of
+the 47 cited observations whose records are committed, **not one of those
+wrappers contains `captureAllowedNow` or `game_attacker`** — the guard did not
+exist when they were captured. Their side labels rest instead on the prisoner
+route never giving the villain a turn. Running the discriminator over the whole
+archive: of 193 armed sessions, 140 made a `damagecharacter` write and can be
+classified, and **exactly 9 wrote first to the claimed attacker's own side —
+the nine arena rounds above, and nothing else.** That is a property of the
+route, not a check that ran.
+
 ### Reference traces (simulator)
 
 `node tools/capture-session.mjs simulate --fixture <candidate.json>` writes
@@ -349,11 +587,11 @@ that stages emits its own, from its own read-back.
 
 | Line `t` | Position | Contents |
 | --- | --- | --- |
-| `meta` | first | trace schema version, observation/session IDs, tool version, method, timestamp, `mutationGranularity`, `installHashVerifiedBefore: true`, attacker side |
+| `meta` | first | trace schema version, observation/session IDs, tool version, method, timestamp, `mutationGranularity`, `installHashVerifiedBefore: true`, attacker side — **declared by the launcher, never observed; wrong in 9 of the 20 arena rounds of 2026-08-31 that can be classified, see [below](#the-attacker-side-is-declared-not-observed)** |
 | `state` | before the action, one per side | staged numeric/boolean field dump per combatant |
 | `var` | any | named scalar: `fight_mode`, `attack_direction` (physical ingress), `spell_id` (spell ingress — `magic_damage_character` has no direction chain), `criticalhit` |
 | `roll` | action | `{label, source, min, max, value, callSite, injected}` in exact call order |
-| `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` is the wrapper's attribution (`damagecharacter`, `magic-damage-character`, `remove-armour`, `death`, ...) |
+| `set` | action | `{path, before, after, hook}` — one watched assignment; `hook` names the innermost *wrapped* function on the stack when the write fired (`damagecharacter`, `magic-damage-character`, `remove-armour`, `death`, ..., or `unattributed`), which is weaker than "this function wrote it" — see [what an attributed mutation means](#what-an-attributed-mutation-means) |
 | `event` | action | `defender-hurt`/`defender-blocked`/`magic-damage`/`death`/`overlay-label` |
 | `final` | after the action, one per side | post-action field dump |
 | `end` | last | `installHashVerifiedAfter: true`, or `null` as the wrapper's placeholder — ingest then re-runs the hash check live and refuses the trace when it fails; `overdraw`, the count of draws the armed window made after the injected tape ran out; `launchNonce`, minted inside the player; `staged`, the optional `side.field=value` list of everything the wrapper itself wrote, absent when it wrote nothing. See [the capture attestations](#the-three-capture-attestations-on-the-end-line) |
@@ -540,11 +778,27 @@ are optional and why no committed record was rewritten to add them. **No
 committed record carries `staged`**: nothing has been wrapper-staged yet, so
 every record in the repository is evidence the game produced unaided.
 
+One gap in that "holding only the repository" claim, found while checking the
+attacker-side labels and recorded here so it is not rediscovered: the 22 goldens
+cite 47 observation ids, and **three of them have no committed record** —
+`obs-nav6` (one of the two behind `golden-prisoner-normal-kill-dir5`) and
+`obs-diag` and `obs-gold3`, which are *both* of the observations behind
+`golden-prisoner-normal-kill-dir6`. Each appears exactly once in the repository,
+in the manifest that attests it. The golden carries their digests; the records
+those digests cover are not here, so for `-dir6` neither piece of its evidence
+can be re-read, re-matched, or checked for side labels from this repository
+alone. The remaining 44 are committed and were checked.
+
 ## Matching rules
 
 An observation matches a fixture when all of the following are exactly equal:
 
-- scenario (numeric staged state, attacker side, attack direction);
+- scenario (numeric staged state, attacker side, attack direction). Note what
+  the attacker-side half can and cannot fail on: `attackerSide` is compared
+  declared-against-declared — an operator string on each side — so it fails when
+  the operator's launcher flag disagrees with the fixture, and never when the
+  *game* disagrees with either; see
+  [the attacker side is declared, not observed](#the-attacker-side-is-declared-not-observed);
 - ordered samples — label, source, bounds, and value, with cosmetic
   `armour-debris-*` opcode rolls excluded from both sides (no instrumentation
   can observe the opcode stream, and the rolls never change combat state).
@@ -552,9 +806,14 @@ An observation matches a fixture when all of the following are exactly equal:
   fields are copied from the fixture's own tape, so in practice this clause
   tests the **number** of draws and their position, not their metadata (see
   [what a match establishes](#what-a-match-actually-establishes));
-- ordered mutation trace on the `(sequence, path, before, after)` contract —
-  `reason` strings are annotations (static-analysis labels in fixtures,
-  hook attributions in observations) and are deliberately not compared;
+- ordered mutation trace on the `(sequence, path, before, after)` contract, plus
+  the attribution: the fixture's static `reason` is **translated** through
+  `SS2_HOOK_FOR_STATIC_REASON` into the hook a wrapper must report, and compared
+  against the observation's. It used to be stripped from both sides, which made
+  three fields forgeable; read
+  [what an attributed mutation means](#what-an-attributed-mutation-means) before
+  citing a hook as evidence about the build, because the translation constrains
+  the tooling and not the build;
 - semantic events against the fixture's derived expectation
   (`defender-blocked` for a miss; `defender-hurt` with the dispatched method
   for a hit; plus `death` and `overlay-label` for a lethal outcome);
@@ -596,6 +855,13 @@ bombard 21 at `+0x6c67`, snipe 22 at `+0x6c8c`, grievous 30). Arming happens
 later, at `attack_chances`, so that draw comes from the live RNG and is not
 on the injected tape. Which candidate a run is evidence for is therefore not
 known until the trace has been read.
+
+**The direction says which candidate, never which combatant.** Both fighters
+dispatch through the same overlay code and therefore draw from the same bands,
+so a direction in 5–8 is not evidence that the hero swung: `session-adc18` is a
+villain swing at direction 5. On any route where the opponent takes turns, the
+direction is an action identity and nothing more — see
+[the attacker side is declared, not observed](#the-attacker-side-is-declared-not-observed).
 
 The spell ingress has no direction chain at all — `magic_damage_character` is
 reached without one — so a spell run is identified by its `spell_id` instead.
@@ -718,7 +984,10 @@ observation records and originates only `createdAt`. Rebuilding the
 hand-written `test/manifests/prisoner-dir6.json` from its two observations
 reproduces its canonical digest
 (`889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c`), which
-is the digest `golden-prisoner-normal-kill-dir6` already cites.
+is the digest `golden-prisoner-normal-kill-dir6` already cites. That rebuild
+cannot be re-run from this repository today: both of those observation records
+(`obs-diag`, `obs-gold3`) are uncommitted — see
+[observation records](#observation-records).
 
 `-SkipPipeline` on `run-capture.ps1`/`launch-capture.ps1` leaves the raw log
 for the campaign driver. Without it the launcher verifies against the one

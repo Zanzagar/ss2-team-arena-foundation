@@ -1,14 +1,19 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ingestSs2CaptureTrace, CaptureTraceError } from "../src/golden/capture-ingest.js";
 import {
+  HookAttributionError,
   ObservationValidationError,
+  SS2_HOOK_FOR_STATIC_REASON,
   SS2_PROJECTED_COMBATANT_KEYS,
+  SS2_RESULT_BRIDGE_HOOK,
+  SS2_SPELL_HOOK_FOR_STATIC_REASON,
   canonicalJsonStringify,
   computeSs2ObservationDigest,
   deriveExpectedEventsFromSs2Fixture,
@@ -18,6 +23,10 @@ import {
   ss2ObservationsMatch,
   validateSs2Observation
 } from "../src/golden/observation.js";
+import {
+  HOOK_FOR_STATIC_REASON,
+  SPELL_HOOK_FOR_STATIC_REASON
+} from "../src/golden/simulate-capture-trace.js";
 import {
   CaptureManifestError,
   PromotionBlockedError,
@@ -49,20 +58,39 @@ const fixturesById = new Map(fixtures.map((fixture) => [fixture.fixtureId, fixtu
 const spellFixtures = await loadSs2SpellFixtures();
 const spellFixturesById = new Map(spellFixtures.map((fixture) => [fixture.fixtureId, fixture]));
 
+/**
+ * Every committed observation record, as `capture-ingest.js` actually produced
+ * it from an archived raw trace. Read here so a claim about what the pipeline
+ * emits can be checked against the pipeline's own output rather than against a
+ * second copy of the same literal.
+ */
+const COMMITTED_OBSERVATION_DIR = fileURLToPath(new URL("observations/ss2-1v1/", import.meta.url));
+const committedObservations = await Promise.all(
+  (await readdir(COMMITTED_OBSERVATION_DIR))
+    .filter((name) => name.endsWith(".json"))
+    .map(async (name) => JSON.parse(await readFile(path.join(COMMITTED_OBSERVATION_DIR, name), "utf8")))
+);
+
 const CALL_SITE = "overlay:862/frame:52/DoAction@0x240c7f";
-const HOOK_FOR_REASON = {
-  "physical-damage": "damagecharacter",
-  "magic-damage": "magic-damage-character",
-  "psyche-up": "magic-damage-character",
-  "breastplate-stamina": "damagecharacter",
-  "stat-clamp": "damagecharacter",
-  "weapon-enchantment": "damagecharacter",
-  "remove-armour-piece": "remove-armour",
-  "remove-armour-clamp": "remove-armour",
-  "death-status-clear": "death",
-  "death-taunt-clear": "death",
-  "battle-result-pending": "result-bridge"
-};
+
+/**
+ * The hook a faithful wrapper reports for one fixture mutation.
+ *
+ * This used to be a private copy of the physical table with
+ * `battle-result-pending` bolted on, applied to physical and spell fixtures
+ * alike — so every record this helper built for a spell fixture attributed the
+ * breastplate-stamina join and `check_stats` to `damagecharacter`, a function
+ * the spell ingress never calls. Nothing noticed, because the matcher stripped
+ * `reason` from both sides. It reads the shipped tables now, and picks between
+ * them on the same discriminator the matcher does.
+ */
+function hookForFixtureReason(fixture, reason, path) {
+  if (path === "/result") return SS2_RESULT_BRIDGE_HOOK;
+  const table = fixture.scenario.spellId !== undefined
+    ? SS2_SPELL_HOOK_FOR_STATIC_REASON
+    : SS2_HOOK_FOR_STATIC_REASON;
+  return table[reason] ?? "unattributed";
+}
 
 /** A record shaped exactly as ingestion would emit for a matching capture. */
 function observationFromFixture(fixture, overrides = {}) {
@@ -100,7 +128,7 @@ function observationFromFixture(fixture, overrides = {}) {
       })),
     mutationTrace: fixture.expected.mutationTrace.map((entry) => ({
       ...entry,
-      reason: HOOK_FOR_REASON[entry.reason] ?? "unattributed"
+      reason: hookForFixtureReason(fixture, entry.reason, entry.path)
     })),
     events: deriveExpectedEventsFromSs2Fixture(fixture),
     resultEvent: cloneJson(fixture.expected.resultEvent),
@@ -305,14 +333,54 @@ test("observations replaying the candidate tape match every static fixture", () 
   }
 });
 
-test("fixture matching ignores reason annotations but not the mutation contract", () => {
+test("fixture matching translates each static reason into the hook the wrapper must report", () => {
+  // This test used to assert the opposite of its first two blocks: that a
+  // record relabelling every mutation `unattributed` still matched, because
+  // `reason` was stripped from BOTH sides. That was a forgery channel. The
+  // hook is a record's only statement about WHERE in the game a write came
+  // from, and stripping it let a record attribute the hitpoint subtraction to
+  // any function at all — or to none — and still match, promote, and yield a
+  // golden the committed suite accepted.
   const fixture = fixturesById.get("candidate-armour-overflow-burning");
+
+  // The honest record still matches, so the check is a translation and not a
+  // tightening: `physical-damage`, `breastplate-stamina`, `stat-clamp` and
+  // `weapon-enchantment` all live inside `damagecharacter` on this ingress.
+  const faithful = observationFromFixture(fixture);
+  assert.deepEqual(matchSs2ObservationToFixture(fixture, faithful).differences, []);
+  assert.deepEqual(
+    faithful.mutationTrace.map((entry) => entry.reason),
+    ["damagecharacter", "damagecharacter", "damagecharacter", "damagecharacter", "damagecharacter"]
+  );
+
+  // A wrapper that could not attribute the writes at all is refused, one
+  // difference per entry, each naming the hook the fixture's reason implies.
   const relabeled = observationFromFixture(fixture, {
     mutate: (draft) => {
       draft.mutationTrace = draft.mutationTrace.map((entry) => ({ ...entry, reason: "unattributed" }));
     }
   });
-  assert.equal(matchSs2ObservationToFixture(fixture, relabeled).match, true);
+  const relabeledComparison = matchSs2ObservationToFixture(fixture, relabeled);
+  assert.equal(relabeledComparison.match, false);
+  assert.deepEqual(
+    relabeledComparison.differences,
+    fixture.expected.mutationTrace.map((entry, index) => ({
+      path: `/mutationTrace/${index}/hook`,
+      expected: "damagecharacter",
+      actual: "unattributed"
+    }))
+  );
+
+  // The sharper forgery: a real hook, on the wrong write. `remove-armour` is a
+  // function this build genuinely has, and the armour subtraction it names is
+  // one the fixture's own trace contains two entries later — so this record is
+  // internally plausible and every other compared channel is untouched.
+  const misattributed = observationFromFixture(fixture, {
+    mutate: (draft) => { draft.mutationTrace[1] = { ...draft.mutationTrace[1], reason: "remove-armour" }; }
+  });
+  assert.deepEqual(matchSs2ObservationToFixture(fixture, misattributed).differences, [
+    { path: "/mutationTrace/1/hook", expected: "damagecharacter", actual: "remove-armour" }
+  ]);
 
   const reordered = observationFromFixture(fixture, {
     mutate: (draft) => {
@@ -339,6 +407,209 @@ test("fixture matching ignores reason annotations but not the mutation contract"
   assert.ok(stateComparison.differences.some((difference) =>
     difference.path === "/finalState/villain/hitpoints"
   ));
+});
+
+test("the promotion gate refuses a wrong-attribution record instead of minting a golden from it", () => {
+  // The forgery, end to end and at full strength. Two records from two
+  // sessions, distinct nonces, agreeing staging, manifest-attested, digests
+  // recomputed so the tamper survives validation — differing from honest
+  // evidence in nothing but WHERE they say the game made each write. Before
+  // the translation landed this promoted: the gate compared the mutation trace
+  // with `reason` stripped from both sides, so the attribution was invisible
+  // to it, and the golden it produced was accepted by the committed suite.
+  const fixture = fixturesById.get("candidate-lethal-result");
+  const forge = (draft) => {
+    draft.mutationTrace = draft.mutationTrace.map((entry) => (
+      entry.path === "/result" ? entry : { ...entry, reason: "next-phase" }
+    ));
+  };
+  const forged = [
+    observationFromFixture(fixture, {
+      observationId: "obs-forge-a",
+      sessionId: "session-forge-a",
+      mutate: forge
+    }),
+    observationFromFixture(fixture, {
+      observationId: "obs-forge-b",
+      sessionId: "session-forge-b",
+      observedAt: "2026-08-30T19:00:00Z",
+      mutate: forge
+    })
+  ];
+  // The records themselves are valid and mutually consistent: the gate's other
+  // checks have nothing to catch, which is why this had to be closed at the
+  // comparison.
+  for (const record of forged) assert.equal(validateSs2Observation(record), record);
+  assert.equal(ss2ObservationsMatch(forged[0], forged[1]).match, true);
+
+  let blocked;
+  try {
+    promoteSs2CandidateToGolden(fixture, forged, captureManifestFor(forged), {
+      recordedAt: "2026-08-30T20:00:00Z"
+    });
+    assert.fail("a record attributing the game's writes to the wrong hook must not promote");
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof PromotionBlockedError);
+  assert.equal(blocked.divergences.length, 2);
+  // The fixture's three writes are the hitpoint subtraction inside
+  // `damagecharacter`, the burning clear inside `death`, and the pipeline's own
+  // `/result` bridge — which the forgery left alone, and which is the one row
+  // whose hook is minted by ingest rather than attributed by the wrapper.
+  for (const divergence of blocked.divergences) {
+    assert.deepEqual(divergence.differences, [
+      { path: "/mutationTrace/0/hook", expected: "damagecharacter", actual: "next-phase" },
+      { path: "/mutationTrace/1/hook", expected: "death", actual: "next-phase" }
+    ]);
+  }
+
+  // And the honest record, differing only in the attribution, still promotes —
+  // so the refusal is aimed at the forgery and not at the family.
+  const honest = [
+    observationFromFixture(fixture, { observationId: "obs-honest-a", sessionId: "session-honest-a" }),
+    observationFromFixture(fixture, {
+      observationId: "obs-honest-b",
+      sessionId: "session-honest-b",
+      observedAt: "2026-08-30T19:00:00Z"
+    })
+  ];
+  assert.equal(
+    promoteSs2CandidateToGolden(fixture, honest, captureManifestFor(honest)).golden.fixtureId,
+    "golden-lethal-result"
+  );
+});
+
+test("the spell ingress owns its own hooks, and a physical attribution is refused for it", () => {
+  // The two tables differ on exactly two reasons, and the difference is not
+  // decorative: during a spell action the breastplate-stamina join and
+  // `check_stats` run inside `magic_damage_character`, a frame `damagecharacter`
+  // never enters. A record claiming otherwise describes a call stack the build
+  // cannot produce.
+  assert.deepEqual(
+    Object.entries(SS2_SPELL_HOOK_FOR_STATIC_REASON)
+      .filter(([reason, hook]) => SS2_HOOK_FOR_STATIC_REASON[reason] !== hook),
+    [["breastplate-stamina", "magic-damage-character"], ["stat-clamp", "magic-damage-character"]]
+  );
+
+  const fixture = spellFixturesById.get("candidate-spell-raw-fractional-damage");
+  const clampIndex = fixture.expected.mutationTrace.findIndex((entry) => entry.reason === "stat-clamp");
+  assert.ok(clampIndex >= 0);
+  assert.equal(
+    observationFromFixture(fixture).mutationTrace[clampIndex].reason,
+    "magic-damage-character"
+  );
+
+  const physical = observationFromFixture(fixture, {
+    mutate: (draft) => {
+      draft.mutationTrace[clampIndex] = { ...draft.mutationTrace[clampIndex], reason: "damagecharacter" };
+    }
+  });
+  assert.deepEqual(matchSs2ObservationToFixture(fixture, physical).differences, [
+    {
+      path: `/mutationTrace/${clampIndex}/hook`,
+      expected: "magic-damage-character",
+      actual: "damagecharacter"
+    }
+  ]);
+});
+
+test("the matcher's hook tables are the ones the reference simulator emits", () => {
+  // src/golden/simulate-capture-trace.js keeps its own copy, because it imports
+  // observation.js and the reverse import would be a cycle. If the two ever
+  // drift, every fixture's reference trace stops matching its own expectations
+  // and the simulator's self-check throws — but that failure names the fixture,
+  // not the tables, so the drift is pinned here where it can be read.
+  assert.deepEqual(SS2_HOOK_FOR_STATIC_REASON, HOOK_FOR_STATIC_REASON);
+  assert.deepEqual(SS2_SPELL_HOOK_FOR_STATIC_REASON, SPELL_HOOK_FOR_STATIC_REASON);
+
+  // Every static reason any committed fixture uses is mapped, so the loud
+  // failure below is unreachable from the repository as it stands.
+  const reasons = new Set();
+  for (const fixture of [...fixtures, ...spellFixtures]) {
+    for (const entry of fixture.expected.mutationTrace) {
+      if (entry.path !== "/result") reasons.add(entry.reason);
+    }
+  }
+  assert.ok(reasons.size > 0);
+  for (const reason of reasons) {
+    assert.ok(
+      Object.hasOwn(SS2_HOOK_FOR_STATIC_REASON, reason),
+      `no hook is mapped for the committed reason ${reason}`
+    );
+  }
+});
+
+test("a fixture reason no hook is mapped to fails loudly rather than diverging", () => {
+  // Reporting a table gap as an observation divergence would send a reader to
+  // re-capture evidence that was never wrong, so the matcher throws and names
+  // the reason and the file to edit.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const record = observationFromFixture(fixture);
+  const unmapped = cloneJson(fixture);
+  unmapped.expected.mutationTrace[0].reason = "invented-reason";
+  unmapped.expected.mutation.reason = "invented-reason";
+  assert.throws(
+    () => matchSs2ObservationToFixture(unmapped, record),
+    (error) => error instanceof HookAttributionError && /invented-reason/.test(error.message)
+  );
+});
+
+test("the result-bridge hook the matcher expects is the one archived captures carry", () => {
+  // `/result` is a pipeline convention, not a watched field: no `set` line can
+  // carry it, so ingest mints the entry from the observed death and
+  // overlay-label events and labels it with its own constant. The constant the
+  // matcher translates `battle-result-pending` into is therefore checked
+  // against records ingest really produced from archived raw traces — not
+  // against a second copy of the same literal in a helper, which would move
+  // with it and assert nothing.
+  const archived = committedObservations.flatMap((record) =>
+    record.mutationTrace.filter((entry) => entry.path === "/result")
+  );
+  assert.ok(archived.length > 0, "no committed observation records a /result entry");
+  for (const entry of archived) assert.equal(entry.reason, SS2_RESULT_BRIDGE_HOOK);
+
+  // And no committed record attributes a game write to it: the bridge belongs
+  // to that one synthesized row and nowhere else.
+  for (const record of committedObservations) {
+    for (const entry of record.mutationTrace) {
+      assert.equal(
+        entry.reason === SS2_RESULT_BRIDGE_HOOK,
+        entry.path === "/result",
+        `${record.observationId} ${entry.path} is attributed to ${entry.reason}`
+      );
+    }
+  }
+});
+
+test("an injected-tape record cannot claim it merely watched a roll", () => {
+  // The wrapper's single roll emitter stamps `injected: true` unconditionally,
+  // and a draw past the end of the tape is not emitted at all (it increments
+  // `overdraw`, which ingest refuses non-zero). So a sample flagged false on
+  // this method claims evidence of a stronger kind than the method can produce
+  // — an unforced roll that happened to land on the fixture's value — and
+  // nothing else in the pipeline looks at the flag: `comparableSamples` drops
+  // it before matching.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const honest = observationFromFixture(fixture);
+  assert.ok(honest.samples.length > 1);
+  assert.ok(honest.samples.every((sample) => sample.injected === true));
+
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
+      mutate: (draft) => { draft.samples[0] = { ...draft.samples[0], injected: false }; }
+    })),
+    /every sample injected/
+  );
+
+  // A passive capture is the mirror image and is unaffected: it may carry no
+  // injected sample at all.
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
+      mutate: (draft) => { draft.capture.method = "passive-runtime"; }
+    })),
+    /passive-runtime captures cannot contain injected samples/
+  );
 });
 
 test("derived expected events cover miss, hit, and lethal candidates", () => {

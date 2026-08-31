@@ -120,39 +120,39 @@ function assertMember(member, teamId, index) {
 }
 
 /**
- * Carries the canonical resource bag onto a team's AI-filled slots.
+ * The `resources` declaration that already covers one AI-filled slot, read in
+ * `src/team/roster.js`'s own precedence order: an array `aiFill`'s entry for
+ * that slot, or a team-wide `aiFill` object. `undefined` means the caller
+ * declared none for this slot, which is the case the host fills in.
  *
  * A supplied gladiator gets its resources from its own combat object
  * (`toCanonicalCombatantSource`), and it has to: the resolver refuses a write
  * to an undeclared resource, and the hero/villain surface is a binding rebound
  * per action, so *every* combatant must declare the set or an armour write
- * would succeed or throw depending on whose turn it was.
+ * would succeed or throw depending on whose turn it was. An AI-filled slot has
+ * no combat object of its own, so its bag comes from the caller's mirror
+ * template — and it goes on **that slot's own empty-slot marker**, which the
+ * roster reads as the nearest and highest-priority fill source.
  *
- * An AI-filled slot is the one case the adapter cannot serve per slot.
- * `src/team/roster.js` builds a filled slot from `team.aiFill` — **one
- * template per team, not per slot** — so when two slots on one team are filled
- * from two different vanilla templates there is nowhere to put the second bag.
- * That is reported rather than papered over: guessing which template wins
- * would put an invented number in the state hash.
+ * This used to be a team-level injection, `{ ...team.aiFill, resources }`,
+ * from when the roster carried one fill template per team and two disagreeing
+ * templates had nowhere to both live. Two things were wrong with it. Filled
+ * slots on such a team declared **no** resources at all, reported as
+ * `diagnostics.aiFillResourceGaps`, and a rule set's write to one was refused
+ * by the resolver. And once `aiFill` was allowed to be an array of per-slot
+ * templates, spreading it into an object literal collapsed the whole array —
+ * `{ ...[a, b] }` is `{ 0: a, 1: b }`, which the roster reads as one nameless
+ * template applying to every slot, so every per-slot name, stat and loadout
+ * the caller declared was silently discarded. Per-slot markers have neither
+ * problem: nothing is merged across slots, so nothing has to agree about its
+ * resources and there is no array to flatten.
  */
-function aiFillWithResources(teamId, declared, fillResources, gaps) {
-  if (fillResources.length === 0) return declared;
-  // A caller that declared resources on `aiFill` has said what it wants.
-  if (declared?.resources !== undefined) return declared;
-  const [first, ...rest] = fillResources;
-  const serialised = JSON.stringify(first);
-  if (rest.some((bag) => JSON.stringify(bag) !== serialised)) {
-    gaps.push(Object.freeze({
-      teamId,
-      reason:
-        `Team ${teamId} AI-fills ${fillResources.length} slots from templates that disagree about their ` +
-        "canonical resources, and src/team/roster.js carries one AI-fill template per team rather than " +
-        "one per slot. The filled slots therefore declare no resources, and a rule set's write to one " +
-        "will be refused. Supply real gladiators, matching templates, or an explicit `aiFill.resources`."
-    }));
-    return declared;
-  }
-  return { ...declared, resources: first };
+function declaredFillResources(declared, index) {
+  if (declared === null || typeof declared !== "object") return undefined;
+  if (!Array.isArray(declared)) return declared.resources;
+  const entry = declared[index];
+  if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return undefined;
+  return entry.resources;
 }
 
 /* ------------------------------------------------------------------ */
@@ -188,12 +188,10 @@ class VanillaBattleHost {
     const sources = [];
     const templates = new Map();
     const aiFilledSlots = [];
-    const aiFillResourceGaps = [];
     const blueprintTeams = teams.map((team, teamIndex) => {
       const teamId = team.id ?? `team-${teamIndex + 1}`;
       const members = Array.isArray(team.members) ? team.members : [];
       if (members.length === 0) throw new BattleHostError(`Team ${teamId} has no slots.`);
-      const fillResources = [];
       const combatants = members.map((member, index) => {
         const filled = assertMember(member, teamId, index);
         if (filled) {
@@ -210,11 +208,16 @@ class VanillaBattleHost {
           }
           const template = normaliseVanillaCombatant(member.vanilla, { clip: member.clip ?? null });
           templates.set(`${teamId}#${index}`, template);
-          // The roster invents the fighter; its resources still come from the
-          // caller's template, so the filled slot declares the same bag every
-          // other combatant does and can be written on either side.
-          fillResources.push(canonicalResourcesFrom(template.fields));
-          return { fill: "ai" };
+          // The roster invents the fighter; its resources still come from THIS
+          // slot's own template, so the filled slot declares the same bag every
+          // other combatant does and can be written on either side. Two filled
+          // slots no longer have to agree, because the bag rides the marker.
+          if (declaredFillResources(team.aiFill, index) !== undefined) {
+            // A caller that declared resources for this slot has said what it
+            // wants, and the marker would outrank it.
+            return { fill: "ai" };
+          }
+          return { fill: "ai", resources: canonicalResourcesFrom(template.fields) };
         }
         const source = toCanonicalCombatantSource(member.vanilla, {
           id: member.id,
@@ -232,7 +235,10 @@ class VanillaBattleHost {
         name: team.name ?? teamId,
         slots: members.length,
         combatants,
-        aiFill: aiFillWithResources(teamId, team.aiFill, fillResources, aiFillResourceGaps)
+        // Passed through exactly as the caller declared it, in whichever form
+        // the roster accepts. The host adds nothing here: a per-slot bag rides
+        // that slot's marker, so nothing has to be merged into this value.
+        aiFill: team.aiFill
       };
     });
 
@@ -340,12 +346,6 @@ class VanillaBattleHost {
     this.#diagnostics = Object.freeze({
       /** Slots the roster AI-filled. Their mirror came from a caller template. */
       aiFilledSlots: Object.freeze(aiFilledSlots.map((entry) => Object.freeze({ ...entry }))),
-      /**
-       * Teams whose AI-filled slots could not be given canonical resources,
-       * because the roster carries one fill template per team and theirs
-       * disagreed. Empty in every other case.
-       */
-      aiFillResourceGaps: Object.freeze(aiFillResourceGaps),
       /**
        * Where an AI-filled slot's template had to be rewritten to describe the
        * fighter the roster actually invented — stats and maximum health, which
