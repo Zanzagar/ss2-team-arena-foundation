@@ -1,11 +1,12 @@
 ---
 handoff:      2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain
-written:      2026-08-31 14:43 -0400
+written:      2026-08-31 14:43 -0400, extended 16:58 -0400
 sessionStart: 2026-08-31 13:30 -0400   # approx; first commit 13:44
 sessionId:    e386f047-1257-4d23-bf9b-6394e6e8b0f5
-agentRuns:    wf_0828f636-618 (4 lenses + 4 adversarial verifiers; verifiers re-run after a usage-limit failure)
+agentRuns:    wf_0828f636-618 (4 HANDOFF lenses + 4 verifiers; verifiers re-run after a usage-limit failure)
+              wf_4906eb50-a7f (4 CLAUDE.md/AGENTS.md research sweeps + 4 verifiers)
 branch:       arena/champion-capture
-commits:      2b123b9..f1f3f94   # 4 commits, NOT pushed
+commits:      2b123b9..3b61e69   # 7 commits, all PUSHED to github/arena/champion-capture
 suite:        620 passed / 0 failed / 0 skipped
 supersedes:   none
 ---
@@ -15,8 +16,8 @@ See [`README.md`](README.md) for what a handoff is and is not.
 
 ## Where things stand
 
-- Branch `arena/champion-capture`, **4 commits ahead of `github/arena/champion-capture`
-  and NOT PUSHED.** Pushing was offered and never authorised — ask before you do it.
+- Branch `arena/champion-capture`, **pushed and in sync** with its remote.
+  Do not push to `main`.
 - **620 / 0 / 0**, tree clean. Confirm the tip with `git log --oneline -1`.
 - `gh` is still not installed. `git ls-remote github "refs/pull/*/head"` for PR state.
 
@@ -37,6 +38,19 @@ See [`README.md`](README.md) for what a handoff is and is not.
 3. **`2d0b077` — the stat-vector arithmetic.** Seven of the 22 written-off fixtures
    are reachable, fifteen are not. `tools/stat-vector-reachability.mjs`.
 4. **`f1f3f94` — three retractions**, one of them mine (below).
+5. **`45b79a5` — `AGENTS.md` + an 11-byte `CLAUDE.md`.** Until now NEITHER agent
+   loaded this project's rules automatically; it worked only because a human typed
+   "read the latest handoff", which reached Claude and never reached Codex. The
+   pattern is Boris Cherny's own (Threads, 2026-03-21: "You can link your AGENTS.md
+   from your CLAUDE.md with: `@AGENTS.md`"), matches the docs, and `getsentry/sentry`
+   runs an identical 11-byte CLAUDE.md. **AGENTS.md must stay SELF-CONTAINED** —
+   Codex has no `@import`. Claude-only material goes BELOW the import line in
+   CLAUDE.md. Keep the COMBINED content under 200 lines (82 today): the import does
+   NOT save context, since imported files load in full at launch.
+6. **`3b61e69` — three fixes to `docs/overnight-agent-plan.md`**: the
+   `git ls-files` rule was one-directional, nothing verified a wave actually
+   launched, and "586 is the right number" was 34 tests stale. Read these BEFORE
+   briefing the restructure fan-out.
 
 ## Read this before you plan a capture
 
@@ -91,6 +105,26 @@ before it becomes a capture plan.**
   plan` is broken (fixed in `ad8c9ae`), that there are 81 divergence reports
   (86), that four "docs known stale" items are outstanding (all reconciled). The
   same failure the last handoff recorded, one layer out.
+
+## Tooling (new this session, all verified)
+
+- **Both plugins installed**, user scope: `mattpocock-skills` v1.2.3 and
+  `codex` v1.0.6. Neither marketplace was registered before — the official one
+  auto-registers only on first INTERACTIVE launch.
+- **Codex has `diagnosing-bugs` and `writing-for-agents` ONLY**, deliberately not
+  `code-review`: a shared review methodology would correlate Claude and Codex as
+  reviewers, and Codex is worth having here precisely because it is independent.
+  Confirmed by asking Codex to list its own skills. They live in
+  `~/.agents/skills/`, not `~/.codex/skills/` (which stays empty).
+- **Codex reads Claude's `.claude-plugin/marketplace.json` natively.**
+  `codex plugin marketplace add mattpocock/skills` works and offers the whole
+  bundle, git-backed and upgradeable. Rejected only because `codex plugin add` is
+  all-or-nothing and would pull in `code-review`. Re-add it if a full mirror is
+  ever wanted.
+- `npx` is NOT absent — it is bundled at
+  the Codex cua_node runtime bin directory, but its sibling
+  `node` must be on PATH or the shim fails. `-s` takes REPEATED flags, not a
+  comma list.
 
 ## Environment (new this session)
 
