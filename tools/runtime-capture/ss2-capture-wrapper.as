@@ -1756,6 +1756,31 @@ function makeHookMaker(hookLabel, onEnter, onExit) {
     };
 }
 
+/**
+ * The `magic-damage` event's `method` field, normalised to the two shapes the
+ * observation schema admits: null, or an animation label matching
+ * SPELL_ANIMATION_LABEL_PATTERN (/^[A-Za-z][A-Za-z0-9_]{0,31}$/) in
+ * src/golden/observation.js.
+ *
+ * Exactly ONE transformation is applied - undefined/null becomes null - and it
+ * is not cosmetic. AS2's String(undefined) is the eight-character string
+ * "undefined", which PASSES that pattern, so echoing the raw argument would
+ * record a plausible-looking animation label the game never passed. `null` is
+ * the schema's spelling of "no label", and it is what the candidate fixtures
+ * carry when the map recorded none.
+ *
+ * Everything else is emitted exactly as the game passed it, INCLUDING values
+ * the schema will refuse. A label ingest rejects is a loud divergence a
+ * reviewer can read off the trace line that carried it; coercing it to null
+ * would be the wrapper inventing "the game passed no label", which is the one
+ * fact this field exists to establish.
+ */
+function spellDamageMethod(raw) {
+    // AS2 loose equality: true for null AND undefined, false for 0 and "".
+    if (raw == undefined) return null;
+    return String(raw);
+}
+
 function makeRandomBetweenMaker(siteId) {
     // Diagnostic passthrough only: the tape is served and recorded at the
     // Math.random tap below, which the frame-52 atomic re-definitions
@@ -2087,9 +2112,25 @@ function beginAction() {
         emit({ t: "var", name: "criticalhit", value: ov.criticalhit });
     }
     // The spell ingress has no direction chain, so a cast is identified by
-    // the inventory id the caller used. Without this line ingest cannot
+    // the inventory id the caller used. Without a spell_id line ingest cannot
     // project scenario.spellId and no spell trace can ever be evidence.
-    // Recorded whenever the game has one; a physical action leaves it unset.
+    //
+    // WITHDRAWN CLAIM, byte-verified 2026-08-30: these two reads can never
+    // fire. `spell_id` DOES NOT EXIST anywhere in the build. A whole-file
+    // reference scan for /spell_id|spell_number/ returns exactly one hit - the
+    // `spell_number` PARAMETER of cast_spell_icon(which_avatar, spell_number),
+    // overlay frame 52 DoAction@0x240c7f +0x2251 - and no read or write of a
+    // `spell_id` name on any object or on _global. So both branches below are
+    // permanently undefined and no spell trace can carry an action identity.
+    //
+    // The id does exist at runtime, but only as cast_spell_icon's second
+    // argument, pushed as a literal one instruction before the call and two
+    // before the caller's damage roll: 30 at +0x8ffa (then
+    // randomBetween(80,160) at +0x9012), 31 at +0x904a (150..450), 32 at
+    // +0x909a (300..600), 34 at +0x847a (100..200), 35 at +0x84ca (200..400),
+    // 49 at +0x868d (boulder count 10..20). Reading it there means wrapping
+    // cast_spell_icon, which is a change to the ARMING path and is deliberately
+    // not made here - see the report accompanying this edit.
     if (ov.spell_id != undefined) {
         emit({ t: "var", name: "spell_id", value: ov.spell_id });
     } else if (_global.spell_id != undefined) {
@@ -2225,7 +2266,68 @@ function hookBattle() {
         };
     });
     registerSlot(function () { return overlayClip(); }, "damagecharacter", makeHookMaker("damagecharacter"));
-    registerSlot(function () { return overlayClip(); }, "magic_damage_character", makeHookMaker("damagecharacter"));
+    // The spell/effect damage ingress. It is NOT damagecharacter, and the two
+    // are separate DefineFunction2 bodies in the same block (byte-verified,
+    // overlay frame 52 DoAction@0x240c7f):
+    //
+    //   magic_damage_character def@+0x129c body +0x1313..+0x157c
+    //     (defender, attacker, game_defender, game_attacker,
+    //      damage_method, bonus_frame, damage)      -- SEVEN parameters
+    //   damagecharacter        def@+0x157d body +0x15ea..+0x1dd2
+    //     (defender, attacker, game_defender, game_attacker,
+    //      damage_method, attack_direction)         -- SIX parameters
+    //
+    // The spell ingress receives the damage already rolled by its caller, makes
+    // no randomBetween call and no RandomNumber draw, calls remove_armour zero
+    // times (the physical path calls it at +0x176a and +0x1791 behind a
+    // randomBetween(1,100) gate at +0x1744), writes psyche_up only on
+    // game_defender (+0x148e) where the physical path writes both sides
+    // (+0x16b5 defender, +0x16c2 attacker), plays no knockback, and dispatches
+    // death with no attack_direction chain at all - slain (+0x1558) or, in a
+    // duel, yield (+0x156d) - against the physical path's four-way dispatch
+    // (+0x19c6/+0x19ec/+0x1a27/+0x1a4d). Its own write order is
+    // armourclass_temp (+0x1403), armourclass -= damage (+0x1410),
+    // armourclass_temp = 0 on strict overflow (+0x144e), hitpoints -= damage
+    // (+0x147b), psyche_up = 1 (+0x148e), staminaleft += stamina_bonus
+    // (+0x14cc), then check_stats (+0x14e0) and the shared defeat gate.
+    //
+    // Attributing all of that to `damagecharacter` reported the spell ingress's
+    // armour and hitpoint subtraction, its psyche_up join, its breastplate
+    // stamina join and its check_stats clamps as physical-damage work. The hook
+    // token is the AS2 name rendered in the hyphenated hook vocabulary, because
+    // HOOK_PATTERN in src/golden/capture-ingest.js admits no underscores; it is
+    // the token the reference generator already specifies, in
+    // SPELL_HOOK_FOR_STATIC_REASON (src/golden/simulate-capture-trace.js),
+    // which maps magic-damage, psyche-up, breastplate-stamina and stat-clamp
+    // onto it for a spell action.
+    //
+    // The `magic-damage` event is this ingress's DISPATCH evidence. The
+    // physical path proves hit or miss by calling defender_hurt or
+    // defender_blocked; magic_damage_character calls neither (its complete call
+    // inventory is the UI attach/goto calls, Math.ceil, check_flipping,
+    // get_percentage, add_percentage, check_stats and the two death sites), so
+    // without this line a spell trace records no dispatch at all.
+    // deriveExpectedEventsFromSs2Fixture emits one for every spellId scenario,
+    // and capture-ingest.js keys the "slain" death dispatch on
+    // `events.some(e => e.type === "magic-damage")` - so no spell trace could
+    // match any fixture, and a lethal one could not even synthesize its result.
+    // Emitted on ENTRY, ahead of the ingress's own writes, which is exactly
+    // where the reference trace puts it (events[0], before every `set` line).
+    //
+    // `method` carries the damage_method argument - arguments[4], the fifth
+    // parameter of the header above - which for THIS ingress is the animation
+    // label played on the defender clip (`defenderClip.gotoAndPlay(
+    // damage_method)` at +0x13d8, pushing register:5). Literals observed at the
+    // call sites: "burning" (fireball group +0x91c1, death-from-above boulders
+    // +0x88e5), "lightning" (bolt group +0x85af), and the status phases'
+    // "frozen" (+0x5354), "lifesteal" (+0x5488), "poisoned" (+0x55bc) and
+    // "burning" (+0x56f0).
+    registerSlot(function () { return overlayClip(); }, "magic_damage_character",
+        makeHookMaker("magic-damage-character", function (args) {
+            if (armed) {
+                emit({ t: "event", type: "magic-damage", method: spellDamageMethod(args[4]) });
+            }
+        }));
     registerSlot(function () { return overlayClip(); }, "remove_armour", makeHookMaker("remove-armour"));
     registerSlot(function () { return overlayClip(); }, "destroy_armour", makeHookMaker("remove-armour"));
     // The phase boundary: an armed action that never reached checkattackroll
