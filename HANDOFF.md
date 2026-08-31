@@ -1,328 +1,267 @@
 # Transfer handoff — SS2 Team Arena Foundation
 
-## Capture campaign state (2026-08-30, end of session)
+## State at the end of the 2026-08-30 arena session
 
-Read this whole section before touching anything. 22 goldens, 429 tests, a
-capture round takes ~14 seconds, and the next action on the critical path is
-the first one this project has ever taken that can change the licensed save.
+Read this section before touching anything.
 
-### What is promoted
+22 promoted goldens. 517+ tests. Three things changed the shape of the project
+this session, and each of them corrected a claim the previous handoff made:
 
-| Family | Coverage | How the candidates were authored |
-| --- | --- | --- |
-| `golden-prisoner-quick-kill-dir1..4` | complete | from the map, before any quick session |
-| `golden-prisoner-normal-kill`, `-dir5/6/8` | complete | **from captures** — weakest evidence, see below |
-| `golden-prisoner-power-kill-dir9..12` | complete | from the map, before any power session |
-| `golden-probe-*` (10, five pairs) | complete | from the map; these **measure** |
+1. **Parallel capture works.** `-SaveDirectory` was never broken.
+2. **The leveled-gladiator arena route works** against the real build, end to
+   end, and a gladiator has been levelled 1 → 4 and fought the tournament
+   ladder to rank 2.
+3. **The wrapper can now stage combatant state**, with the owner's approval.
+   This is the first time it authors game state rather than only observing.
 
-All twelve melee attack directions are runtime-verified, from one staged
-fight: a level-1 gladiator against the tutorial prisoner, both unarmoured,
-`fight_mode` `misc`.
+### The correction that matters most to trust
 
-**Prefer the power and quick bands as the model.** Their candidates were
-derived from the battle map by an author with no access to any capture and
-committed before a single session of that band ran; the build then matched
-them exactly. The normal band's candidates were authored *from* captures, so
-each one's first observation confirmed nothing — it is what the candidate was
-fitted to. Never author a candidate from a capture.
+The previous handoff said "an audit re-read all 89 raw probe traces and found
+every measurement replicates across all twelve directions with zero
+exceptions." **That is false, and no campaign can make it true.** Each melee
+band only ever draws its own four directions, so 4-of-4 is the ceiling. The
+earlier audit measured the *union* across all ten probe arms (1–12) and
+reported it as per-measurement coverage. The real figures, now committed as 69
+regenerated divergence reports plus
+[`ss2-probe-replication.md`](docs/integration/ss2-probe-replication.md):
 
-### What the probes measured (the important part)
+| Measurement | Sessions | Directions |
+| --- | ---: | --- |
+| `rollneeded` 27, quick | 26 | 3 of 4 |
+| `rollneeded` 44, normal | 14 | 3 of 4 |
+| `rollneeded` 63, power | 25 | 4 of 4 |
+| Critical-deflection threshold 100 | 10 | 2 of 4 |
+| Armour-selection sample | 14 | **1 of 4** |
 
-A probe pair differs in exactly one injected value and is predicted to differ
-in a channel the capture genuinely observes. Twenty sessions produced:
+The armour-selection measurement produced **zero** divergence reports — both
+its above-the-gate runs were direction 5 — so regeneration left the weakest of
+the three planned measurements exactly where it was.
 
-- **`rollneeded` bracketed to a single integer per band** — quick misses at 26
-  and hits at 27, normal 43/44, power 62/63, all matching
-  `round(ratio * 100 * K)`. Because 44 hits while 43 misses, the comparison is
-  `diceroll >= rollneeded`, not `>`. An audit strengthened this: a strict
-  reading is impossible under *every* rounding convention and *every* ratio,
-  and the same six observations independently confirm both the
-  `(attack+9)/(defence+9)` ratio and `Math.round` over `ceil`. One unstated
-  premise remains — it assumes `rollneeded = 100 - chance`, which only the
-  map's byte reading settles.
-- **The critical-deflection threshold is 100, inclusive.** Both arms ran at
-  hit-roll 50, direction 5; deflection roll 99 dispatches `critical`, 100
-  dispatches `normal`, everything else byte-identical. Note this measures the
-  constant term and the boundary only — with helmet and greaves at 0 the
-  formula yields 100 for any coefficients. The armoured fixtures attack the
-  operand mix.
-- **The armour-selection sample is consumed before the equipped test** —
-  removal roll 66 gives 7 draws, 67 gives 8. Weakest of the three: it confirms
-  something the map already asserted flatly, and the extra draw's label and
-  position are echoed, so what is measured is "one extra draw, no state
-  change".
+---
 
-Unplanned findings: a miss consumes only pre-dispatch draws (3 normal, 2
-power/quick), so the runtime does not short-circuit on the roll; and the quick
-band draws no knockback roll while normal and power do, independently
-confirming the directions 5–12 knockback gate.
+## What runs now
 
-### What a capture actually proves — read before trusting a golden
+### Parallel capture (`-Concurrency`)
 
-Full account in `docs/integration/ss2-runtime-capture.md` under *What a match
-actually establishes*. Short version:
+`tools/runtime-capture/run-campaign.ps1 -Concurrency 3` runs three sessions at
+once, each with its own SharedObject store seeded from the real save. Measured:
+three rounds in **35 s** with a cold wrapper compile, three matches, zero
+divergences, master save byte-identical.
 
-- **Observed:** the ordered mutation trace, the semantic events (including
-  hit/miss and the dispatched method), the final state, `attack_direction`,
-  `fight_mode`, and the **number** of draws.
-- **Echoed from the candidate, not observed:** every roll line's label,
-  bounds, value and call site. The wrapper serves its tape from a tap on
-  `Math.random`, which takes no arguments.
-- **Never compared:** `expected.calculation` and `expected.mutation`.
-- The simulated-evidence rejection is one editable string in the trace meta
-  line, and session independence is two operator-supplied strings.
+**`-SaveDirectory` was never broken.** `tools/ffdec.ps1` redirects
+`LOCALAPPDATA` to `.tools/ffdec-profile` for the whole PROCESS, and
+`launch-capture.ps1` called it for the wrapper compile — so the seed copy then
+read a master-store path inside `.tools/` that does not exist, skipped the copy
+behind a `Test-Path`, and handed Ruffle an empty directory. Ruffle did the only
+thing it could. The log lines that would have said so immediately were
+suppressed by `RUST_LOG=avm_trace=info`, which sets Ruffle's *global* level to
+off. Both causes are fixed and the seed is now asserted byte-identical rather
+than attempted.
 
-### Non-negotiable rules (each learned the hard way)
+**Scope limit:** per-session stores FORK the save. Right for the capture
+campaign, wrong for the arena route, which must ACCUMULATE across bouts.
+`-Concurrency > 1` is refused for any navigator but `prisoner`.
 
-- Licensed SWFs are read-only and hash-verified before and after every
-  capture. Never copy, export or commit game assets or extracted scripts.
+### The arena route (`-Navigate arena`, `run-arena.ps1`)
+
+A looping state machine over the screen the game rests on. Every action
+replicates a named `DefineButton2` body statement for statement. Verified live:
+
+- level 1 → 2 through the game's own prisoner fight (~7 s);
+- level 2 → 4 through duels;
+- the tournament ladder from rank 4 to rank 2 in **five of six** attempts.
+
+`run-arena.ps1` refuses to start without a fresh snapshot name, takes the
+snapshot itself, and hashes `ss2_data.sol` before and after. `-Attempts N`
+relaunches after the two aborts that are ordinary rather than defects (a lost
+duel; the 2 % special-event draw). Retries deliberately do **not** restore the
+snapshot — the save already holds every completed bout.
+
+Snapshot **`level4-vitality-tournament-gate`** holds the level-4 gladiator:
+vitality 13, 220 hitpoints, 5723 gold, `current_tournament` 1.
+
+### Scenario staging (`-StageHero`, `-StageVillain`)
+
+`stepStaging` in the wrapper writes `field:value` pairs once `battle_started`
+is true — past the frame-214 full heal, past frame 221's forced
+`equipped_weapon = 1`, past `initbattle` — repeated for 20 frames because the
+game re-derives values during battle construction. It stops before the action
+arms, so no staged write can ever appear in the mutation trace. Every field is
+reported on the trace's `end` line, read back from the game rather than echoed.
+
+**Verified live:** eleven fields including `herolevel`, `min_damage 300` and
+`hitpoints 999` all stuck.
+
+Why it exists: `candidate-armoured-*` stages helmet 6 / greaves 2, which
+`randomise_gladiator` will never produce by chance; and the champion bout needs
+a *reproducible* hero, which the ladder cannot give (below).
+
+---
+
+## The tournament rank-1 bout
+
+**The opponent is reproducible. Confirmed live**, not just from the bytes:
+"John the Butcher", 110 `hitpointsmax`, 86 `armourclass`, identical across
+**eight independent draws**, matching the hard-coded DNA literal `unleash_hell`
+builds him from. `unleash_hell` contains zero RNG of any kind.
+
+**The hero entering that bout is not**, and this was observed rather than
+inferred: in eight of nine ladder runs the hero levelled 4 → 5 after the rank-3
+bout, because experience per bout is a *generated* opponent's `character_xp`.
+`staminaleft` also carries across bouts — `battlevalues` resets it only when it
+is already `<= 0`. Both are projected fields, so two sessions differing in
+either cannot match.
+
+Hence two things:
+
+- `arenaCapture=champion` **refuses to arm** unless the hero enters at
+  `-ArenaStagedLevel` with full stamina. It would have refused all nine
+  observed runs, which is the point: a silent non-match becomes a visible
+  refusal.
+- **Winning the champion bout is not required.** The wrapper arms on the first
+  `checkattackroll` and closes the trace on that call's return, so the evidence
+  is one action. `run-arena.ps1` treats a closed trace as success. This matters
+  because a vitality-only gladiator loses to him **0 for 8**, and staging the
+  hero to 100 strength / 300–400 damage / 999 hitpoints **still lost** — see
+  the open question below.
+
+---
+
+## Non-negotiable rules (each learned the hard way)
+
+- Licensed SWFs are read-only and hash-verified before and after every capture.
+  Never copy, export or commit game assets or extracted scripts.
 - **Never shortcut the game's own frames.** Jumping past the prologue tripped
-  the game's character-tampering screen. The prologue is construction — it
-  skins the hero and builds the villain. Locking the frame rate is fine; every
-  frame still runs.
+  the game's own validation screen. Locking the frame rate is fine; every frame
+  still runs.
 - A candidate becomes golden ONLY via >=2 matching observations from >=2
   sessions. Never hand-write a golden, observation or manifest.
 - **Derive candidates from the battle map, never from a capture.**
 - `tools\runtime-capture\validate-vehicle.ps1` must PASS after ANY wrapper edit.
 - Use `git commit -F <file>` for any message containing quotes.
-- **Snapshot before every session, not only levelled ones** — see the save
-  correction below.
+- Snapshot before every session. `run-arena.ps1` does it for you and refuses to
+  run otherwise.
 
-### Two corrections made late, both worth knowing
+### AVM1 has ONE comparison opcode — read this before touching the wrapper
 
-**The prisoner route is not save-neutral.** An earlier claim (mine) said it
-never reaches a flush site. Wrong: `refresh_gladiators` flushes
-unconditionally and is called from root frames 35 and 84, which the navigator
-passes through at navSteps 0 and 1. Every capture has flushed the store twice.
-What is true and was *measured*: the write is a near-identity rewrite, so
-`ss2_data.sol` stays byte-identical (679 bytes, `6A06E9E8…`) while its mtime
-moves. The data is safe; the route avoiding the flush is not why. The same
-function has a **reset branch** that blanks every character slot when the
-gladiator count reads `undefined`/`0`/`NaN` — almost certainly the clobbering
-the launcher warns about.
+`>` is `<` with the operands swapped; `>=` and `<=` are `<` negated. Every
+comparison with NaN is false, so **both negated forms return TRUE for NaN**.
+Every value the navigator reads is undefined until the frame that initialises
+it.
 
-**Seven goldens cited a manifest that did not exist.** The campaign driver
-named manifests by attack direction, six probe arms share direction 5, and
-they overwrote one another in one settle loop. Fixed (named by candidate,
-`overwrite: false`), all ten recovered by brute-forcing `createdAt` so the
-goldens stayed byte-identical, and the coverage test now walks every golden
-instead of one family's four.
+This bit twice in one run. `tod >= ceiling` aborted the first live arena run at
+430 ms with `time_of_day` undefined. The guard written to fix it,
+`n > 0 || n <= 0`, did it again — `NaN <= 0` is `!(0 < NaN)` is true — so the
+guard passed the exact value it existed to reject. The only safe shape is
+un-negated `<`, twice: `(n < 1) || (0 < n)`. Use `isNum()`.
+
+---
+
+## Corrections to the previous handoff and to the static audits
+
+| Claim | Status |
+| --- | --- |
+| "every measurement replicates across all twelve directions" | **False.** 4-of-4 is the ceiling; see the table above |
+| "a levelled gladiator stays comparable with the 22 goldens" | **False.** `hitpointsmax` is a projected field AND an operand of the defeat gate. A level-4 gladiator cannot re-observe any golden. The defensible claim is only that vitality-only spending adds no new operand to a measured formula |
+| "a tournament loss ends the character" | **False.** No flush site is reachable from any bout, the ladder, the win chain or the loss path. Eight champion losses cost gold and counters; the gladiator survived every one |
+| "pressing button 2283 early parks forever" | **False.** The refusal arm sets a text field and jumps to the end — idempotent and retryable. The gate is still right; the consequence was overstated |
+| "every session runs the DEMO build" | **False at runtime.** `game_mode` reads `"full"`. The audit inferred demo from `fizMode` being unset; it would have capped herolevel at 12, tournaments at 3 and ammo at 10, and does not |
+| "`-SaveDirectory` is not usable" | **False.** See above |
+| level 1 needs 60 experience | **Wrong.** It needs 125 — the near-125 floor the route map could not fully decode is real |
+
+Two hazards the four preconditions **missed**, both now handled:
+
+- Root frame 150 draws `1 + RandomNumber(100)` on EVERY town-square entry and
+  jumps to the special event when it is `<= 2` — a flat **2 % per entry**,
+  independent of `time_of_day`, through an opcode nothing can intercept. A
+  levelling run makes three to six entries, so 6–12 % of healthy runs end this
+  way. GATE B catches it; `-Attempts` retries it.
+- The tournament loop **never returns to town square**, so the whole ladder
+  shares one `time_of_day` budget with no reset anchor.
+
+GATE C was **confirmed live on the first run**: after the fourth point was
+spent, `statpointsHero` read 0 while `statpointsRoot` still read 1. The mirror
+lagged by exactly one point, so pressing in that slot would have taken the
+refusal arm.
 
 ---
 
 ## Next steps, in order
 
-### 1. Fold four preconditions into the navigator, THEN level a gladiator
-
-This is the critical path and the first save-mutating action. An adversarial
-audit of `docs/integration/ss2-arena-route.md` found four things that would
-have bitten. Do not start without them:
-
-- **Bound the session by wall clock.** `time_of_day` advances via
-  `setInterval(day_night_cycle, 1500)` — 1.5s wall clock — during everything
-  except the battle itself. At `>= 200` (about 4m24s of non-battle time from
-  24) the game enters a **special event** that permanently mutates charisma,
-  magicka or gold and then saves it through town square. Re-assert
-  `_global.time_of_day = 24` at each town-square rest (an in-vocabulary write
-  the game's own buttons make), and log it.
-- **Hard-abort on root frames 160–169.** Never let a generic advance step
-  press `special_button1`/`special_button2`.
-- **Gate the level-up press on `_root.statpoints`, not
-  `game.hero.statpoints`.** Button 2283 reads the *display mirror*, maintained
-  by an `enterFrame` clip action. Pressing it in the same execution slot as
-  the four decrements takes the refusal arm and parks forever. Allow >=1 frame.
-- **The frame-113 timeout must abort and log, never re-issue
-  `gotoAndPlay("daybreak")`.** Re-entering the span mid-way retains the
-  existing `day_night` clip and can flip its parity to a permanent hang.
-
-Spend all four level-up points into **vitality** every time. An audit traced
-all 34 `vitality` references: its only derivation is
-`hitpointsmax = herolevel*10 + vitality*20`. It touches no input to
-`attack_chances`, the damage roll, the deflection threshold or the controller
-selector — so a levelled gladiator stays comparable with the 22 goldens.
-
-Level 4 is the tournament gate (`tournament_level_required` 4 for a fresh
-gladiator).
-
-### 2. Capture the tournament rank-1 bout, not a duel and not a generated rank
-
-Two agents converged on this independently, and it corrects an earlier plan.
-
-- **Duels are not a capture target at all.** `randomise_gladiator` generates
-  the opponent per entry using `RandomNumber` **opcode** draws for appearance,
-  stat distribution and a matched armour suit. Opcode draws can be neither
-  injected nor recorded, so a duel opponent cannot be reproduced even with a
-  full tape.
-- **Tournament ranks 2..N are regenerated on every fresh launch**
-  (`tournament_in_progress != true`), and matching compares the full final-state
-  projection of **both** sides — so a generated opponent can never clear the
-  two-session gate.
-- **Rank 1 is built by `unleash_hell(tournament_number)` from hard-coded DNA
-  literals — zero villain-side RNG.** That is the one reproducible armoured
-  opponent, at the cost of winning the prior bouts in the same launch.
-
-### 3. Capture the families already authored and waiting
-
-- `candidate-tournament-*` (3) — the defeat gate's first-blood term, never
-  exercised. Outside tournament mode any hit reaching hitpoints ends the fight.
-- `candidate-armoured-*` (5) — armour absorption, the equality quirk, strict
-  overflow, a **real** deflection threshold (helmet 6 / greaves 2 → 93, and
-  the 92/93 bracket excludes every rival operand reading), and `remove_armour`
-  destroying a specific piece.
-- Pass `-WatchFields` with the per-piece `_defence` names. The wrapper's
-  default list omits them and ingest refuses a trace missing a field the
-  fixture stages. `watchFields` is now additive; leaving it empty reproduces
-  every existing golden exactly.
-- The ~5 legacy candidates needing a non-lethal hit need tournament *staging*,
-  not new fixtures.
-
-### 4. The spell family has never been captured
-
-The wrapper emits `spell_id` and the pipeline projects it, but no spell
-session has run. Before one can: the wrapper's `magic_damage_character` hook
-is registered with the `damagecharacter` label and emits no `magic-damage`
-event (`ss2-capture-wrapper.as`, the `registerSlot` for it). It needs the
-right hook label and an event carrying the `damage_method` argument.
+1. **Capture the champion bout.** Everything is in place: the ladder reaches
+   rank 2 reliably, staging makes the hero reproducible, and the trace closes on
+   one action. Run `run-arena.ps1 -ArenaTarget tournament -ArenaCapture champion
+   -ArenaStagedLevel <n> -StageHero <fields>` twice from the same snapshot and
+   ingest both.
+2. **Capture `candidate-armoured-*` (5).** These need `-StageVillain` with the
+   per-piece `<piece>_defence` names, and `-WatchFields` with the same names —
+   the wrapper's default list omits them and ingest refuses a trace missing a
+   field the fixture stages.
+3. **`candidate-tournament-*` (3)** — the defeat gate's first-blood term, now
+   reachable since `fight_mode == "tournament"` is.
+4. **The spell family has never been captured.** The wrapper's
+   `magic_damage_character` hook is registered with the `damagecharacter` label
+   and emits no `magic-damage` event. It needs the right hook label and an event
+   carrying the `damage_method` argument.
 
 ---
 
-## Known defects and open items
+## Open questions and known defects
+
+**Staged combat stats did not change the outcome, and nobody knows why.**
+Staging `strength 100 / min_damage 300 / max_damage 400 / hitpoints 999` and
+reading all eleven fields back correctly still lost to an opponent with 110
+hitpoints and 86 armour, in about the same wall clock as an unstaged run. Either
+something recomputes these mid-battle (`battlevalues` and `check_stats` are the
+candidates), or the damage path reads different fields than `game.hero.min_damage`.
+**This matters for the armoured fixtures**, which stage defender armour and need
+it to hold through `damagecharacter`. Settle it with a targeted probe before
+trusting a staged capture of that family.
 
 **Evidence chain**
-- `overdraw` and `launchNonce` are validated at ingest then **discarded** —
-  neither reaches the observation record, so a reviewer holding only the repo
-  cannot verify the over-draw guard was satisfied. `overdraw` is also optional
-  at ingest; a trace without it silently carries no assurance. No test covers
-  either. Fix: make it mandatory for `injected-tape-runtime`, carry both into
-  `capture.*`, assert nonce uniqueness in the promotion gate.
-- **69 divergence reports were deleted as direction-lottery noise, and that
-  was a misjudgement.** An audit re-read all 89 raw probe traces and found
-  every measurement replicates across all twelve directions with zero
-  exceptions — far stronger than the two-session gate. The raw traces survive
-  under ignored `captures/` (155 sessions). Regenerate and commit them, and
-  state per-measurement replication counts.
-- Ingest drops no-op writes, so a candidate omitting the unconditional
-  breastplate-stamina write would still match. Observed evidence discarded.
+- Two-session independence still rests on operator-supplied strings for every
+  promoted golden: `capture.launchNonce` now exists and promotion refuses a
+  shared one, but **not one of the 22 goldens cites a nonce-bearing
+  observation**.
+- Ingest drops no-op writes, so a candidate omitting an unconditional write
+  would still match.
 
-**Tooling**
-- `-SaveDirectory` is **not usable**. Its protective half is verified (a
-  session with its own store provably cannot touch the real save), but Ruffle
-  writes a fresh empty store instead of reading the seeded copy — confirmed the
-  seed lands at exactly the right path, byte-identical. Parallel capture is
-  blocked on understanding that.
-- `campaign.mjs loadFamily` matches `fixtureId.startsWith("candidate-" + f)`,
-  so `--family armour` also sweeps `candidate-armoured-*`. Should require a
-  `-`-delimited segment boundary.
-- `campaign.mjs` indexes families by `scenario.attackDirection`, so a spell
-  family would collide all members on `undefined`.
-- The ~7s fixed setup per round (hash verify, FFDec compile, Ruffle start) is
-  now ~half a round. Hoisting the wrapper compile out of the campaign loop is
-  the easy win.
+**Adapter**
+- `src/team/roster.js` builds AI-filled slots from one `aiFill` template per
+  team, not per slot; the host reports `diagnostics.aiFillResourceGaps` and
+  declares nothing rather than guessing.
+- **A4 is open and needs four files one agent did not own.** The completion
+  token is `team-arena:<winner>:<losers>:<reason>` and carries no battle
+  identity, so two bouts between the same teams share a token and bout 1's
+  acknowledgement settles bout 2. Fixing it needs `resolver.js` to pass the
+  battle to `CampaignSettlement`, `record.js`'s `assertSettlementBlock` to stop
+  recomputing the token, and two test files that hard-code the literal string.
+  Record ids change, which is cheap now (no campaign records are committed).
+- No per-action animation acknowledgement exists, so nothing sequences action
+  N+1's rebind against action N's running timeline. Documented, not invented.
 
-**Adapter follow-ups from the seam widening**
-- `toCanonicalCombatantSource` should emit `resources` from `armourclass`,
-  `staminaleft`, `ammo_left`, `charisma`, the armour piece ratings and the
-  enchantment fields, **on both sides** — the resolver refuses a write to an
-  undeclared resource by design.
-- `vanillaWritesForResolvedAction` needs a `RESOURCE` branch so writes reach
-  `armourclass`.
-- `createEffectRecordingRuleSet` is now redundant; use `lastResolvedAction`.
-- **A drawn battle cannot settle through the bridge.** The resolver produces
-  and settles draws; vanilla dispatches only `combatwon`/`combatlost`, so a
-  draw has no arena label and `reportArenaLabel` is the only thing that arms
-  the final gate. A draw's acknowledgement should be the completed death
-  animations with no arena transition. The resolver side is pinned as a
-  contract to code against.
-
-**Docs**
-- `docs/ss2-adapter-contract.md` "canonical-shape gaps" is partly stale.
-- `docs/roadmap.md` has stale rows (Stage 4 arena layout, campaign save).
-- `ss2-runtime-capture.md`: the trace grammar's `end` row does not document
-  `overdraw`/`launchNonce`; the `var` row omits `spell_id`; the `event` row
-  omits `magic-damage`; §Reading divergent traces still says an over-draw is
-  invisible.
-- An unresolved tension worth settling: `ss2-runtime-capture.md` says
-  `getphase` accepts only the current controller's labels, while the battle map
-  reads the phase machine as never consulting the controller frame. If the map
-  is right, the autopilot's gate is stricter than the build — safe, but
-  untested. One round issuing a label to a controller that does not offer it
-  settles it.
+**Campaign persistence**
+- `buildCampaignRecord` now refuses a battle where a combatant entered already
+  at zero health. Distinguishing "entered down" from "we lost the event" is new
+  data and a schema-3 question.
 
 ---
 
 ## Working agreement for parallel agents
 
-Nine ran concurrently this session and it worked, on these rules: exclusive
-file ownership per agent, no agent runs a state-mutating git command (one
-owner commits), no agent launches Ruffle or touches the installation or the
-save, and adversarial verifiers write nothing at all. The two adversarial
-passes were the highest-value agents of the session — both found real defects
-in committed work, including two of mine.
+Eleven ran this session on these rules: exclusive file ownership stated in the
+prompt, no agent runs a state-mutating git command (one owner commits), no agent
+launches Ruffle or touches the installation or the save, and adversarial
+verifiers write nothing at all.
 
-A separate design track is researching endless progression in
-`docs/design/endless-progression-brief.md`. It is deliberately disjoint:
-design must never flow into candidate authoring, or a capture confirms a fit
-rather than a prediction.
-
-## On the PC with Swords & Sandals II installed
-
-1. Preferred: copy `ss2-team-arena-foundation.bundle` to the new PC and run
-   `git clone ss2-team-arena-foundation.bundle ss2-team-arena-foundation`.
-   This preserves the complete commit history.
-2. Alternative: extract the transfer ZIP into a new local Codex project folder.
-3. Open that folder as the project, then continue this Codex task and say that
-   the licensed game is installed.
-4. Give Codex permission to read the game's installation directory when asked.
-   Do not copy, upload, or redistribute the original SWF or assets.
-5. Run `npm test` from this folder to confirm the transferred foundation.
-
-## What Codex should inspect first
-
-Locate the licensed Swords & Sandals Classic Collection installation and identify
-the S&S II SWF and any S&S II mod folders. The adapter work starts by mapping
-the vanilla battle entry point, player/opponent state objects, random-number
-generation, combat formulas, result callback, and battle movie clips.
-
-## Scope already completed
-
-**The combat core is `src/team/`, not `src/engine.js`.** One shared resolver
-serves 1v1, 2v2 and 3v3 — there is no second code path for 1v1 — with team
-elimination, AI fill, controller identity independent of combatant identity,
-and a campaign settlement that fires exactly once, after a whole team is down
-*and* the final animation is acknowledged. `src/engine.js` is now a
-compatibility facade over it, preserving the historical deterministic replay,
-wire snapshots and state hashes; that equivalence was checked across 200
-blueprints against the pre-refactor engine, not assumed.
-
-Formulas are injected through the rule-set seam (`src/team/rule-set.js`), and
-the seam is gated: a rule set may only claim `runtime-verified` if it pins the
-build SHA-256 *and* cites a promoted golden. `classicStyleRules` is unchanged,
-byte-identical to its original formulas, and still the only rule set —
-explicitly a placeholder. **Nothing measured has been dropped into the seam
-yet.** Eight goldens satisfy the gate's form, not its substance.
-
-`src/adapter/` is the SS2 seam: it converts vanilla combatant state to
-canonical state and back, dispatches presentation, and produces the result
-acknowledgement — and it decides no combat, which is enforced by shape rather
-than convention (every vanilla write mirrors the resolver's post-action
-projection, never `before - effect`). It reconciles 3v3 with a two-sided
-vanilla surface by treating hero/villain as a *binding* rebound per action
-rather than a roster.
-
-There are two isolated candidate families: the physical attack ingress
-(`src/golden/ss2-attack-candidate.js`) and the spell ingress
-(`src/golden/ss2-spell-candidate.js`, byte-verified from
-`magic_damage_character`), registered separately and asserted disjoint. The
-whole capture pipeline — digested observation records, raw-trace ingestion,
-the two-independent-session promotion gate, preserved divergence reports, a
-never-promotable reference simulator, and the campaign driver — is in place
-and covered by tests. The delivery target remains 2v2 and 3v3 cooperative
-campaign support; see `docs/roadmap.md`.
-
-A separate design track is researching endless progression in
-`docs/design/endless-progression-brief.md`. It is deliberately disjoint from
-this work: design must never flow into candidate authoring, or a capture
-confirms a fit rather than a prediction.
+**The adversarial passes were again the highest-value agents.** They found: a
+demonstrated data-destruction bug in the campaign store (one additive line in
+another module silently deleted every stored record); five combat-deciding edits
+to the adapter that left the whole suite green; a settlement path where the
+adapter satisfied both of its own gates by talking to itself; the four
+preconditions' two missing hazards; and a test that deleted the only thing that
+changed before asserting nothing had changed — this project's own worst failure
+mode, evidence fitted to the design.
 
 ## Keep the project lawful and reversible
 

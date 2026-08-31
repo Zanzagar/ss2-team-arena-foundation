@@ -115,6 +115,15 @@ param(
     # ss2-capture-wrapper.as before using it.
     [string] $StageHero = "",
     [string] $StageVillain = "",
+    # Equip the gladiator through the game OWN purchase path. -StageGold grants
+    # gold (the one field no combat site reads); -ShopWeapon and -ShopArmour give
+    # the HIGHEST item id to try, and the wrapper steps down until the game
+    # accepts one. This is how to raise damage: battlevalues DERIVES min_damage
+    # from strength and hero.weapon, so staging min_damage writes the output of a
+    # formula the game recomputes. Buying changes the input.
+    [int] $StageGold = 0,
+    [int] $ShopWeapon = 0,
+    [int] $ShopArmour = 0,
     # GATE A bounds. time_of_day advances on a 1.5s WALL-CLOCK interval outside
     # the battle; at 200 the game takes a special event that permanently
     # mutates charisma, magicka or gold and then saves it. 0 leaves the
@@ -288,6 +297,9 @@ $ruffleArgs = @(
     "-ParenaStagedLevel=$ArenaStagedLevel",
     "-PstageHero=$StageHero",
     "-PstageVillain=$StageVillain",
+    "-PstageGold=$StageGold",
+    "-PshopWeapon=$ShopWeapon",
+    "-PshopArmour=$ShopArmour",
     $wrapperSwf
 )
 # Passed only when set: an empty FlashVar reads as "" in the wrapper, which is

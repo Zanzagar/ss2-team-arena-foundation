@@ -128,6 +128,10 @@ var rawArenaStagedLevel = _root.arenaStagedLevel;
 // lists. See stepStaging.
 var rawStageHero = _root.stageHero;
 var rawStageVillain = _root.stageVillain;
+// Shop staging: gold to grant, and which shop bands to spend it in.
+var rawStageGold = _root.stageGold;
+var rawShopWeapon = _root.shopWeapon;
+var rawShopArmour = _root.shopArmour;
 var rawTimeOfDayCeiling = _root.timeOfDayCeiling;
 var rawSessionLimitSec = _root.sessionLimitSec;
 var config = {
@@ -733,6 +737,92 @@ function arenaResetAutopilot() {
     autopilotAborted = false;
 }
 
+// ===========================================================================
+// Shopping: equipping the gladiator through the game's own purchase path.
+//
+// This is the RIGHT way to make a gladiator stronger, and it is worth saying
+// why, because the wrong way was tried first and looked like it worked.
+//
+// battlevalues DERIVES the damage fields:
+//     min_damage = strength + weapons[hero.weapon].weapon_min_damage
+//     max_damage = strength + weapons[hero.weapon].weapon_max_damage
+// (root frame 35, battlevalues +0x3356 and +0x3386). So staging `min_damage`
+// writes the OUTPUT of a formula the game recomputes from its inputs. Eleven
+// staged fields were read back correctly at battle construction and changed
+// nothing about the fight, because the number that matters is regenerated from
+// `strength` and `hero.weapon`.
+//
+// Buying changes an INPUT. `hero.weapon` is persistent, survives every
+// battlevalues call, every save and every relaunch - and the only thing this
+// wrapper has to write is GOLD, which is not a combat input at all: no site in
+// attack_chances, the damage roll, the deflection threshold or the controller
+// selector reads goldpieces. It is the least invasive intervention available.
+//
+// The item handlers are genuinely callable. weaponbuttons() assigns onRelease
+// as a script-defined function (sprite 1961 frame 1, DefineFunction2 at
+// +0x08cb, calling buyweapon at +0x0941), exactly like the slot handler the
+// prisoner navigator already invokes at navStep 2. Only the `getitem` confirm
+// is a DefineButton2 and has to be replicated.
+//
+// Item selection is by TRIAL, high id to low, rather than by modelling the
+// gate. buyweapon refuses an item the hero does not qualify for by playing the
+// `angry` page instead of `getitem`, so the wrapper offers an id and reads
+// which page the shop went to. That is the game answering the question, which
+// is both more robust than a reimplemented gate and less to get wrong.
+// ===========================================================================
+var stageGold = Number(rawStageGold);
+if (!(stageGold > 0)) stageGold = 0;
+var shopWeaponTop = Number(rawShopWeapon);
+if (!(shopWeaponTop > 0)) shopWeaponTop = 0;
+var shopArmourTop = Number(rawShopArmour);
+if (!(shopArmourTop > 0)) shopArmourTop = 0;
+
+var goldStaged = false;
+var shopDone = (shopWeaponTop <= 0 && shopArmourTop <= 0);
+var shopKind = "weapon";      // "weapon" -> "armour" -> done
+var shopItem = 0;             // the id currently being offered
+var shopTries = 0;
+var shopScanTicks = 0;
+// Category pages, highest tier first. Weapon shop labels are byte-verified in
+// the route map: bashing1..3 at 48/56/64, hacking1..3 at 72/80/88,
+// slashing1..3 at 96/106/116, ranged1..3 at 124/131/139, getitem at 147. The
+// armoury uses per-piece pages between 48 and 177 with getitem at 184.
+var WEAPON_PAGES = ["hacking3", "bashing3", "slashing3", "hacking2", "bashing2",
+                    "slashing2", "hacking1", "bashing1", "slashing1"];
+var ARMOUR_PAGES = ["browse"];
+var shopPages = WEAPON_PAGES;
+var shopPageIndex = 0;
+var SHOP_MAX_TRIES = 90;
+
+function shopClip(which) {
+    return which == "weapon" ? gameRoot().weaponsmith : gameRoot().armoursmith;
+}
+
+/** The getitem confirm body: character 1952 (weapons) / 1907 (armour). */
+function shopConfirm(which) {
+    var root = gameRoot();
+    var clip = shopClip(which);
+    var hero = root.game.hero;
+    if (Number(hero.goldpieces) < Number(clip.itemcost)) return false;
+    if (Number(clip.itemcost) != 0) root.coins.start();
+    if (which == "weapon") {
+        if (String(clip.itemtype) != "ranged") {
+            hero.weapon = clip.itemnumber;
+            hero.weapon_enchantment_potency = 1;
+            hero.weapon_enchantment_type = 1;
+        } else {
+            hero.secondary_weapon = clip.itemnumber;
+            hero.secondary_weapon_enchantment_potency = 1;
+            hero.secondary_weapon_enchantment_type = 1;
+        }
+    }
+    hero.goldpieces -= Number(clip.itemcost);
+    root.constructDNA();
+    clip.itempurchased = "yes";
+    clip.gotoAndPlay("browse");
+    return true;
+}
+
 function stepArenaNavigator() {
     if (!arenaMode) return;
     if (arenaStopped) return;
@@ -845,12 +935,143 @@ function stepArenaNavigator() {
             ",\"gold\":" + jnum(root.game.hero.goldpieces) +
             ",\"bouts\":" + arenaBoutsFought);
         if (arenaReachedTarget(root)) { arenaFinish(root, "level"); return; }
+        // Gold is staged HERE and nowhere else: the town square is where the
+        // shops are reachable from, and where save_character persists it. It is
+        // the only field this route writes outside a staged battle, chosen
+        // because no combat site reads it.
+        if (stageGold > 0 && !goldStaged) {
+            goldStaged = true;
+            root.game.hero.goldpieces = stageGold;
+            root.constructDNA();
+            arenaLog("staged-gold", "\"goldpieces\":" + jnum(root.game.hero.goldpieces));
+        }
+        if (!shopDone) {
+            if (shopKind == "weapon" && shopWeaponTop > 0) {
+                shopItem = shopWeaponTop; shopTries = 0; shopScanTicks = 0;
+                shopPages = WEAPON_PAGES; shopPageIndex = 0;
+                arenaLog("shop-enter", "\"kind\":\"weapon\",\"topItem\":" + jnum(shopItem) +
+                    ",\"gold\":" + jnum(root.game.hero.goldpieces));
+                root.gotoAndPlay("weaponshop");           // button 1796
+                arenaPhase = "shop-open"; arenaCooldown = 25; return;
+            }
+            if (shopKind == "weapon") shopKind = "armour";
+            if (shopKind == "armour" && shopArmourTop > 0) {
+                shopItem = shopArmourTop; shopTries = 0; shopScanTicks = 0;
+                shopPages = ARMOUR_PAGES; shopPageIndex = 0;
+                arenaLog("shop-enter", "\"kind\":\"armour\",\"topItem\":" + jnum(shopItem) +
+                    ",\"gold\":" + jnum(root.game.hero.goldpieces));
+                root.gotoAndPlay("armoury");              // button 1792
+                arenaPhase = "shop-open"; arenaCooldown = 25; return;
+            }
+            shopDone = true;
+        }
         // Button 1800's ENTIRE body is this one call - 42 bytes, no sound. An
         // earlier revision of this step added clicksound2.start() here, which
         // this file has no licence to do while claiming to replicate a button
         // body statement for statement.
         root.gotoAndPlay("foyer");                        // button 1800
         arenaPhase = "foyer"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "shop-open") {
+        var shop = shopClip(shopKind);
+        if (shop == undefined) return;
+        if (shopTries >= SHOP_MAX_TRIES || shopItem < 1) {
+            arenaLog("shop-exhausted", "\"kind\":\"" + shopKind + "\",\"tries\":" + shopTries);
+            arenaPhase = "shop-leave"; return;
+        }
+        // SCAN downward for the highest id the shop has actually wired, rather
+        // than waiting on one specific id. A live run entered the weapon shop,
+        // reached its Stop frame at root 186, and then sat until GATE A's
+        // ceiling because item 60 had no onRelease - the handlers are not
+        // necessarily wired for every id in the band at the browse page.
+        // Asking the clip what it offers is both more robust and more honest
+        // than modelling which ids exist.
+        var offered = 0;
+        for (var probe = shopItem; probe >= 1; probe--) {
+            var candidate = shop["item" + probe];
+            if (candidate != undefined && typeof candidate.onRelease == "function") {
+                offered = probe; break;
+            }
+        }
+        if (offered == 0) {
+            // The item handlers do not exist on the shop's entry or browse
+            // pages. Probed live: at shop frames 38 and 47 the clip carried
+            // `weaponbuttons`, `buyweapon`, `getweaponinfo` and a set of
+            // `instanceNNN` slots, and NO `item<n>` property at all. The
+            // per-item onRelease bindings are wired by the CATEGORY page, so
+            // the shop has to be sent to one first.
+            //
+            // Pages are tried highest tier first, because the highest tier the
+            // gate allows is the one worth buying. Each is given a moment to
+            // wire its items before the next is tried.
+            shopScanTicks++;
+            if ((shopScanTicks % 60) == 1 && shopPageIndex < shopPages.length) {
+                var page = shopPages[shopPageIndex];
+                shopPageIndex++;
+                arenaLog("shop-page", "\"kind\":\"" + shopKind + "\",\"page\":\"" + page +
+                    "\",\"shopFrame\":" + jnum(shop._currentframe));
+                shop.gotoAndPlay(page);
+                return;
+            }
+            if (shopScanTicks == 1 || shopScanTicks == 200) {
+                // Name what the clip DOES carry, so one run settles the shape
+                // instead of another blind guess.
+                var names = "";
+                var seen = 0;
+                for (var key in shop) {
+                    if (seen >= 24) break;
+                    names += key + " "; seen++;
+                }
+                arenaLog("shop-no-handlers",
+                    "\"kind\":\"" + shopKind + "\",\"topItem\":" + jnum(shopItem) +
+                    ",\"shopFrame\":" + jnum(shop._currentframe) +
+                    ",\"ticks\":" + shopScanTicks +
+                    ",\"props\":\"" + names + "\"}");
+            }
+            if (shopScanTicks > 900) {
+                arenaLog("shop-unreachable", "\"kind\":\"" + shopKind + "\"");
+                arenaPhase = "shop-leave";
+            }
+            return;
+        }
+        shopItem = offered;
+        shopTries++;
+        // A REAL script-assigned handler, not a replicated button body.
+        shop["item" + shopItem].onRelease();
+        arenaPhase = "shop-answer"; arenaCooldown = 8; return;
+    }
+    if (arenaPhase == "shop-answer") {
+        // The game answers by which page it played: `getitem` means the hero
+        // qualifies, `angry` means it does not. Reading the answer beats
+        // reimplementing the gate.
+        var answering = shopClip(shopKind);
+        if (answering == undefined) return;
+        var shopFrame = Number(answering._currentframe);
+        var getitemFrame = (shopKind == "weapon") ? 147 : 184;
+        if (shopFrame >= getitemFrame) {
+            if (shopConfirm(shopKind)) {
+                arenaLog("shop-bought",
+                    "\"kind\":\"" + shopKind + "\",\"item\":" + jnum(shopItem) +
+                    ",\"cost\":" + jnum(answering.itemcost) +
+                    ",\"weapon\":" + jnum(root.game.hero.weapon) +
+                    ",\"goldLeft\":" + jnum(root.game.hero.goldpieces));
+                arenaPhase = "shop-leave"; arenaCooldown = 10; return;
+            }
+            // Refused on cost: try a cheaper item.
+            shopItem--;
+            arenaPhase = "shop-open"; arenaCooldown = 8; return;
+        }
+        if (shopFrame >= 27 && shopFrame < getitemFrame) {
+            shopItem--;                                    // refused; step down
+            arenaPhase = "shop-open"; arenaCooldown = 8; return;
+        }
+        return;
+    }
+    if (arenaPhase == "shop-leave") {
+        if (shopKind == "weapon") shopKind = "armour";
+        else shopDone = true;
+        root.gotoAndPlay("townsquare");
+        arenaPhase = "town"; arenaCooldown = 25; return;
     }
     if (arenaPhase == "foyer") {
         if (frame != 208) return;

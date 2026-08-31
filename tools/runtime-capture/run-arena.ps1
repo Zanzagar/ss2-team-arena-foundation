@@ -64,6 +64,12 @@ param(
     # lists. The ONLY place the wrapper authors game state; see stepStaging.
     [string] $StageHero = '',
     [string] $StageVillain = '',
+    # Equip through the game OWN purchase path. Gold is the one field no combat
+    # site reads; the shop ids are the HIGHEST to try, stepping down until the
+    # game accepts one.
+    [int] $StageGold = 0,
+    [int] $ShopWeapon = 0,
+    [int] $ShopArmour = 0,
     # Only read when $ArenaCapture is not 'never'; a tape is still required by
     # the launcher, and a non-capturing run is launched passive so the tape can
     # never reach a fight nobody staged.
@@ -169,6 +175,9 @@ $launcherArgs = @(
     '-ArenaStagedLevel', "$ArenaStagedLevel",
     '-StageHero', "`"$StageHero`"",
     '-StageVillain', "`"$StageVillain`"",
+    '-StageGold', "$StageGold",
+    '-ShopWeapon', "$ShopWeapon",
+    '-ShopArmour', "$ShopArmour",
     '-TimeOfDayCeiling', "$TimeOfDayCeiling",
     '-SessionLimitSec', "$SessionLimitSec",
     '-FrameRate', "$FrameRate",
