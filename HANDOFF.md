@@ -231,6 +231,39 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+**All eight currently reachable fixtures pin the identical
+`staminaleft: 105 / staminamax: 110` for BOTH combatants** — the five
+`candidate-armoured-*` and the three `candidate-tournament-*`. It reads as one
+derived constant applied uniformly rather than eight independent derivations.
+
+Five independent live direction-5 hero captures disagree with it, and with each
+other: villain `staminaleft` came back 90, 92, 93, 95, 100 and hero 104, 106,
+106, 108. Nothing else observable diverged, except one run where the villain
+landed a blow first and cost the hero 12 hitpoints — which is the predicted
+consequence of the repaired side guard re-arming rather than a surprise.
+
+Be precise about what "nothing else diverged" covers, because the compared
+projection is narrower than it looks. `matchSs2ObservationToFixture` compares
+the scenario, the ordered samples, the ordered mutations with each reason
+translated to a hook, the semantic events, the result event and the final state.
+**`expected.calculation` and `expected.mutation` are candidate-derived and are
+NOT compared at all** — so the hit chance, roll needed, deflection roll and
+threshold, and critical determination were never checked against the runtime.
+And `/samples` is close to a self-comparison on an injected-tape capture,
+because the wrapper emits the fixture's own tape entry rather than the game's
+call arguments.
+
+What genuinely matched five times over is the mutation trace and the final
+state — the damage write, the armour absorption, and the resulting
+`armourclass`. Those are real game outputs.
+
+So the blocker for all eight is one field, and the question is whether it belongs
+in these fixtures at all. **Do not resolve it by editing the fixtures to the
+observed values.** That is the one move this pipeline exists to refuse. It is a
+map question: does `staminaleft` enter the resolution chain, and is its value at
+the first `checkattackroll` determined by the scenario or by the number of
+approach steps the scenario does not specify?
+
 **The 81 divergence-report digests are unverified, and the obvious fix is
 another assertion that cannot fail.** `ss2-divergence-corpus.test.js` compares
 `record.digest` to `report.observationDigest` only inside
