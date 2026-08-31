@@ -16,9 +16,11 @@ cleanly with no free parameter; 60 do not.** The corpus is about 98% sound, and
 four claims below this line are now WRONG. They are corrected here rather than
 edited away, because each was load-bearing.
 
-**Baseline is 614 tests, 0 failed, 0 skipped** (was 603 before this pass; the
-"602" written below was already stale when written — `20197f2`'s own message says
-603). `github/main` is **`4409ec7`**, not `e3f14aa`: PR #2
+**Baseline is 620 tests, 0 failed, 0 skipped** (614 at the end of the audit pass,
+617 by the end of that session — a number this file was never updated with, so
+every "614" below it was stale on the day it was written; 620 after `2b123b9`.
+Was 603 before the audit pass; the "602" written below was already stale when
+written — `20197f2`'s own message says 603). `github/main` is **`4409ec7`**, not `e3f14aa`: PR #2
 (`design/endless-progression-readiness`) merged after this file was last touched.
 No PR is open for `arena/champion-capture`. `gh` is NOT installed on this machine;
 check PR state with `git ls-remote github "refs/pull/*/head"`.
@@ -94,13 +96,29 @@ check PR state with `git ls-remote github "refs/pull/*/head"`.
   `projectSs2ObservationForComparison` structurally incapable of sharing an
   exclusion with the matcher.
 
+  **Both halves of that were done on 2026-08-31.** The projection split landed in
+  `f2a57c4`. The copy hole is closed in `2b123b9`, and closing it needed
+  something the paragraph above did not see: **no pairwise comparison could ever
+  have caught it**, because copies agree, and agreement is what that gate checks
+  for. It went through the nonce instead. `cc42503` had already made
+  `launchNonce` mandatory at INGEST, but the promotion gate bound only the
+  records that HAPPENED to carry one — so deleting the key from the copy walked
+  past it, which was demonstrated end to end against the committed corpus. Absence
+  is now enumerated: `src/golden/pre-nonce-observations.js` names by digest the 58
+  records that predate the field, the list may only ever shrink, and three tests
+  audit it. **What is still open, and is smaller than what was closed: a forger
+  who MINTS A FRESH NONCE for the copy is refused by none of this.** A nonce off
+  the wrapper is unverifiable text; no repository-side check distinguishes one the
+  player minted from one a person typed.
+
 Also corrected this pass: three circular warrants in the staging docs — including
 `capture-staging.md:318`, which attributed the villain's `100→95` to the HERO's
 five walks, when `+0x32a1..+0x3304` mutate `game_attacker.staminaleft` ONLY, so
 that derivation was impossible — and five wrong rows in the `staminacost` table,
 notably `rest`, which is `0 - round(stamina*15)`, a GAIN, not 0.
 
-Not yet done, in priority order: close the projection/exclusion hazard; re-promote
+Not yet done, in priority order (the projection/exclusion hazard and the copy
+hole that led this list are both closed — see the paragraph above): re-promote
 the four goldens from eligible records (pipeline only, never by hand); correct the
 CONTRADICTED scalars in non-promoted fixtures (7 of 9 misc-a carry a
 strength/damage triple no weapon row in the build produces; two pin an enchantment
@@ -115,7 +133,7 @@ written 16 lines before the game is loaded.
 ## State at the end of the 2026-08-31 session
 
 22 promoted goldens and **no runtime evidence yet for the champion, armoured or
-tournament families**. **614 tests, all passing, 0 skipped** (this paragraph said 602; see the corrections block above) in a capture-bearing
+tournament families**. **620 tests, all passing, 0 skipped** (this paragraph said 602, then 614; see the corrections block above) in a capture-bearing
 worktree.
 
 The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
@@ -126,9 +144,9 @@ history includes `ecf4510` — and the 2026-08-31 session added the commits on
 ### Expected test profiles
 
 - A capture-bearing operator worktree with the complete ignored raw-trace
-  archive runs all **614 tests: 614 passed, 0 skipped, 0 failed**.
-- A fresh clone or worktree with none of those ignored traces runs **614 tests:
-  613 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  archive runs all **620 tests: 620 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **620 tests:
+  619 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
   existence check; the committed observation and divergence integrity checks
   still run.
 - A partial raw-trace archive does **not** skip: it fails and names every
