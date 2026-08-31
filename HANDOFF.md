@@ -231,6 +231,40 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+The blocks below are in reverse order of discovery. Read this list first; the
+ones that change what the next session should DO are marked ►.
+
+► **The promotion gate never compared the two observations to each other.** Now
+  it does, and the gate is DORMANT by measurement (0 of 162 leaves can differ
+  while both still match). It is a precondition for any field exclusion, not a
+  fix. Land no exclusion before it.
+► **A candidate was fitted to an observation, and it predates this session.**
+  `staminaleft` 105 was transcribed after the map predicted 110. The same hero
+  block may have carried it into other fixtures — **audit the corpus before
+  trusting any staged scalar.**
+► **The champion family cannot be captured at all** (hero `attack`/`defence` 3
+  is unreachable; `hitpointsmax` 250 and `staminamax` 150 likewise). Five
+  fixtures join the fifteen impossible-hero ones. Re-derive from the map.
+► **All eight reachable fixtures over-pin `staminaleft`**, which nothing in the
+  resolution chain reads. Fixing it needs a matcher change, which needs the
+  dormant gate above landed first.
+► **The stub is far weaker than the gate implies** — 7 of 15 hook slots have
+  never wrapped in any gate run; `attack_chances`, the production arming point,
+  is exercised 0 times there and ~209 times live.
+- The wrong-side guard read an object the game never writes and was dead on
+  every route. Fixed, and proved to fire in both directions. *(Closed.)*
+- `scenario.attackerSide` is compared against the fixture's own declaration —
+  a self-comparison — and the wrapper's real observation of who swung is
+  discarded before ingest.
+- The 81 divergence-report digests are unverified, and the obvious repair is
+  itself an assertion that cannot fail.
+- Hook attribution forgery. *(Closed this session.)*
+
+Three claims I recorded during the session were wrong and are corrected in
+place: that the wrong-side defect was arena-specific; that `if (attacker ==
+undefined) return false` was the fix; and that 105 was arithmetically
+unreachable. Each correction sits with the block it belongs to.
+
 **Correction to my own entry above, and the transcription charge is CONFIRMED
 while my reasoning for it was wrong.**
 
