@@ -71,10 +71,65 @@ by a plan.
   discipline is absolute: a candidate fitted to an observation makes its own
   confirmation meaningless.
 
-## Sizing
+## Sizing: the limit is structural, not budgetary
 
-Agents on this project have run 150k–380k tokens each. A twelve-agent fan-out
-is roughly 2–4M tokens. Budget accordingly against the weekly allowance, and
-prefer fewer agents with sharper briefs over more with vague ones — every
-high-value finding so far came from a brief that named the specific claim to
-attack.
+With no cap on agent count, the binding constraint becomes **exclusive file
+ownership**. Two writers on one file corrupt each other's work, and the moment
+tracks are invented to fill a quota their briefs go vague — and a vague brief is
+where the value collapses. Every high-value finding on this project came from a
+brief that named the specific claim to attack.
+
+That gives two different ceilings:
+
+**Writers are capped by the file graph.** The repository has roughly thirty
+source files, twenty test files and fifteen documents, and a track needs a
+coherent slice of them plus the tests that pin it. That supports something like
+**ten to twelve** genuinely disjoint writer tracks. Beyond that the slices stop
+being coherent.
+
+**Adversarial verifiers have no such cap, because they write nothing.** They
+cannot conflict with a writer or with each other, so they can be run as widely
+as there are sharp questions to ask — and running SEVERAL independent auditors
+against the SAME target is a quality technique rather than duplication, because
+each brings a different lens and the overlap is the check. This project's two
+most valuable findings both came from an auditor told plainly to try to break a
+specific named claim:
+
+- "the campaign store is vanilla-safe" — broken, with a demonstrated
+  data-destruction path;
+- "the adapter decides no combat, enforced by shape" — broken with five
+  combat-deciding edits that left the whole suite green.
+
+So the shape of a large overnight run is **~10 writers on disjoint slices, plus
+as many write-nothing auditors as there are load-bearing claims worth
+attacking**, each given one claim by name. Twenty agents total is comfortable.
+Forty is possible if the extra ones are auditors with genuinely distinct
+questions, and pointless if they are auditors with the same question.
+
+Cost, for planning: agents here have run 150k–380k tokens each, so twenty is
+roughly 3–6M.
+
+### Claims worth handing to an auditor, one each
+
+Each of these is currently asserted somewhere and load-bearing. None has been
+independently attacked since it was written.
+
+1. "A candidate becomes golden only via two matching observations from two
+   independent sessions" — attack the promotion gate and the independence check.
+2. "The wrapper never decides an outcome; it only presses the game's own entry
+   points" — attack the autopilot, the navigator and the staging code against
+   the byte map.
+3. "Ingest refuses a mis-staged scenario" — attack `capture-ingest.js` chain
+   validation with deliberately malformed traces.
+4. "The 22 goldens are byte-identical and their provenance is intact" — verify
+   every golden's manifest digest and cited observations actually resolve, as
+   the earlier seven-goldens-citing-nothing defect did not.
+5. "`validate-vehicle.ps1` passing means the wrapper is sound" — establish what
+   the stub round trip does NOT cover.
+6. "The arena route cannot corrupt the save" — attack every write path in
+   `ss2-capture-wrapper.as` and `run-arena.ps1`.
+7. "Parallel capture cannot touch the licensed save" — attack the isolation,
+   the seed assertion and the pid handling.
+8. "The AVM1 `isNum` guard is used everywhere it is needed" — find every
+   remaining bare `>=`, `<=` or `!=` on a value read out of the game. This trap
+   has now caused three separate live defects.
