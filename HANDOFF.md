@@ -185,6 +185,31 @@ on `fightMode` (the fixtures carry it now).
 
 ---
 
+## The design track is deliberately quarantined
+
+A separate track researches endless progression, on branch
+`design/endless-progression` (PR #1), and it now carries a complete proposed
+Arena Circuit progression, loot, inventory, opponent and settlement design.
+
+**Design must never flow into candidate authoring.** A candidate fitted to a
+design is a candidate fitted to a hypothesis, and the capture that "confirms" it
+confirms a fit rather than a prediction — which is the one failure this whole
+pipeline exists to prevent. The rule is not that the two tracks disagree; it is
+that the measuring instrument must not be shaped by what anyone hopes to
+measure. Read the design if you are working on the design. Do not read it while
+authoring a fixture.
+
+This omission is mine: the rule was in the previous handoff and I dropped it
+when rewriting this file, at exactly the moment the design track grew from a
+brief into a full proposal.
+
+**Repository naming.** The GitHub repo was renamed to
+`Zanzagar/swords-and-sandals-2-multiplayer`; the `github` remote already points
+at the new URL. The local worktree directories and the `origin` bundle keep the
+old `ss2-team-arena-foundation` name **intentionally** — do not rename them or
+hand-edit worktree metadata. `package.json` still carries the old identity on
+`main`; the migration is part of PR #1 and lands when that merges.
+
 ## Working agreement for parallel agents
 
 Exclusive file ownership stated in every prompt; no agent runs a state-mutating
