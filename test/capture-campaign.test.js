@@ -754,11 +754,20 @@ test("promotable is false when both matching observations come from the same ses
   // Both records are eligible (neither is dir6's `authoredFrom`), so the only
   // thing left for the gate to object to is the shared session — which is what
   // this test is about.
+  //
+  // The variants carry DISTINCT nonces. Editing a committed record re-seals its
+  // digest, which drops it off the enumerated pre-nonce waiver in
+  // src/golden/pre-nonce-observations.js — so leaving them nonce-free would put
+  // the gate's nonce refusal in front of the session refusal and this test would
+  // pass on the wrong error. Two launches sharing one operator-chosen sessionId
+  // is also the honest shape of what is being asserted.
   const first = observationVariant("obs-camp2", (record) => {
     record.capture.sessionId = "session-shared";
+    record.capture.launchNonce = "801-1122334455";
   });
   const second = observationVariant("obs-gold3", (record) => {
     record.capture.sessionId = "session-shared";
+    record.capture.launchNonce = "802-5544332211";
   });
 
   const { campaign: sandbox } = await createCampaignSandbox({

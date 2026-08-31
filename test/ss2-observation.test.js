@@ -93,12 +93,32 @@ function hookForFixtureReason(fixture, reason, path) {
   return table[reason] ?? "unattributed";
 }
 
-/** A record shaped exactly as ingestion would emit for a matching capture. */
+/**
+ * A record shaped exactly as ingestion would emit for a matching capture.
+ *
+ * Every record carries a `capture.launchNonce` by default, distinct per
+ * observation id. This helper claims to model what ingest emits, and since
+ * `cc42503` ingest REFUSES an `injected-tape-runtime` trace that omits the
+ * nonce — so a nonce-free record here modelled a wrapper that cannot exist, the
+ * same defect the samples comment below records. It mattered for the same
+ * reason: a helper that mints them for free makes every promotion test rehearse
+ * the one shape the promotion gate now has to refuse.
+ *
+ * Pass `launchNonce: null` to omit the field deliberately — the pre-nonce
+ * shape, which only the enumerated legacy records may still promote under.
+ */
 function observationFromFixture(fixture, overrides = {}) {
+  const observationId = overrides.observationId ?? "obs-a";
+  // Deterministic, distinct per id, and shaped like a real one ("261-1951330494"):
+  // the player mints it, so two records only share one by being one launch.
+  const launchNonce = Object.hasOwn(overrides, "launchNonce")
+    ? overrides.launchNonce
+    : `${[...observationId].reduce((hash, character) => (hash * 31 + character.codePointAt(0)) % 997, 7)}-` +
+      `${[...observationId].reduce((hash, character) => (hash * 131 + character.codePointAt(0)) % 2147483647, 11)}`;
   const record = {
     schemaVersion: 1,
     kind: "ss2-1v1-observation",
-    observationId: overrides.observationId ?? "obs-a",
+    observationId,
     build: cloneJson(fixture.build),
     capture: {
       sessionId: overrides.sessionId ?? "session-a",
@@ -107,7 +127,8 @@ function observationFromFixture(fixture, overrides = {}) {
       observedAt: overrides.observedAt ?? "2026-08-30T17:00:00Z",
       installHashVerifiedBefore: true,
       installHashVerifiedAfter: true,
-      mutationGranularity: "property-watch"
+      mutationGranularity: "property-watch",
+      ...(launchNonce === null ? {} : { launchNonce })
     },
     target: { fixtureId: fixture.fixtureId },
     scenario: cloneJson(fixture.scenario),

@@ -2,12 +2,13 @@
  * Promotion gate from static candidate fixtures to runtime-observed goldens.
  *
  * A candidate is promoted only when at least two matching observations from
- * at least two independent capture sessions exist, no two of them share a
- * player-minted `capture.launchNonce`, they agree about whether the wrapper
- * staged the scenario, every observation is covered by a validated capture
- * manifest, and each observation's digest verifies. Any divergent observation
- * blocks promotion and yields a divergence report that must be preserved
- * instead of discarded.
+ * at least two independent capture sessions exist, every one of them carries a
+ * player-minted `capture.launchNonce` (or is one of the enumerated records
+ * that predate the field), no two of them share a nonce, they agree about
+ * whether the wrapper staged the scenario, every observation is covered by a
+ * validated capture manifest, and each observation's digest verifies. Any
+ * divergent observation blocks promotion and yields a divergence report that
+ * must be preserved instead of discarded.
  *
  * A golden promoted from wrapper-staged evidence carries that fact in
  * `provenance.staged`, so the fixture says so on its own face rather than
@@ -23,6 +24,7 @@ import {
   sha256OfCanonicalJson,
   validateSs2Observation
 } from "./observation.js";
+import { SS2_PRE_NONCE_OBSERVATION_DIGESTS } from "./pre-nonce-observations.js";
 import {
   GoldenClassification,
   GoldenProvenance,
@@ -279,10 +281,23 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   // launchNonce -> the first observation that claimed it. The nonce is minted
   // inside the player, from values the launcher does not supply, so two records
   // agreeing on one came from a single launch however different their
-  // operator-chosen sessionIds look. Legacy records carry no nonce (the field
-  // was validated and discarded before it was carried into the record), and
-  // they must still promote — so this gate binds only observations that
-  // actually carry one, and says nothing about the ones that do not.
+  // operator-chosen sessionIds look.
+  //
+  // This map used to be the whole of the rule, and binding only the records
+  // that HAPPENED to carry a nonce made it optional for exactly the person it
+  // was aimed at. The forgery: copy a record, change the observation and
+  // session ids, delete the nonce from the copy. Two ids, two sessionIds, no
+  // shared nonce, byte-identical comparison projections — and a golden claiming
+  // two independent confirmations of a single run. Nothing else in the pipeline
+  // can see it. The pairwise gate below CHECKS FOR agreement, so two copies are
+  // exactly what it is looking for; the matcher is satisfied by both for the
+  // same reason it was satisfied by the original; the manifest is hand-authored
+  // and will attest two sessions as readily as one.
+  //
+  // So absence is now enumerated rather than tolerated. See
+  // ./pre-nonce-observations.js for the closed list, and for what this still
+  // does NOT close — a forger who mints a fresh nonce for the copy is refused
+  // by none of this.
   const nonceOwners = new Map();
   // The staging claim -> the first observation that made it. The key is the
   // declaration string, or `null` for "the wrapper staged nothing", which is
@@ -368,7 +383,19 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     observationIds.add(observation.observationId);
     sessionIds.add(observation.capture.sessionId);
     const launchNonce = observation.capture.launchNonce;
-    if (launchNonce !== undefined) {
+    if (launchNonce === undefined) {
+      if (!SS2_PRE_NONCE_OBSERVATION_DIGESTS.has(observation.digest)) {
+        defer(new PromotionError(
+          `Observation ${observation.observationId} carries no capture.launchNonce and is not one of ` +
+          "the records that predate the field. The nonce is the only identity on a record that the " +
+          "operator did not choose, so a record without one can be copied into a second session for " +
+          "free — which is the forgery the nonce exists to refuse. Ingest has required it on every " +
+          "injected-tape-runtime trace since cc42503, so a capture taken with the current tooling " +
+          "always carries one; re-capture rather than promoting this. The pre-nonce waiver is the " +
+          "closed digest set in src/golden/pre-nonce-observations.js, and it may only ever shrink."
+        ));
+      }
+    } else {
       const owner = nonceOwners.get(launchNonce);
       if (owner !== undefined) {
         defer(new PromotionError(
