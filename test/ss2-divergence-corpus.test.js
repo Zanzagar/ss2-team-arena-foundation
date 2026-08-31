@@ -90,6 +90,40 @@ const PROBE_ARMS_WITHOUT_DIVERGENCE = Object.freeze(new Set([
   "candidate-probe-armour-removal-gate-above"
 ]));
 
+/**
+ * The archive layout `captures/README.md` documents, and the one the raw-trace
+ * check below derives.
+ *
+ * Pinned against the committed README rather than restated here alone, so a
+ * layout change has to move both, and so `CAPTURES_DIR` can be anchored on a
+ * file whose CONTENT identifies it. Existence alone is not enough: a
+ * `CAPTURES_DIR` that accidentally resolved to the repository root would find a
+ * `README.md` there too.
+ */
+const ARCHIVE_LAYOUT = "captures/<session-id>/<observation-id>.jsonl";
+
+/**
+ * Directories under `captures/` that hold tool output rather than session
+ * evidence, with the tool that writes each:
+ *
+ * - `vehicle-check/` — `tools/runtime-capture/validate-vehicle.ps1:35`, which
+ *   HANDOFF.md mandates after ANY wrapper edit. A fresh clone therefore
+ *   acquires `.jsonl` files here BEFORE it acquires any capture evidence, which
+ *   is why "captures/ holds no .jsonl at all" is the wrong emptiness test.
+ * - `wrapper/` — the same gate's earlier output location.
+ * - `simulated/` — `tools/capture-session.mjs:191`, the `--simulate` dry run,
+ *   which needs no licensed build and can be run anywhere.
+ *
+ * This set is an accommodation and is kept narrow and visible on purpose. It is
+ * held honest by an assertion below: no name here may collide with a committed
+ * report's `sessionId`, so it can never swallow real evidence.
+ */
+const NON_SESSION_CAPTURE_DIRS = Object.freeze(new Set([
+  "simulated",
+  "vehicle-check",
+  "wrapper"
+]));
+
 /** The four-direction band an attack-direction belongs to. */
 function bandOf(direction) {
   if (direction >= 1 && direction <= 4) return "quick";
@@ -130,6 +164,56 @@ async function loadJsonIfPresent(filePath) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
+}
+
+async function loadTextIfPresent(filePath) {
+  try {
+    return await readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function directoryExists(dirPath) {
+  try {
+    return (await stat(dirPath)).isDirectory();
+  } catch (error) {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+/** The file's size in bytes, or `null` when nothing readable is at that path. */
+async function fileSizeIfPresent(filePath) {
+  try {
+    const stats = await stat(filePath);
+    return stats.isFile() ? stats.size : null;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+/**
+ * Every `.jsonl` under `captures/`, as `{ relative, top }`.
+ *
+ * Deliberately NO ENOENT tolerance. The two helpers above swallow ENOENT, and
+ * copying that idiom here would make this scan blind to exactly the fault it
+ * exists to detect: a wrong `CAPTURES_DIR` would list nothing, "the archive is
+ * empty" would be satisfied, and the guard would skip for the same reason it
+ * always did. The caller anchors `CAPTURES_DIR` on the committed README first,
+ * so a root that cannot be listed here is a real fault and must be loud.
+ */
+async function archivedTraceFiles(root) {
+  const entries = await readdir(root, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+    .map((entry) => {
+      const relative = path.relative(root, path.join(entry.parentPath ?? entry.path, entry.name));
+      return { relative, top: relative.split(path.sep)[0] };
+    })
+    .sort((left, right) => (left.relative < right.relative ? -1 : 1));
 }
 
 const reportFileNames = (await readdir(DIVERGENCE_DIR))
@@ -226,12 +310,41 @@ test("every report names an observation the repo can account for", async () => {
   // fixture-relative (its scenario projection and `target.fixtureId` come from
   // the fixture), so the same raw trace ingested against two fixtures yields
   // two different digests, and requiring equality across them would be wrong.
-  let withRecord = 0;
+  //
+  // Which reports MUST resolve to a record is derived from a LISTING of the
+  // observation directory, independently of the per-report lookup below, so the
+  // two disagree if `OBSERVATION_DIR` is wrong. The line this replaces was
+  // `withRecord + (reports.length - withRecord) === reports.length` — an
+  // algebraic identity that holds for every integer, and which an audit
+  // confirmed still passed with the entire observation directory moved aside.
+  // Every substantive assertion in this loop sits behind `if (!record)`, so
+  // that identity was the only thing closing a test whose name claims the repo
+  // can account for every report.
+  const committedRecordIds = new Set(
+    (await readdir(OBSERVATION_DIR))
+      .filter((fileName) => fileName.endsWith(".json"))
+      .map((fileName) => fileName.slice(0, -".json".length))
+  );
+  assert.ok(
+    committedRecordIds.size > 0,
+    "no committed observation records were listed, so OBSERVATION_DIR is wrong or the records are gone"
+  );
+  const expectRecord = reports
+    .filter(({ report }) => committedRecordIds.has(report.observationId))
+    .map(({ report }) => report.observationId)
+    .sort();
+  assert.ok(
+    expectRecord.length > 0,
+    "no committed observation record shares an id with any divergence report, so every per-report " +
+    "assertion below is skipped and this test constrains nothing"
+  );
+
+  const resolved = [];
   let sameTarget = 0;
   for (const { fileName, report } of reports) {
     const record = await loadJsonIfPresent(path.join(OBSERVATION_DIR, `${report.observationId}.json`));
     if (!record) continue;
-    withRecord += 1;
+    resolved.push(report.observationId);
     assert.equal(validateSs2Observation(record), record, report.observationId);
     assert.equal(
       record.capture.sessionId,
@@ -247,14 +360,23 @@ test("every report names an observation the repo can account for", async () => {
       );
     }
   }
-  assert.equal(
-    withRecord + (reports.length - withRecord),
-    reports.length,
-    "every report is either backed by a committed record or preserved only as a report"
+  assert.deepEqual(
+    resolved.sort(),
+    expectRecord,
+    "the reports that resolved to a committed observation record are not the ones a listing of " +
+    `${path.relative(REPO_ROOT, OBSERVATION_DIR)} says should have resolved. Either the per-report ` +
+    "path derivation is wrong, or a record was added or removed while this ran"
   );
-  assert.ok(
-    sameTarget <= withRecord,
-    "internal: same-target records are a subset of records"
+  assert.equal(
+    sameTarget,
+    0,
+    "a committed observation record now targets the very fixture a divergence report says it " +
+    "diverged from. That pair should not be able to exist — a report is written BECAUSE the " +
+    "observation did not match that fixture — which is why the digest equality above has never " +
+    "once executed against the committed corpus. This assertion replaces a tautology " +
+    "(`sameTarget <= withRecord`, guaranteed because sameTarget only increments inside the " +
+    "withRecord branch) so the dead branch is visible rather than hidden. If this line fails the " +
+    "branch finally has teeth: read the pair, then update this assertion deliberately"
   );
 });
 
@@ -262,20 +384,50 @@ test("no preserved divergence contradicts a promotion", async () => {
   // The corpus and the goldens read the same evidence. If a golden cites an
   // observation as one of its two matching repetitions, no report may claim
   // that same observation diverged from the candidate it was promoted from.
-  let checked = 0;
+  //
+  // As above, which reports SHOULD be checked is derived from a listing of the
+  // golden directory rather than from the per-report lookup, so a wrong
+  // `GOLDEN_DIR` fails instead of quietly reducing the loop to nothing. The
+  // floor this replaces was `checked > 0`, which one surviving golden satisfies.
+  const goldenIds = new Set(
+    (await readdir(GOLDEN_DIR))
+      .filter((fileName) => fileName.endsWith(".json"))
+      .map((fileName) => fileName.slice(0, -".json".length))
+  );
+  assert.ok(
+    goldenIds.size > 0,
+    "no promoted goldens were listed, so GOLDEN_DIR is wrong or the goldens are gone"
+  );
+  const goldenIdFor = (fixtureId) => `golden-${fixtureId.slice("candidate-".length)}`;
+  const expectChecked = reports
+    .filter(({ report }) => report.fixtureId.startsWith("candidate-") && goldenIds.has(goldenIdFor(report.fixtureId)))
+    .map(({ fileName }) => fileName)
+    .sort();
+  assert.ok(
+    expectChecked.length > 0,
+    "no committed golden shares a candidate id with any divergence report, so this test would " +
+    "compare nothing against a promotion"
+  );
+
+  const checked = [];
   for (const { fileName, report } of reports) {
     if (!report.fixtureId.startsWith("candidate-")) continue;
-    const goldenId = `golden-${report.fixtureId.slice("candidate-".length)}`;
+    const goldenId = goldenIdFor(report.fixtureId);
     const golden = await loadJsonIfPresent(path.join(GOLDEN_DIR, `${goldenId}.json`));
     if (!golden) continue;
-    checked += 1;
+    checked.push(fileName);
     assert.ok(
       !golden.provenance.observationIds.includes(report.observationId),
       `${fileName}: ${goldenId} cites ${report.observationId} as MATCHING evidence, but this report ` +
       "preserves it as a divergence — one of the two is wrong"
     );
   }
-  assert.ok(checked > 0, "no report was checked against a promoted golden");
+  assert.deepEqual(
+    checked.sort(),
+    expectChecked,
+    "the reports checked against a promoted golden are not the ones a listing of " +
+    `${path.relative(REPO_ROOT, GOLDEN_DIR)} says should have been checked`
+  );
 });
 
 test("the probe corpus is the direction lottery and nothing else", () => {
@@ -337,24 +489,148 @@ test("each probe report's raw trace is still archived", async (t) => {
   // evidence is. Raw trace entries under `captures/` are gitignored, but the
   // directory itself contains a committed README, so directory existence does
   // not distinguish an operator archive from a fresh clone.
+  //
+  // Why the skip guard is three checks and not one
+  // ----------------------------------------------
+  // This guard used to be `if (found === 0) t.skip()`, where `found` counted
+  // successful lookups of `CAPTURES_DIR/<sessionId>/<observationId>.jsonl`. Every
+  // component of that path is a constant the guard never validated, so ANY error
+  // in deriving it drove `found` to 0 — the same value a fresh clone produces.
+  // An audit reproduced it three times with one-character edits on this
+  // capture-bearing machine (`captures` -> `capture`, `".."` -> `"."`, `.jsonl`
+  // -> `.json`); each drove `found` to 0 and took the skip branch, which exits 0
+  // and reports the same "583 passed / 1 skipped" HANDOFF.md documents as the
+  // expected FRESH-CLONE profile. The only thing separating a broken lookup from
+  // an absent archive was a human remembering which machine they were on.
+  //
+  // It is also not enough to scan `captures/` for `.jsonl` before skipping. That
+  // scan uses the same root, so a wrong `CAPTURES_DIR` blinds the fix exactly as
+  // it blinded the guard; and `captures/` is a live working directory, so "holds
+  // no .jsonl at all" is false on a fresh clone the moment someone runs
+  // `validate-vehicle.ps1`, which HANDOFF.md mandates after any wrapper edit.
+  //
+  // So: anchor the root on committed content, then census the archive two ways
+  // that fail differently, and refuse to skip unless both say the archive is
+  // genuinely absent.
+  assert.ok(probeReports.length > 0, "there are no probe reports whose raw trace could be checked");
+
+  // 1. Anchor. `captures/README.md` is the ONLY path under captures/ that git
+  //    tracks (`.gitignore`: `captures/*`, `!captures/README.md`), so it is
+  //    present in a fresh clone AND on an operator machine — precisely the
+  //    discrimination this test needs. Its absence is a derivation fault, never
+  //    an empty archive. Content is checked too, so a CAPTURES_DIR that landed
+  //    on some other directory holding a README cannot satisfy this.
+  const readmePath = path.join(CAPTURES_DIR, "README.md");
+  const readmeRelative = path.relative(REPO_ROOT, readmePath);
+  const readme = await loadTextIfPresent(readmePath);
+  assert.ok(
+    readme !== null,
+    `${readmeRelative} does not resolve, so CAPTURES_DIR is derived wrongly. That file is committed ` +
+    "and therefore present in every clone, so its absence cannot mean 'this machine has no archive'"
+  );
+  assert.ok(
+    readme.includes(ARCHIVE_LAYOUT),
+    `${readmeRelative} no longer documents the layout '${ARCHIVE_LAYOUT}', which is the layout this ` +
+    "test derives. Either CAPTURES_DIR resolves to the wrong directory, or the archive layout moved " +
+    "and this test's path derivation has to move with it"
+  );
+
+  // The exempt working directories may never shadow a real session directory.
+  const shadowed = probeReports
+    .map(({ report }) => report.sessionId)
+    .filter((sessionId) => NON_SESSION_CAPTURE_DIRS.has(sessionId))
+    .sort();
+  assert.deepEqual(
+    shadowed,
+    [],
+    "a probe report's sessionId collides with a directory NON_SESSION_CAPTURE_DIRS exempts from the " +
+    "evidence census, so that report's traces would be discounted as tool output"
+  );
+
+  // 2. Two censuses over the same reports, derived differently. The session
+  //    directory census uses only CAPTURES_DIR + `report.sessionId`; the trace
+  //    census adds `<observationId>.jsonl`. A fault in the filename half moves
+  //    one and not the other.
   let found = 0;
+  let sessionDirsFound = 0;
   const missing = [];
+  const unresolved = [];
   for (const { report } of probeReports) {
-    const tracePath = path.join(CAPTURES_DIR, report.sessionId, `${report.observationId}.jsonl`);
-    if (await exists(tracePath)) found += 1;
-    else missing.push(path.relative(REPO_ROOT, tracePath));
+    const sessionDir = path.join(CAPTURES_DIR, report.sessionId);
+    const tracePath = path.join(sessionDir, `${report.observationId}.jsonl`);
+    const relative = path.relative(REPO_ROOT, tracePath);
+    if (await directoryExists(sessionDir)) sessionDirsFound += 1;
+    // A zero-byte trace satisfies existence and regenerates nothing, so size is
+    // the check, not existence.
+    const size = await fileSizeIfPresent(tracePath);
+    if (size === null) {
+      missing.push(relative);
+      unresolved.push(relative);
+    } else if (size === 0) {
+      missing.push(`${relative} (present but empty, so it regenerates nothing)`);
+    } else {
+      found += 1;
+    }
   }
+
+  // 3. Whole-tree `.jsonl` census, run unconditionally so it is exercised on
+  //    the operator machine rather than only on the path that skips.
+  const archived = await archivedTraceFiles(CAPTURES_DIR);
+  const evidence = archived.filter((entry) => !NON_SESSION_CAPTURE_DIRS.has(entry.top));
+  const exemptNames = [...NON_SESSION_CAPTURE_DIRS].sort().join(", ");
+
   if (found === 0) {
+    const suspects = [];
+    if (sessionDirsFound > 0) {
+      suspects.push(
+        `${sessionDirsFound} of the ${probeReports.length} expected probe SESSION DIRECTORIES do ` +
+        "exist under captures/, so the archive is on this machine and the <observation-id>.jsonl " +
+        "half of the derived path is what failed"
+      );
+    }
+    if (evidence.length > 0) {
+      suspects.push(
+        `captures/ holds ${evidence.length} .jsonl file(s) outside the non-session working ` +
+        `directories (${exemptNames}), so this machine has capture evidence and the expected ` +
+        "probe traces should have resolved"
+      );
+    }
+    const sample = (items) => (items.length === 0 ? "    (none)" : `    ${items.slice(0, 5).join("\n    ")}`);
+    assert.deepEqual(
+      suspects,
+      [],
+      "None of the expected probe raw traces resolved, but captures/ is not an empty archive. The " +
+      "PATH DERIVATION is the suspect, not evidence retention:\n" +
+      `  derived layout: ${ARCHIVE_LAYOUT}\n` +
+      `  expected, did not resolve (${unresolved.length} of ${probeReports.length}; first 5):\n` +
+      `${sample(unresolved)}\n` +
+      `  .jsonl actually present under captures/ (${archived.length}; first 5):\n` +
+      `${sample(archived.map((entry) => path.join("captures", entry.relative)))}\n` +
+      "  why this is not an absent archive:\n" +
+      `    ${suspects.join("\n    ")}`
+    );
+    // Say what was positively verified, so the skip line is self-evidencing
+    // rather than an assertion of ignorance a reader has to take on trust.
     t.skip(
-      "none of the expected ignored probe raw traces are present; " +
-      "raw-trace existence cannot be checked from this clone"
+      `${readmeRelative} resolved and documents '${ARCHIVE_LAYOUT}', so CAPTURES_DIR is right; ` +
+      `0 of ${probeReports.length} probe session directories and 0 of ${probeReports.length} probe ` +
+      `raw traces are present; captures/ holds ${archived.length} .jsonl file(s), none of them ` +
+      `capture evidence (anything present is tool output under ${exemptNames}). This clone has no ` +
+      "probe archive, so raw-trace retention cannot be checked here"
     );
     return;
   }
+
   assert.deepEqual(
     missing,
     [],
     "a preserved probe divergence has no surviving raw trace, so it can no longer be regenerated"
   );
   assert.equal(found, probeReports.length);
+  assert.equal(
+    sessionDirsFound,
+    probeReports.length,
+    "every probe raw trace resolved, but the independently derived session-directory census " +
+    "disagrees about how many session directories exist — the two derivations must agree"
+  );
 });

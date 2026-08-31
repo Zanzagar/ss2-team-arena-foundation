@@ -789,6 +789,55 @@ test("the nearest declaration wins, and the merge is shallow", () => {
 });
 
 /**
+ * The one combination the tests above leave open, and the one a per-slot
+ * *adapter* actually needs: a team-level ARRAY entry and that same slot's
+ * marker, composing on one slot.
+ *
+ * The tests above cover the array alone, the marker alone, and an object
+ * template under a marker. They never put an array entry and a marker on the
+ * same slot — which is exactly the shape a caller who declares
+ * `aiFill: [...]` for names and stats gets once a layer above supplies each
+ * filled slot's resource bag on the marker. If the array entry were displaced
+ * by the marker rather than merged under it, that caller's declaration would
+ * vanish silently, which is the failure mode the module header calls "a fill
+ * field that vanishes is how an AI ally ends up fighting as somebody else".
+ */
+test("a per-slot array entry and that slot's own marker compose, with the marker nearest", () => {
+  const battle = createTeamBattle({
+    seed: 3,
+    teams: [
+      {
+        id: "red",
+        slots: 3,
+        combatants: [
+          brute("r1", 40),
+          // Slot 2: the array entry names the fighter, the marker supplies the
+          // one key the array entry left open.
+          { fill: "ai", resources: { armourclass: 44 } },
+          // Slot 3: both declare `resources`, so the nearer one wins outright.
+          { fill: "ai", resources: { armourclass: 12 } }
+        ],
+        aiFill: [
+          null,
+          { name: "Vanguard", stats: { agility: 7 } },
+          { name: "Skirmisher", resources: { armourclass: 99, staminaleft: 30 } }
+        ]
+      },
+      { id: "blue", combatants: [brute("b1", 20)] }
+    ]
+  });
+  const [, vanguard, skirmisher] = battle.teams[0].combatants;
+  // The array entry survives the marker instead of being displaced by it.
+  assert.deepEqual([vanguard.name, skirmisher.name], ["Vanguard", "Skirmisher"]);
+  assert.equal(vanguard.stats.agility, 7);
+  assert.equal(resourceValue(vanguard, "armourclass"), 44);
+  // Where both declare the key, the marker wins — and the merge is shallow, so
+  // the array entry's whole bag is replaced rather than merged into.
+  assert.equal(resourceValue(skirmisher, "armourclass"), 12);
+  assert.deepEqual(resourceNames(skirmisher), ["armourclass"]);
+});
+
+/**
  * THE DEFECT THIS CLOSES.
  *
  * Two AI-filled slots on one team, each mirroring a different gladiator, each
