@@ -1972,18 +1972,55 @@ function captureAllowedNow() {
     // BOTH combatants, and on the arena route the villain fights back - so the
     // first call with a numeric attack_direction is not guaranteed to be the
     // hero's. `attackerSide` is a launcher FlashVar the game never sees, so
-    // arming on the villain's swing would file a trace labelled "hero" that
-    // ingest has no way to contradict: a false observation, which is worse than
-    // no observation.
-    var attacker = gameRoot().game_attacker;
-    if (attacker != undefined) {
-        var isHero = (attacker == gameRoot().game.hero);
-        var claimed = (config.attackerSide == "hero");
-        if (isHero != claimed) {
-            dbg("capture-refused-wrong-side");
-            return false;
-        }
+    // arming on the villain's swing files a trace labelled "hero" that ingest
+    // has no way to contradict: a false observation, which is worse than no
+    // observation.
+    //
+    // THIS GUARD WAS DEAD ON EVERY ROUTE UNTIL NOW, AND IT WAS MEASURED DEAD.
+    // It read gameRoot().game_attacker - _level1.game_attacker - and the game
+    // never writes that path. All 296 game_attacker references in the build
+    // live inside sprite:862[overlay] frames 1 and 52, and the only two writes
+    // are bare SetVariable instructions inside changeCombatants
+    // (DoAction@0x240c7f +0x2ba2 villain, +0x2c18 hero). A bare SetVariable in
+    // AVM1 resolves up the scope chain and stops at the clip that defined the
+    // function, so the value lives on the OVERLAY CLIP - the same object every
+    // hook slot is read from, and the same object attack_direction is read from
+    // at arming time in all 193 armed sessions.
+    //
+    // The cost of the wrong path was not theoretical: across 268 archived
+    // rufflelogs, `capture-refused-wrong-side` appears ZERO times, while nine of
+    // twenty live arena rounds demonstrably recorded the villain's swing under
+    // a "hero" label. (HANDOFF previously said six such refusals existed in
+    // older prisoner captures and that the defect was arena-specific. Both were
+    // wrong: those six matches are in compiled wrapper SOURCE copies, not in
+    // any trace, and the defect was universal.)
+    //
+    // Now FAIL-CLOSED, and that costs no session. changeCombatants binds
+    // game_attacker before checkattackroll's body begins - it runs at overlay
+    // frame 52 top level (+0x318c) and again inside nextphase (+0x3646,
+    // +0x366d), always before the turn's action - so an unresolved attacker
+    // means something is wrong, not that the answer is pending. And a refusal
+    // latches nothing: beginAction tests this BEFORE setting actionCaptured,
+    // and tappedRandom serves the tape only while armed, so the wrapper simply
+    // arms on the hero's next attack in the same bout.
+    var ov = overlayClip();
+    var attacker = (ov == undefined) ? undefined : ov.game_attacker;
+    var isHero = (attacker != undefined && attacker == gameRoot().game.hero);
+    var isVillain = (attacker != undefined && attacker == gameRoot().game.villain);
+    // Both false means unresolved; both true is impossible unless hero and
+    // villain are the same object. Either way the identity is not established.
+    if (isHero == isVillain) {
+        dbg("capture-refused-attacker-unresolved");
+        return false;
     }
+    if (isHero != (config.attackerSide == "hero")) {
+        dbg("capture-refused-wrong-side");
+        return false;
+    }
+    // Not decoration: this is how the next operator can tell the guard RESOLVED
+    // the side from how it looked when it was silently resolving nothing. A run
+    // whose log carries no attacker-resolved line has a dead guard again.
+    dbg("attacker-resolved-" + (isHero ? "hero" : "villain"));
     if (!arenaMode) return true;
     if (arenaCaptureMode == "always") return true;
     if (arenaCaptureMode == "champion") {

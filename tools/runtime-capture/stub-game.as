@@ -49,6 +49,20 @@ arena.gladiators.createEmptyMovieClip("overlay", 40000);
 var stubRoot = this;
 var ov = arena.gladiators.overlay;
 ov.attack_direction = 5;
+// The attacker identity, on the OVERLAY CLIP - which is where vanilla puts it.
+// changeCombatants writes game_attacker/game_defender with bare SetVariable
+// instructions (DoAction@0x240c7f +0x2ba2 villain, +0x2c18 hero), and a bare
+// SetVariable in AVM1 resolves up the scope chain to the clip that defined the
+// function, so the value lands on the overlay rather than on _level1.
+//
+// The stub omitted this entirely, which is why it could not exercise
+// captureAllowedNow's side guard at all. That mattered: the guard read the
+// WRONG path for its whole life, was dead in all 268 archived captures, and
+// this gate never noticed - the one thing the gate is run after every wrapper
+// edit to catch. A stub that omits the field a guard reads cannot test the
+// guard, and its silence reads exactly like a pass.
+ov.game_attacker = stubRoot.game.hero;
+ov.game_defender = stubRoot.game.villain;
 _global.fight_mode = "misc";
 
 ov.randomBetween = function (a, b) {
