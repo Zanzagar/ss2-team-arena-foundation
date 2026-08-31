@@ -96,7 +96,11 @@ param(
     # mutates charisma, magicka or gold and then saves it. 0 leaves the
     # wrapper's own defaults (150 and 900s).
     [int] $TimeOfDayCeiling = 0,
-    [int] $SessionLimitSec = 0
+    [int] $SessionLimitSec = 0,
+    # Force a fresh wrapper compile instead of reusing the content-addressed
+    # build. The cache is keyed on the source hash and so cannot go stale; this
+    # exists for diagnosing the FFDec step itself, not for correctness.
+    [switch] $NoWrapperCache
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,15 +137,47 @@ if ($LASTEXITCODE -ne 0) { throw 'The installed build does not match the pinned 
 $sessionDirRelative = "captures\$SessionId"
 New-Item -ItemType Directory -Path (Join-Path $projectRoot $sessionDirRelative) -Force | Out-Null
 
-Write-Host 'Building the wrapper from source...'
-$shell = "$sessionDirRelative\wrapper-shell.swf"
-$wrapperSwf = "$sessionDirRelative\ss2-capture-wrapper.swf"
-& $nodeExe tools/runtime-capture/make-wrapper-shell.mjs $shell | Out-Null
-$scripts = "$wrapperSwf-scripts"
-New-Item -ItemType Directory -Path (Join-Path $scripts 'scripts\frame_1') -Force | Out-Null
-Copy-Item 'tools\runtime-capture\ss2-capture-wrapper.as' (Join-Path $scripts 'scripts\frame_1\DoAction.as') -Force
-& (Join-Path $projectRoot 'tools\ffdec.ps1') -importScript $shell $wrapperSwf $scripts | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "FFDec wrapper compilation failed (exit $LASTEXITCODE)." }
+# The wrapper compile depends on nothing but ss2-capture-wrapper.as, so it is
+# identical every round - and it is roughly half of the ~7s of fixed setup a
+# ~14s capture round pays. The build is therefore CONTENT-ADDRESSED on the
+# source hash and reused across sessions.
+#
+# Keyed on the source hash rather than a filename or a timestamp on purpose:
+# reusing a stale wrapper would silently capture with the wrong
+# instrumentation, which is the one failure mode a cache here could introduce.
+# Any edit to the source produces a different directory and a fresh compile,
+# so the cache cannot go stale - it can only be cold.
+#
+# This does NOT hoist the install hash verification above it. That is a
+# per-session attestation, not setup, and it stays per session.
+#
+# Moving the wrapper SWF out of the per-session directory does not move the
+# game's SharedObject. Ruffle keys a store by the path of the SWF that created
+# it, and so_local is created by the GAME on _level1 - its store has stayed at
+# the installed-game path across 163 sessions whose wrapper lived at 163
+# different paths.
+$wrapperSource = 'tools\runtime-capture\ss2-capture-wrapper.as'
+$wrapperSourceHash = (Get-FileHash -LiteralPath $wrapperSource -Algorithm SHA256).Hash
+$wrapperKey = $wrapperSourceHash.Substring(0, 16)
+$cacheRelative = "captures\wrapper-cache\$wrapperKey"
+$wrapperSwf = "$cacheRelative\ss2-capture-wrapper.swf"
+$builtStamp = "$cacheRelative\built.sha256"
+
+if ((-not $NoWrapperCache) -and (Test-Path $builtStamp) -and (Test-Path $wrapperSwf)) {
+    Write-Host "Reusing the compiled wrapper for source $wrapperKey."
+} else {
+    Write-Host 'Building the wrapper from source...'
+    New-Item -ItemType Directory -Path $cacheRelative -Force | Out-Null
+    $shell = "$cacheRelative\wrapper-shell.swf"
+    & $nodeExe tools/runtime-capture/make-wrapper-shell.mjs $shell | Out-Null
+    $scripts = "$wrapperSwf-scripts"
+    New-Item -ItemType Directory -Path (Join-Path $scripts 'scripts\frame_1') -Force | Out-Null
+    Copy-Item $wrapperSource (Join-Path $scripts 'scripts\frame_1\DoAction.as') -Force
+    & (Join-Path $projectRoot 'tools\ffdec.ps1') -importScript $shell $wrapperSwf $scripts | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "FFDec wrapper compilation failed (exit $LASTEXITCODE)." }
+    Set-Content -LiteralPath $builtStamp -Value $wrapperSourceHash -Encoding utf8
+    Write-Host "Compiled the wrapper for source $wrapperKey."
+}
 
 $tape = & $nodeExe tools/capture-session.mjs tape --fixture $FixturePath
 if ($LASTEXITCODE -ne 0) { throw 'Reading the fixture tape failed.' }
