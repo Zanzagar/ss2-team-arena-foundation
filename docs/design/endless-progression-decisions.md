@@ -13,6 +13,10 @@ into durable, independently reviewable decisions. It does not add a seventh
 product decision, change measured vanilla behaviour, or authorize an
 `endless-v0` implementation.
 
+For the shorter pre-read and guided review sequence, use the
+[owner decision packet](endless-progression-owner-packet.md). This file remains
+authoritative after the selected answers are transcribed here.
+
 ## How to record a decision
 
 The detailed **Record** under each decision is authoritative; the summary table
