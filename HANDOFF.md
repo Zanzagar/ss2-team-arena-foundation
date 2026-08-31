@@ -1,4 +1,4 @@
-# Transfer handoff — SS2 Team Arena Foundation
+# Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
 ## State at the end of the 2026-08-30 session
 

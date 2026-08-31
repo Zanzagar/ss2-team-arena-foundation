@@ -28,7 +28,7 @@ if (-not $resolvedTemporaryRoot.StartsWith($resolvedTemporaryParent, [System.Str
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 
 try {
-    $headers = @{ 'User-Agent' = 'ss2-team-arena-foundation' }
+    $headers = @{ 'User-Agent' = 'swords-and-sandals-2-multiplayer' }
     $releaseUri = "https://api.github.com/repos/ruffle-rs/ruffle/releases/tags/v$ruffleVersion"
     $release = Invoke-RestMethod -Uri $releaseUri -Headers $headers
     $asset = $release.assets | Where-Object name -EQ $assetName | Select-Object -First 1

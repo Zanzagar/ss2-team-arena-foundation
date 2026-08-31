@@ -26,7 +26,7 @@ if (-not $resolvedTemporaryRoot.StartsWith($resolvedTemporaryParent, [System.Str
 New-Item -ItemType Directory -Path $temporaryRoot | Out-Null
 
 try {
-    $githubHeaders = @{ 'User-Agent' = 'ss2-team-arena-foundation' }
+    $githubHeaders = @{ 'User-Agent' = 'swords-and-sandals-2-multiplayer' }
     $releaseUri = "https://api.github.com/repos/jindrapetrik/jpexs-decompiler/releases/tags/version$ffdecVersion"
     $release = Invoke-RestMethod -Uri $releaseUri -Headers $githubHeaders
     $ffdecAsset = $release.assets | Where-Object name -EQ "ffdec_$ffdecVersion.zip" | Select-Object -First 1
@@ -35,7 +35,7 @@ try {
     }
 
     $javaAssetsUri = 'https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse'
-    $javaAssets = Invoke-RestMethod -Uri $javaAssetsUri -Headers @{ 'User-Agent' = 'ss2-team-arena-foundation' }
+    $javaAssets = Invoke-RestMethod -Uri $javaAssetsUri -Headers @{ 'User-Agent' = 'swords-and-sandals-2-multiplayer' }
     $javaAsset = $javaAssets | Select-Object -First 1
     if (-not $javaAsset.binary.package.link -or -not $javaAsset.binary.package.checksum) {
         throw 'The official Adoptium API did not return a Windows x64 JRE package and checksum.'
@@ -44,7 +44,7 @@ try {
     $ffdecArchive = Join-Path $temporaryRoot $ffdecAsset.name
     $javaArchive = Join-Path $temporaryRoot $javaAsset.binary.package.name
     Invoke-WebRequest -Uri $ffdecAsset.browser_download_url -OutFile $ffdecArchive -Headers $githubHeaders
-    Invoke-WebRequest -Uri $javaAsset.binary.package.link -OutFile $javaArchive -Headers @{ 'User-Agent' = 'ss2-team-arena-foundation' }
+    Invoke-WebRequest -Uri $javaAsset.binary.package.link -OutFile $javaArchive -Headers @{ 'User-Agent' = 'swords-and-sandals-2-multiplayer' }
 
     $ffdecHash = (Get-FileHash -LiteralPath $ffdecArchive -Algorithm SHA256).Hash
     if ($ffdecAsset.digest) {
