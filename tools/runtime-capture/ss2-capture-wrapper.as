@@ -293,9 +293,20 @@ var CONTROLLERS = [
     // 38-51 "no controller" would accrue wait ticks against a step that is
     // about to become available. Confirmed with the project's own tool:
     // node tools/inspect-swf.mjs <swf> --labels --timeline 'sprite:862'
+    // `walkleft` was MISSING from this row, and it was not harmless. Every
+    // controller frame carries two mutually exclusive layouts selected by
+    // `gladiator_dir`, and this row models their union - so omitting one
+    // direction told arenaPolicyStep the hero could not walk left. Against a
+    // villain to the left it fell through to `walkright` and walked the hero
+    // AWAY, forever: because the policy always returned something,
+    // autopilotWaitTicks never accumulated and AUTOPILOT_WAIT_LIMIT never
+    // tripped, so the run burned to GATE A's ceiling with no
+    // `autopilot-unavailable` line. That is exactly the "looks like a stall
+    // rather than an error" case this file warns about, produced by this table.
     { name: "closerange_archer", from: 28, to: 51, actions: {
         bash_attack: true, shove: true, taunt: true, jumpleft: true,
-        jumpright: true, walkright: true, psyche_up: true, wincrowd: true } }
+        jumpright: true, walkleft: true, walkright: true,
+        psyche_up: true, wincrowd: true } }
 ];
 
 // The frame gate is necessary but not sufficient: several labels carry their
@@ -376,6 +387,19 @@ function dbgRootFrame() {
 //   step 5  frame == 220      -> gotoAndPlay("arena")                [button 2128]
 //   step 6  battle_started    -> hand over to the autopilot
 // ---------------------------------------------------------------------------
+// KNOWN, DELIBERATE INFIDELITIES IN THIS ROUTE, left in place rather than
+// fixed. A byte-diff of every replication found that navSteps 0, 1, 3 and 5
+// omit the `_root.clicksound2.start()` their buttons (1502, 1535, 1669, 2128)
+// each perform, and that navStep 3 reorders 1669's statements - the button
+// plays the sound fourth, this plays it not at all.
+//
+// They are NOT corrected here, and that is the whole point: this is the route
+// that produced all twenty-two promoted goldens, and "the prisoner route is
+// untouched so the goldens stay reproducible" is worth more than a cosmetic
+// call. None of the omissions can reach an observed channel - a sound start
+// writes no watched field, draws no roll and dispatches no event - so the
+// evidence is unaffected either way. The arena route, which has no committed
+// evidence behind it, does replicate them.
 var navStep = 0;
 var navCooldown = 0;
 var navDiagCount = 0;
@@ -816,6 +840,7 @@ var shopKind = "weapon";      // "weapon" -> "armour" -> done
 var shopItem = 0;             // the id currently being offered
 var shopTries = 0;
 var shopScanTicks = 0;
+var shopBought = false;
 var shopSettleFrame = -1;
 var shopSettleTicks = 0;
 // Category pages, highest tier first. Weapon shop labels are byte-verified in
@@ -891,12 +916,14 @@ function stepArenaNavigator() {
         // Frame 10 performs the SharedObject read; so_local proves it ran.
         if (root.so_local == undefined) return;
         arenaLog("title");
+        root.clicksound2.start();                         // button 1502
         root.gotoAndPlay("new_or_continue");
         arenaPhase = "slots"; arenaCooldown = 15; return;
     }
     if (arenaPhase == "slots") {
         if (frame < 52) return;
         arenaLog("new_or_continue");
+        root.clicksound2.start();                         // button 1535
         root.gotoAndPlay("load_saved_gladiators");
         arenaPhase = "load"; arenaCooldown = 15; return;
     }
@@ -981,8 +1008,21 @@ function stepArenaNavigator() {
     }
     if (arenaPhase == "town") {
         if (frame < 150 || frame > 159) return;
-        // GATE A - re-assert the clock the way buttons 1669 and 2283 do, and
-        // record both sides of the write so a reader can see it happened.
+        // GATE A. THIS IS NOT A BUTTON REPLICATION, and an earlier version of
+        // this comment implied it was by citing buttons 1669 and 2283.
+        //
+        // Those two write 24 on their own one-shot transitions. NOTHING in the
+        // build writes it on every town-square entry, which is what this does -
+        // so the route SUPPRESSES A GAME MECHANIC: `time_of_day` advances on a
+        // 1.5s wall-clock interval and drives the day counter, the lighting and
+        // the >= 200 special event, and root frame 150's save_character
+        // persists the frozen value into the licensed save. The logs show it
+        // plainly, entry after entry: todBefore 26 -> todAfter 24.
+        //
+        // It stays, because the event it prevents permanently mutates charisma,
+        // magicka or gold and saves that too - a worse alteration than freezing
+        // a clock. But it is an alteration, it is owner-approved as a safety
+        // gate, and it must not be described as something a button does.
         var todBefore = _global.time_of_day;
         _global.time_of_day = 24;
         arenaLog("townsquare",
@@ -1145,7 +1185,19 @@ function stepArenaNavigator() {
         // `itemnumber = weap_i` at +0x07f6 on the common path of its 1..80 loop.
         // That is exactly what happened live: item 39 was asked for, hero.weapon
         // became 20, and itemcost was undefined.
-        if (typeof chosen.onRollOver == "function") chosen.onRollOver();
+        // BOTH are guarded, symmetrically. An earlier version guarded only the
+        // rollover, which left the exact failure the guard exists to prevent
+        // one missing binding away: without the rollover, `itemnumber` is stale
+        // at 20 and `itemcost` undefined, so pressing buy alone purchases item
+        // 20 at an unreadable cost - which is what happened live.
+        if (typeof chosen.onRollOver != "function" || typeof chosen.onRelease != "function") {
+            arenaLog("shop-item-unbound", "\"item\":" + jnum(shopItem) +
+                ",\"hasRollOver\":" + (typeof chosen.onRollOver == "function" ? "true" : "false") +
+                ",\"hasRelease\":" + (typeof chosen.onRelease == "function" ? "true" : "false"));
+            shopItem--;
+            arenaCooldown = 4; return;
+        }
+        chosen.onRollOver();
         chosen.onRelease();
         arenaPhase = "shop-answer"; arenaCooldown = 8; return;
     }
@@ -1169,6 +1221,7 @@ function stepArenaNavigator() {
             if (shopSettleTicks < 3) return;
             shopSettleTicks = 0;
             if (shopConfirm(shopKind)) {
+                shopBought = true;
                 arenaLog("shop-bought",
                     "\"kind\":\"" + shopKind + "\",\"item\":" + jnum(shopItem) +
                     ",\"cost\":" + jnum(answering.itemcost) +
@@ -1187,9 +1240,28 @@ function stepArenaNavigator() {
         return;
     }
     if (arenaPhase == "shop-leave") {
+        // NO BUTTON PERFORMS THIS TRANSITION when nothing was bought, and that
+        // is worth stating rather than hiding. The weaponsmith's exit is button
+        // 1929: `clicksound2.start(); if (itempurchased == null) {
+        // gotoAndPlay("angry"); play(); } else if (itempurchased == "yes") {
+        // _root.gotoAndPlay("townsquare"); }`. You cannot leave for the town
+        // square without having bought something - you get the angry page, and
+        // only ITS button exits.
+        //
+        // So on the bought path this is faithful, and on the shop-exhausted,
+        // shop-unreachable and operands-unreadable paths it is a transition no
+        // single press can make from that state. It is kept because the
+        // alternative is parking the run inside a shop until GATE A's ceiling,
+        // and because those three paths produce no evidence by construction -
+        // but a capture must never be taken from a run that took one of them.
+        if (shopKind != "weapon" || shopDone) {
+            arenaLog("shop-leave", "\"kind\":\"" + shopKind + "\"" +
+                ",\"boughtPath\":" + (shopBought ? "true" : "false"));
+        }
         if (shopKind == "weapon") shopKind = "armour";
         else shopDone = true;
-        root.gotoAndPlay("townsquare");
+        root.clicksound2.start();                         // button 1929's first
+        root.gotoAndPlay("townsquare");                   // statement
         arenaPhase = "town"; arenaCooldown = 25; return;
     }
     if (arenaPhase == "foyer") {
@@ -1227,7 +1299,8 @@ function stepArenaNavigator() {
                     "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
                 return;
             }
-            _global.fight_mode = "tournament";            // button 2069
+            root.clicksound2.start();                     // button 2069 opens
+            _global.fight_mode = "tournament";            // with the sound
             foyer.gotoAndPlay("tournament");
             foyer.play();
             arenaPhase = "ladder"; arenaCooldown = 20; return;
@@ -1275,7 +1348,8 @@ function stepArenaNavigator() {
             ",\"villainName\":\"" + String(root.game.villain.character_name) + "\"" +
             ",\"villainHitpointsmax\":" + jnum(root.game.villain.hitpointsmax) +
             ",\"villainArmourclass\":" + jnum(root.game.villain.armourclass));
-        _global.fightselected = false;                    // button 2128
+        root.clicksound2.start();                         // button 2128
+        _global.fightselected = false;
         root.gotoAndPlay("arena");
         arenaPhase = "fight"; arenaCooldown = 30; return;
     }
@@ -1377,10 +1451,21 @@ function stepArenaNavigator() {
         // makes this the least faithful step on the whole route, and four
         // presses in one execution slot is further from four button presses
         // than four presses in four slots.
+        // BUTTON 2253, verbatim - not "button 1596's body with vitality
+        // substituted for strength", which is what this said and was wrong.
+        // 2253 IS the level-up panel's vitality `+`, placed on sprite 2265 at
+        // root frame 227, and its body is exactly these four statements. No
+        // substitution was ever needed, and the route map's button list omits
+        // 2253, which is where the misattribution came from.
+        //
+        // The claim that this is "the least faithful step on the route" because
+        // "the body is two statements with no call" was also false: the body is
+        // a guard, a CALL to clicksound.start(), and two assignments - all of
+        // which are replicated here. It is a verbatim replication.
         if (Number(levelHero.statpoints) > 0) {
-            root.clicksound.start();                      // button 1596's body,
-            levelHero.vitality++;                         // with vitality for
-            levelHero.statpoints--;                       // strength
+            root.clicksound.start();
+            levelHero.vitality++;
+            levelHero.statpoints--;
             arenaPointsSpent++;
             arenaMirrorWaitTicks = 0;
             arenaMirrorZeroTicks = 0;
