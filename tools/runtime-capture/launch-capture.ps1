@@ -72,7 +72,31 @@ param(
     # per-piece <piece>_defence fields, which the default omits and ingest
     # refuses a trace for when the fixture stages them. Leave empty for every
     # capture that matches an existing golden.
-    [string] $WatchFields = ""
+    [string] $WatchFields = "",
+    # --- the leveled-gladiator arena route (-Navigate arena) --------------
+    # These are inert unless -Navigate is 'arena'. See stepArenaNavigator in
+    # ss2-capture-wrapper.as and docs/integration/ss2-arena-route.md.
+    #
+    # NOTE that the arena route is NOT save-neutral: root frame 150 flushes the
+    # SharedObject on every town-square entry, and this route passes through it
+    # on the way in and after every win. Use run-arena.ps1, which refuses to
+    # start without a fresh snapshot, rather than calling this directly.
+    #
+    # 'level:<n>' fights duels until herolevel reaches n; 'tournament' enters
+    # the ladder and fights it to rank 1.
+    [string] $ArenaTarget = "",
+    # 'aggressive' is the only policy; empty lets the wrapper pick it.
+    [string] $ArenaPolicy = "",
+    # Which bout of a multi-bout run may be recorded: 'never' (a levelling run
+    # is staging, not evidence), 'champion' (the tournament rank-1 bout only),
+    # or 'always'.
+    [string] $ArenaCapture = "",
+    # GATE A bounds. time_of_day advances on a 1.5s WALL-CLOCK interval outside
+    # the battle; at 200 the game takes a special event that permanently
+    # mutates charisma, magicka or gold and then saves it. 0 leaves the
+    # wrapper's own defaults (150 and 900s).
+    [int] $TimeOfDayCeiling = 0,
+    [int] $SessionLimitSec = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -147,8 +171,20 @@ $ruffleArgs = @(
     "-Pautopilot=$Autopilot",
     "-Pnavigate=$Navigate",
     "-PwatchFields=$WatchFields",
+    "-ParenaTarget=$ArenaTarget",
+    "-ParenaPolicy=$ArenaPolicy",
+    "-ParenaCapture=$ArenaCapture",
     $wrapperSwf
 )
+# Passed only when set: an empty FlashVar reads as "" in the wrapper, which is
+# already "unset", but a zero would read as an explicit ceiling of zero and
+# abort the run on its first tick.
+if ($TimeOfDayCeiling -gt 0) {
+    $ruffleArgs = @("-PtimeOfDayCeiling=$TimeOfDayCeiling") + $ruffleArgs
+}
+if ($SessionLimitSec -gt 0) {
+    $ruffleArgs = @("-PsessionLimitSec=$SessionLimitSec") + $ruffleArgs
+}
 if ($FrameRate -gt 0) { $ruffleArgs = @('--frame-rate', "$FrameRate") + $ruffleArgs }
 if ($SaveDirectory) {
     # Seed the private store from the real one, so the session starts from the

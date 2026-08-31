@@ -38,6 +38,16 @@
  *                  randomBetween samples ONLY, consumed exclusively inside
  *                  the armed action
  *   watchFields    comma list of game-object fields to watch (defaults below)
+ *   navigate       "prisoner" — the staged tutorial fight (stepNavigator), or
+ *                  "arena" — the leveled-gladiator route (stepArenaNavigator)
+ *   arenaTarget    "level:<n>" drive duels until herolevel reaches n, or
+ *                  "tournament" enter the ladder and fight it to rank 1
+ *   arenaPolicy    "aggressive" — the arena route's fight policy; the prisoner
+ *                  route keeps its explicit autopilot step list instead
+ *   arenaCapture   "never" (default) | "champion" | "always" — which bout of a
+ *                  multi-bout arena run may be recorded
+ *   timeOfDayCeiling, sessionLimitSec
+ *                  arena-route abort bounds; see GATE A
  *
  * FlashVars land as _root properties and timeline vars ARE _root properties,
  * so every FlashVar is read before any same-named variable is declared.
@@ -99,6 +109,22 @@ var rawTape = _root.tape;
 var rawWatchFields = _root.watchFields;
 var rawAutopilot = _root.autopilot;
 var rawNavigate = _root.navigate;
+// Arena-route configuration. Read here with every other FlashVar, because
+// timeline variables ARE _root properties and a same-named declaration later
+// in this file would shadow the launcher's value.
+//   arenaTarget       "level:<n>"  drive duels until herolevel reaches n
+//                     "tournament" enter the ladder and fight it to rank 1
+//   arenaPolicy       "aggressive" (default) — close and attack every turn
+//   arenaCapture      "never" (default for a levelling run) | "champion" |
+//                     "always"
+//   timeOfDayCeiling  abort if _global.time_of_day reaches this (default 150;
+//                     the game's special event fires at 200)
+//   sessionLimitSec   abort after this much wall clock (default 900)
+var rawArenaTarget = _root.arenaTarget;
+var rawArenaPolicy = _root.arenaPolicy;
+var rawArenaCapture = _root.arenaCapture;
+var rawTimeOfDayCeiling = _root.timeOfDayCeiling;
+var rawSessionLimitSec = _root.sessionLimitSec;
 var config = {
     gameUrl: _root.gameUrl,
     observationId: _root.observationId,
@@ -454,9 +480,591 @@ function stepNavigator() {
     }
 }
 
+// ===========================================================================
+// Arena navigator (navigate=arena): the LEVELED-gladiator route.
+//
+// stepNavigator above is a one-shot linear walk to a single staged fight.
+// This route LOOPS - town square -> foyer -> fight -> reward -> (level up) ->
+// town square - so it is written as a state machine over the screen the game
+// is actually resting on, and re-entering a screen is ordinary rather than a
+// special case. Mapped in docs/integration/ss2-arena-route.md; every action
+// below names the DefineButton2 whose body it replicates statement for
+// statement, so the two can be diffed.
+//
+// This is the first thing this project runs that can permanently change the
+// licensed save: root frame 150 calls save_character() and flushes the
+// SharedObject on EVERY town-square entry (route map section 8). Four hazards
+// an adversarial audit found are therefore enforced here as hard gates,
+// marked GATE A..D. None of them may be relaxed without new evidence.
+//
+//   GATE A  time_of_day advances on a 1.5s WALL-CLOCK setInterval during
+//           everything except the battle. At >= 200 the game enters a special
+//           event that permanently mutates charisma, magicka or gold and then
+//           SAVES it through town square. Re-assert 24 at each town-square
+//           rest (the write buttons 1669 and 2283 both make), log it, and
+//           abort well below 200.
+//   GATE B  root frames 160-169 are that special event. Reaching them at all
+//           is a failed run: abort, never advance through them.
+//   GATE C  button 2283 gates on the DISPLAY MIRROR _root.statpoints, kept by
+//           an enterFrame clip action - not game.hero.statpoints. Pressing in
+//           the same execution slot as the four decrements takes the refusal
+//           arm and parks forever, so the press waits for the mirror to read
+//           zero on a LATER frame.
+//   GATE D  the daybreak wait must abort and log, never re-issue
+//           gotoAndPlay("daybreak"). Re-entering the span mid-way retains the
+//           existing day_night clip and can flip its parity to a permanent
+//           hang.
+// ===========================================================================
+var ARENA_DEFAULT_TIME_OF_DAY_CEILING = 150;
+var ARENA_DEFAULT_SESSION_LIMIT_SEC = 900;
+var ARENA_DAYBREAK_LIMIT_TICKS = 4000;
+var ARENA_MIRROR_LIMIT_TICKS = 1800;
+
+var arenaMode = (rawNavigate == "arena");
+var arenaTargetLevel = 0;
+var arenaWantTournament = false;
+if (rawArenaTarget != undefined && rawArenaTarget != "") {
+    if (rawArenaTarget == "tournament") {
+        arenaWantTournament = true;
+    } else {
+        var arenaTargetParts = rawArenaTarget.split(":");
+        if (arenaTargetParts[0] == "level") arenaTargetLevel = Number(arenaTargetParts[1]);
+    }
+}
+// Capture is OFF by default on this route. A levelling run is not evidence -
+// it is staging - and a trace emitted from one would be an observation of a
+// fight nobody chose. "champion" arms only for the tournament rank-1 bout,
+// which is the one reproducible armoured opponent in the build.
+var arenaCaptureMode = (rawArenaCapture == undefined || rawArenaCapture == "") ? "never" : rawArenaCapture;
+// The policy is arena-route-only, and forced off elsewhere rather than merely
+// left unset: a stray arenaPolicy on a prisoner run would replace that route's
+// explicit step list with a greedy fight, and every one of the twenty-two
+// promoted goldens depends on the step list being exactly what was asked for.
+var arenaPolicy = (rawArenaPolicy == undefined || rawArenaPolicy == "") ? "" : rawArenaPolicy;
+if (!arenaMode) arenaPolicy = "";
+if (arenaMode && arenaPolicy == "" && autopilotSteps.length == 0) arenaPolicy = "aggressive";
+var arenaTimeCeiling = Number(rawTimeOfDayCeiling);
+if (!(arenaTimeCeiling > 0)) arenaTimeCeiling = ARENA_DEFAULT_TIME_OF_DAY_CEILING;
+var arenaSessionLimitMs = Number(rawSessionLimitSec) * 1000;
+if (!(arenaSessionLimitMs > 0)) arenaSessionLimitMs = ARENA_DEFAULT_SESSION_LIMIT_SEC * 1000;
+
+var arenaPhase = "boot";
+var arenaCooldown = 0;
+var arenaStopped = false;
+var arenaStartMs = getTimer();
+var arenaDaybreakTicks = 0;
+var arenaMirrorWaitTicks = 0;
+var arenaMirrorZeroTicks = 0;
+var arenaPointsSpent = 0;
+var arenaBoutsFought = 0;
+
+// String(Number(undefined)) is "NaN", which is not JSON. Diagnostic lines are
+// stripped by delog, but a malformed one is unreadable by any tool, so every
+// numeric field goes through here.
+function jnum(value) {
+    var n = Number(value);
+    if (n != n) return "null";
+    return String(n);
+}
+
+function arenaLog(step, extra) {
+    var root = gameRoot();
+    var hero = (root == undefined) ? undefined : root.game.hero;
+    trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"" + step + "\"" +
+        ",\"root\":" + (root == undefined ? "null" : jnum(root._currentframe)) +
+        ",\"level\":" + (hero == undefined ? "null" : jnum(hero.herolevel)) +
+        ",\"tod\":" + jnum(_global.time_of_day) +
+        ",\"ms\":" + jnum(getTimer()) +
+        (extra == undefined ? "" : "," + extra) + "}");
+}
+
+function arenaAbort(reason, extra) {
+    if (arenaStopped) return;
+    arenaStopped = true;
+    arenaPhase = "aborted";
+    autopilotAborted = true;
+    arenaLog("ABORT:" + reason, extra);
+}
+
+function arenaFinish(root, why) {
+    if (arenaStopped) return;
+    arenaStopped = true;
+    arenaPhase = "done";
+    autopilotAborted = true;
+    arenaLog("TARGET-REACHED:" + why,
+        "\"vitality\":" + jnum(root.game.hero.vitality) +
+        ",\"hitpointsmax\":" + jnum(root.game.hero.hitpointsmax) +
+        ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+        ",\"experience\":" + jnum(root.game.hero.experience) +
+        ",\"bouts\":" + arenaBoutsFought);
+}
+
+/**
+ * The tournament field is pre-generated once, at foyer frame 22, and is
+ * inspectable only in the window before the first bout. Ranks 2..N come from
+ * randomise_gladiator and are regenerated on every fresh launch, so they can
+ * never clear the two-session gate; rank 1 comes from unleash_hell() and its
+ * hard-coded DNA. Dumping the whole field is what makes that claim checkable
+ * from a run's own log instead of from the map alone.
+ */
+function arenaLogLadder(root) {
+    var count = Number(root.foyer.tournament_max_gladiators);
+    if (!(count > 0)) return;
+    for (var rank = 1; rank <= count; rank++) {
+        var villain = root.game["villain" + rank];
+        if (villain == undefined) continue;
+        trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"ladder\",\"rank\":" + rank +
+            ",\"hitpointsmax\":" + jnum(villain.hitpointsmax) +
+            ",\"armourclass\":" + jnum(villain.armourclass) +
+            ",\"attack\":" + jnum(villain.attack) +
+            ",\"defence\":" + jnum(villain.defence) +
+            ",\"minDamage\":" + jnum(villain.min_damage) +
+            ",\"maxDamage\":" + jnum(villain.max_damage) +
+            ",\"helmet\":" + jnum(villain.helmet) +
+            ",\"greaves\":" + jnum(villain.greaves) + "}");
+    }
+}
+
+/** Every-tick hazard checks. False means the run is over. */
+function arenaGuards(root) {
+    var frame = root._currentframe;
+    // GATE B - the special event screens. A generic advance step here would
+    // press special_button1/special_button2 and take a permanent stat change.
+    if (frame >= 160 && frame <= 169) {
+        arenaAbort("special-event-screen", "\"frame\":" + jnum(frame));
+        return false;
+    }
+    // Terminal screens: gameover (235), bugs (242), gameover_demo (252),
+    // enter_highscore (263). Nothing on this route is above 234.
+    if (frame >= 235) {
+        arenaAbort("terminal-screen", "\"frame\":" + jnum(frame));
+        return false;
+    }
+    // GATE A - both halves. The clock ceiling is the game's own state; the
+    // wall clock catches a stall that never advances it.
+    var tod = Number(_global.time_of_day);
+    if (tod == tod && tod >= arenaTimeCeiling) {
+        arenaAbort("time-of-day-ceiling",
+            "\"tod\":" + jnum(tod) + ",\"ceiling\":" + jnum(arenaTimeCeiling));
+        return false;
+    }
+    if (getTimer() - arenaStartMs > arenaSessionLimitMs) {
+        arenaAbort("session-wall-clock", "\"limitMs\":" + jnum(arenaSessionLimitMs));
+        return false;
+    }
+    return true;
+}
+
+function arenaReachedTarget(root) {
+    if (arenaWantTournament) return false;
+    if (!(arenaTargetLevel > 0)) return false;
+    return Number(root.game.hero.herolevel) >= arenaTargetLevel;
+}
+
+/** A fresh bout re-arms the fight policy; the prisoner route never loops. */
+function arenaResetAutopilot() {
+    autopilotIndex = 0;
+    autopilotIdleTicks = 0;
+    autopilotCooldown = 0;
+    autopilotWaitTicks = 0;
+    autopilotAborted = false;
+}
+
+function stepArenaNavigator() {
+    if (!arenaMode) return;
+    if (arenaStopped) return;
+    var root = gameRoot();
+    if (root == undefined) return;
+    if (!arenaGuards(root)) return;
+    if (arenaCooldown > 0) { arenaCooldown--; return; }
+    var frame = root._currentframe;
+
+    if (arenaPhase == "boot") {
+        // Frame 10 performs the SharedObject read; so_local proves it ran.
+        if (root.so_local == undefined) return;
+        arenaLog("title");
+        root.gotoAndPlay("new_or_continue");
+        arenaPhase = "slots"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "slots") {
+        if (frame < 52) return;
+        arenaLog("new_or_continue");
+        root.gotoAndPlay("load_saved_gladiators");
+        arenaPhase = "load"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "load") {
+        if (typeof root.get_char1.onRelease != "function") return;
+        if (root.so_local.max_gladiators == undefined) return;
+        if (root.so_local.max_gladiators < 1) return;
+        arenaLog("slot-list");
+        root.get_char1.onRelease();
+        arenaPhase = "confirm"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "confirm") {
+        // initcharacter populates the combat object field by field; counting
+        // properties is naming-agnostic, exactly as in stepNavigator.
+        var heroProps = 0;
+        for (var heroKey in root.game.hero) heroProps++;
+        if (heroProps < 6) return;
+        // Frame 113 routes on herolevel and NEITHER arm fires for 0,
+        // undefined or a non-number - the playhead would then run on into the
+        // dungeon span and play the prologue regardless. Refuse to jump until
+        // the value is a number.
+        var loadedLevel = Number(root.game.hero.herolevel);
+        if (loadedLevel != loadedLevel || loadedLevel < 1) {
+            arenaAbort("herolevel-not-a-number",
+                "\"raw\":\"" + String(root.game.hero.herolevel) + "\"");
+            return;
+        }
+        arenaLog("hero-loaded", "\"props\":" + heroProps +
+            ",\"currentTournament\":" + jnum(root.game.hero.current_tournament) +
+            ",\"vitality\":" + jnum(root.game.hero.vitality) +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces));
+        if (arenaReachedTarget(root)) { arenaFinish(root, "already-at-level"); return; }
+        // button 1669, verbatim.
+        _global.current_character = root.char_to_load;
+        root.delete_tooltips();
+        _global.gamephase = 1;
+        root.hero.removeMovieClip();
+        _global.time_of_day = 24;
+        root.game.hero.score = 0;
+        root.gotoAndPlay("daybreak");
+        arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 10; return;
+    }
+    if (arenaPhase == "daybreak") {
+        // Frame 113 routes: herolevel > 1 -> townsquare (150), == 1 -> dungeon
+        // (114). Both arms additionally require day_night._currentframe == 80
+        // EXACTLY, and day_night stops at 107 and never returns, so a phase
+        // slip hangs the screen forever.
+        if (frame >= 150 && frame <= 159) {
+            arenaLog("routed-townsquare"); arenaPhase = "town"; return;
+        }
+        if (frame >= 114 && frame <= 149) {
+            arenaLog("routed-dungeon-prologue");
+            arenaPhase = "prologue"; return;
+        }
+        arenaDaybreakTicks++;
+        if (arenaDaybreakTicks > ARENA_DAYBREAK_LIMIT_TICKS) {
+            // GATE D. Abort and log; do NOT re-issue gotoAndPlay("daybreak").
+            arenaAbort("daybreak-timeout",
+                "\"frame\":" + jnum(frame) +
+                ",\"dayNight\":" + jnum(root.day_night._currentframe) +
+                ",\"ticks\":" + arenaDaybreakTicks);
+        }
+        return;
+    }
+    if (arenaPhase == "prologue") {
+        // The level-1 arm. The prologue skins the hero, builds the prisoner
+        // via unleash_hell(0) and sets fight_mode itself before jumping to
+        // arena_intro. It self-advances; nothing here may hurry it.
+        if (frame >= 214 && frame <= 220) { arenaPhase = "intro"; }
+        return;
+    }
+    if (arenaPhase == "town") {
+        if (frame < 150 || frame > 159) return;
+        // GATE A - re-assert the clock the way buttons 1669 and 2283 do, and
+        // record both sides of the write so a reader can see it happened.
+        var todBefore = _global.time_of_day;
+        _global.time_of_day = 24;
+        arenaLog("townsquare",
+            "\"todBefore\":" + jnum(todBefore) + ",\"todAfter\":24" +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+            ",\"bouts\":" + arenaBoutsFought);
+        if (arenaReachedTarget(root)) { arenaFinish(root, "level"); return; }
+        root.clicksound2.start();
+        root.gotoAndPlay("foyer");                        // button 1800
+        arenaPhase = "foyer"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "foyer") {
+        if (frame != 208) return;
+        var foyer = root.foyer;
+        if (foyer == undefined) return;
+        if (foyer._currentframe != 21) return;            // browse has settled
+        var required = Number(foyer.tournament_level_required);
+        var heroLevel = Number(root.game.hero.herolevel);
+        arenaLog("foyer-browse",
+            "\"required\":" + jnum(required) +
+            ",\"duelVisible\":" + (foyer.duel_button._visible == true ? "true" : "false") +
+            ",\"tournamentNumber\":" + jnum(foyer.tournament_number) +
+            ",\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"inProgress\":" + (_global.tournament_in_progress == true ? "true" : "false"));
+        if (arenaWantTournament) {
+            // The tournament button refuses with a bubble message below the
+            // gate, so the check is the game's own and must pass first.
+            if (!(heroLevel >= required)) {
+                arenaAbort("tournament-gate-not-met",
+                    "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
+                return;
+            }
+            _global.fight_mode = "tournament";            // button 2069
+            foyer.gotoAndPlay("tournament");
+            foyer.play();
+            arenaPhase = "ladder"; arenaCooldown = 20; return;
+        }
+        // The duel and tournament options are mutually exclusive: the duel
+        // button is hidden exactly when herolevel >= tournament_level_required.
+        if (foyer.duel_button._visible != true) {
+            arenaAbort("duel-button-hidden",
+                "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
+            return;
+        }
+        _global.fight_mode = "duel";                      // button 2066, verbatim
+        var maxArena;
+        if      (heroLevel < 15) maxArena = 2;
+        else if (heroLevel < 27) maxArena = 3;
+        else if (heroLevel < 36) maxArena = 4;
+        else if (heroLevel < 48) maxArena = 5;
+        else                     maxArena = 6;
+        // The body draws a real RandomNumber here; AS2 random(n) compiles to
+        // the same opcode. Substituting a constant would make the venue a
+        // wrapper decision rather than the game's.
+        _global.current_arena = 1 + random(maxArena);
+        root.clicksound2.start();
+        root.gotoAndPlay("arena_intro");
+        arenaPhase = "intro"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "ladder") {
+        var ladderFoyer = root.foyer;
+        if (ladderFoyer == undefined || ladderFoyer._currentframe != 36) return;
+        if (root.game.villain == undefined) return;
+        arenaLogLadder(root);
+        arenaLog("ladder-ready",
+            "\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"maxGladiators\":" + jnum(ladderFoyer.tournament_max_gladiators) +
+            ",\"arena\":" + jnum(_global.current_arena));
+        root.gotoAndPlay("arena_intro");                  // button 2071
+        arenaPhase = "intro"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "intro") {
+        if (frame != 220) return;                         // arena_intro's Stop
+        arenaLog("versus",
+            "\"fightMode\":\"" + String(_global.fight_mode) + "\"" +
+            ",\"arena\":" + jnum(_global.current_arena) +
+            ",\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"villainName\":\"" + String(root.game.villain.character_name) + "\"" +
+            ",\"villainHitpointsmax\":" + jnum(root.game.villain.hitpointsmax) +
+            ",\"villainArmourclass\":" + jnum(root.game.villain.armourclass));
+        _global.fightselected = false;                    // button 2128
+        root.gotoAndPlay("arena");
+        arenaPhase = "fight"; arenaCooldown = 30; return;
+    }
+    if (arenaPhase == "fight") {
+        if (_global.battle_started != true) return;
+        arenaBoutsFought++;
+        arenaResetAutopilot();
+        arenaLog("battle-ready", "\"bout\":" + arenaBoutsFought +
+            ",\"policy\":\"" + arenaPolicy + "\"" +
+            ",\"captureMode\":\"" + arenaCaptureMode + "\"");
+        arenaPhase = "in-battle"; return;
+    }
+    if (arenaPhase == "in-battle") {
+        var arenaClip = root.arena;
+        if (arenaClip == undefined) return;
+        var arenaFrame = Number(arenaClip._currentframe);
+        // Arena clip labels: combat_exp 222 (Stop 249), combat_lost 250
+        // (Stop 334). The loss span is terminal for this run - button 2244's
+        // body is not mapped, and guessing at it is exactly the class of
+        // shortcut this project does not take.
+        if (arenaFrame >= 250) {
+            arenaAbort("battle-lost", "\"arenaFrame\":" + jnum(arenaFrame) +
+                ",\"bout\":" + arenaBoutsFought);
+            return;
+        }
+        if (arenaClip.fight_win_stuff == undefined) return;
+        if (arenaClip.fight_win_stuff.button_yes._visible != true) return;
+        arenaPhase = "reward"; return;
+    }
+    if (arenaPhase == "reward") {
+        var rewardArena = root.arena;
+        if (rewardArena == undefined) return;
+        var winPanel = rewardArena.fight_win_stuff;
+        if (winPanel == undefined) return;
+        // The reward button only EXISTS after the two-second exp-bar tween
+        // finishes, and nextleveltext is written inside that tween's callback -
+        // so this visibility check is what stops the branch selection racing
+        // the string it reads.
+        if (winPanel.button_yes._visible != true) return;
+        var nextLevelText = String(winPanel.nextleveltext);
+        var rewardLevel = Number(root.game.hero.herolevel);
+        var currentTournament = Number(root.game.hero.current_tournament);
+        var ranking = Number(root.game.hero.tournament_ranking);
+        var gameMode = String(_global.game_mode != undefined ? _global.game_mode : root.game_mode);
+        arenaLog("reward",
+            "\"nextleveltext\":\"" + nextLevelText + "\"" +
+            ",\"gameMode\":\"" + gameMode + "\"" +
+            ",\"experience\":" + jnum(root.game.hero.experience) +
+            ",\"experienceneeded\":" + jnum(root.game.hero.experienceneeded) +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+            ",\"ranking\":" + jnum(ranking) +
+            ",\"currentTournament\":" + jnum(currentTournament));
+        // button 775. Exactly one arm, chosen the way the button chooses it.
+        root.clicksound2.start();
+        if (currentTournament >= 19 && ranking <= 2) {
+            arenaAbort("final-victory-arm",
+                "\"currentTournament\":" + jnum(currentTournament));
+            return;
+        }
+        if (nextLevelText == "YOU HAVE LEVELLED UP!" &&
+            ((gameMode == "demo" && rewardLevel < 12) ||
+             (gameMode == "full" && rewardLevel < 50))) {
+            root.game.hero.experience = root.game.hero.experienceneeded + 1;
+            root.game.hero.herolevel++;
+            root.battlevalues(root.game.hero);
+            root.constructDNA();
+            arenaPointsSpent = 0;
+            arenaMirrorWaitTicks = 0;
+            arenaMirrorZeroTicks = 0;
+            root.gotoAndPlay("levelup");
+            arenaPhase = "levelup"; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_in_progress == true) {
+            root.gotoAndPlay("foyer");
+            arenaPhase = "foyer"; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_complete == true) {
+            _global.tournament_complete = null;
+            _global.time_of_day = 1 + random(23);
+            _global.day++;
+            var chanceOfRain = 1 + random(100);
+            _global.rain_chance = chanceOfRain > 80;
+            _global.special_for_day = false;
+            root.game.hero.days_in_arena = _global.day;
+            _global.cloudframe = 1 + random(16);
+            _global.special_event = 0;
+            _global.special_event_happening = false;
+            root.gotoAndPlay("daybreak");
+            arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 20; return;
+        }
+        root.gotoAndPlay("townsquare");
+        arenaPhase = "town"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "levelup") {
+        if (frame != 234) return;                         // the levelup span's Stop
+        var levelHero = root.game.hero;
+        // Root frame 227 sets statpoints = 4 on entry. Spend them ONE PER
+        // TICK: the stat button's body is two statements with no call, which
+        // makes this the least faithful step on the whole route, and four
+        // presses in one execution slot is further from four button presses
+        // than four presses in four slots.
+        if (Number(levelHero.statpoints) > 0) {
+            root.clicksound.start();                      // button 1596's body,
+            levelHero.vitality++;                         // with vitality for
+            levelHero.statpoints--;                       // strength
+            arenaPointsSpent++;
+            arenaMirrorWaitTicks = 0;
+            arenaMirrorZeroTicks = 0;
+            arenaLog("levelup-point",
+                "\"spent\":" + arenaPointsSpent +
+                ",\"vitality\":" + jnum(levelHero.vitality) +
+                ",\"statpointsHero\":" + jnum(levelHero.statpoints) +
+                ",\"statpointsRoot\":" + jnum(root.statpoints));
+            arenaCooldown = 2;
+            return;
+        }
+        // GATE C. Button 2283 reads _root.statpoints, the display mirror an
+        // enterFrame clip action maintains - not game.hero.statpoints. Require
+        // the mirror to read zero on two consecutive later frames before
+        // pressing; taking the refusal arm parks the run forever, and a run
+        // parked on the level-up screen holds a half-levelled gladiator.
+        arenaMirrorWaitTicks++;
+        if (Number(root.statpoints) == 0) arenaMirrorZeroTicks++;
+        else arenaMirrorZeroTicks = 0;
+        if (arenaMirrorZeroTicks < 2) {
+            if (arenaMirrorWaitTicks == 1 || arenaMirrorWaitTicks == 600) {
+                arenaLog("levelup-mirror-wait",
+                    "\"statpointsRoot\":" + jnum(root.statpoints) +
+                    ",\"statpointsRootRaw\":\"" + String(root.statpoints) + "\"" +
+                    ",\"ticks\":" + arenaMirrorWaitTicks);
+            }
+            if (arenaMirrorWaitTicks > ARENA_MIRROR_LIMIT_TICKS) {
+                // Either the mirror lives somewhere else than the audit found,
+                // or it never clears. Both are findings, not things to press
+                // through: the raw value is logged so one dry run settles it.
+                arenaAbort("levelup-mirror-never-cleared",
+                    "\"statpointsRootRaw\":\"" + String(root.statpoints) + "\"" +
+                    ",\"statpointsHero\":" + jnum(levelHero.statpoints));
+            }
+            return;
+        }
+        // button 2283, the non-refusal arm.
+        root.specials_gained_mov.removeMovieClip();
+        root.backup_char(levelHero);
+        root.clicksound2.start();
+        root.hero.removeMovieClip();
+        root.restore_char(levelHero);
+        var newLevel = Number(levelHero.herolevel);
+        arenaLog("levelup-confirm",
+            "\"level\":" + jnum(newLevel) +
+            ",\"vitality\":" + jnum(levelHero.vitality) +
+            ",\"hitpointsmax\":" + jnum(levelHero.hitpointsmax) +
+            ",\"mirrorWaitTicks\":" + arenaMirrorWaitTicks);
+        if (arenaReachedTarget(root)) {
+            // Still take the button's own arm: leaving the playhead parked on
+            // the level-up screen would leave statpoints spent but the level
+            // unbacked-up.
+            if (newLevel == 2) {
+                _global.day = 1;
+                _global.time_of_day = 24;
+                root.gotoAndPlay("daybreak");
+            } else if (_global.tournament_in_progress == true) {
+                root.backup_character(levelHero);
+                root.gotoAndPlay("foyer");
+            } else {
+                root.gotoAndPlay("townsquare");
+            }
+            arenaFinish(root, "level");
+            return;
+        }
+        if (newLevel == 2) {
+            _global.day = 1;
+            _global.time_of_day = 24;
+            root.gotoAndPlay("daybreak");
+            arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_in_progress == true) {
+            root.backup_character(levelHero);
+            root.gotoAndPlay("foyer");
+            arenaPhase = "foyer"; arenaCooldown = 20; return;
+        }
+        root.gotoAndPlay("townsquare");
+        arenaPhase = "town"; arenaCooldown = 20; return;
+    }
+}
+
+/**
+ * Fight policy for the arena route. The prisoner route's fixed step list
+ * cannot serve a duel: the opponent is generated at the hero's own level,
+ * fights back, and the bout runs many turns. This is deliberately the
+ * smallest policy that can win one - close the distance, then attack - and it
+ * issues nothing the controller in scope does not offer, so it can only ever
+ * press buttons the player could press.
+ *
+ * rest and taunt share one controller slot, chosen by whether stamina is at
+ * least half, and the wrapper cannot see which is wired. Issuing the wrong one
+ * sets a decision nothing dispatches, so neither is ever issued: overlay frame
+ * 1 issues its own forced-rest phase when stamina runs out, and letting the
+ * game handle that is both safer and more faithful.
+ */
+function arenaPolicyStep(controller) {
+    if (controller == undefined) return undefined;
+    if (controller.actions.normal_attack == true) return "normal_attack";
+    var gladiators = gameRoot().arena.gladiators;
+    if (gladiators != undefined) {
+        var heroX = Number(gladiators.hero._x);
+        var villainX = Number(gladiators.villain._x);
+        if (heroX == heroX && villainX == villainX) {
+            var toward = (villainX >= heroX) ? "walkright" : "walkleft";
+            if (controller.actions[toward] == true) return toward;
+        }
+    }
+    if (controller.actions.walkright == true) return "walkright";
+    if (controller.actions.walkleft == true) return "walkleft";
+    return undefined;
+}
+
 function stepAutopilot() {
     if (autopilotAborted) return;
-    if (autopilotIndex >= autopilotSteps.length) return;
+    if (arenaPolicy == "" && autopilotIndex >= autopilotSteps.length) return;
     if (_global.battle_started != true) return;
     var ov = overlayClip();
     if (ov == undefined || typeof ov.getphase != "function") return;
@@ -469,8 +1077,42 @@ function stepAutopilot() {
     autopilotIdleTicks++;
     if (autopilotIdleTicks < 8) return;
 
-    var step = autopilotSteps[autopilotIndex];
     var controller = controllerForFrame(frame);
+    if (arenaPolicy != "") {
+        // Policy mode: no step list to walk, so there is nothing to fall off
+        // the end of. The policy only ever returns an action the controller in
+        // scope offers, which makes the availability check below redundant for
+        // this path - an undefined step means "this controller offers nothing
+        // I know how to use", which is a wait, not a failure, until the limit.
+        var policyStep = arenaPolicyStep(controller);
+        if (policyStep == undefined) {
+            autopilotWaitTicks++;
+            if (autopilotWaitTicks == 1 || autopilotWaitTicks == AUTOPILOT_WAIT_LIMIT / 2) {
+                trace("{\"t\":\"dbg\",\"at\":\"autopilot-wait\",\"step\":\"(policy)\"" +
+                    ",\"frame\":" + frame + ",\"controller\":\"" +
+                    (controller == undefined ? "none" : controller.name) +
+                    "\",\"ticks\":" + autopilotWaitTicks + "}");
+            }
+            if (autopilotWaitTicks >= AUTOPILOT_WAIT_LIMIT) {
+                trace("{\"t\":\"dbg\",\"at\":\"autopilot-unavailable\",\"step\":\"(policy)\"" +
+                    ",\"frame\":" + frame + ",\"controller\":\"" +
+                    (controller == undefined ? "none" : controller.name) + "\"}");
+                autopilotAborted = true;
+            }
+            return;
+        }
+        autopilotIndex++;
+        autopilotIdleTicks = 0;
+        autopilotWaitTicks = 0;
+        autopilotCooldown = 30;
+        trace("{\"t\":\"dbg\",\"at\":\"autopilot\",\"step\":\"" + policyStep +
+            "\",\"n\":" + autopilotIndex + ",\"frame\":" + frame +
+            ",\"controller\":\"" + controller.name + "\",\"policy\":\"" + arenaPolicy + "\"}");
+        ov.getphase(policyStep);
+        return;
+    }
+
+    var step = autopilotSteps[autopilotIndex];
 
     // The step is only issued to a controller that offers it. Firing
     // regardless is what an unattended run cannot afford: getphase would set
@@ -738,8 +1380,39 @@ function shadowMathScopes() {
     }
 }
 
+/**
+ * Whether this action may be recorded at all.
+ *
+ * Every route other than `navigate=arena` is unchanged: it returns true, so
+ * the twenty-two promoted goldens stay reproducible byte for byte.
+ *
+ * The arena route is different because it fights MANY bouts per process and
+ * only one of them is ever evidence. A levelling run is staging, not
+ * observation, and a trace emitted from a duel would be an observation of an
+ * opponent nobody chose and nobody can reproduce (randomise_gladiator draws
+ * through the RandomNumber opcode, which no instrumentation can intercept).
+ * "champion" arms only for the tournament rank-1 bout - the hero reaches
+ * tournament_ranking <= 2 exactly when foyer frame 22 has bound
+ * _root.game.villain to the champion built by unleash_hell() from hard-coded
+ * DNA, which is the one reproducible armoured opponent in the build.
+ */
+function captureAllowedNow() {
+    if (!arenaMode) return true;
+    if (arenaCaptureMode == "always") return true;
+    if (arenaCaptureMode == "champion") {
+        var hero = gameRoot().game.hero;
+        if (hero == undefined) return false;
+        var ranking = Number(hero.tournament_ranking);
+        return (ranking == ranking && ranking <= 2 && _global.tournament_in_progress == true);
+    }
+    return false;
+}
+
 function beginAction() {
     if (actionCaptured) return;
+    // Checked before the latch, deliberately: a bout that is not the capture
+    // target must leave the wrapper able to arm on a LATER bout.
+    if (!captureAllowedNow()) return;
     actionCaptured = true;
     armed = true;
     dbg("action-armed");
@@ -932,6 +1605,7 @@ Key.addListener(keyListener);
 this.onEnterFrame = function () {
     dbgRootFrame();
     stepNavigator();
+    stepArenaNavigator();
     if (!battleHooked) { hookBattle(); return; }
     // Lethal close for actions the atomic frame-52 path resolved without
     // our checkattackroll wrap: one tick after the result label.
