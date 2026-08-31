@@ -1,146 +1,268 @@
 # Transfer handoff — SS2 Team Arena Foundation
 
-## Capture campaign state (2026-08-30, latest)
+## Capture campaign state (2026-08-30, end of session)
 
-Read this section first. Two full attack bands are runtime-verified, capture
-runs are unattended and take ~14 seconds each, and the campaign has moved from
-*confirming* candidates to *measuring* the build.
+Read this whole section before touching anything. 22 goldens, 429 tests, a
+capture round takes ~14 seconds, and the next action on the critical path is
+the first one this project has ever taken that can change the licensed save.
 
 ### What is promoted
 
-Eight goldens, all from one staged fight (the tutorial prisoner):
+| Family | Coverage | How the candidates were authored |
+| --- | --- | --- |
+| `golden-prisoner-quick-kill-dir1..4` | complete | from the map, before any quick session |
+| `golden-prisoner-normal-kill`, `-dir5/6/8` | complete | **from captures** — weakest evidence, see below |
+| `golden-prisoner-power-kill-dir9..12` | complete | from the map, before any power session |
+| `golden-probe-*` (10, five pairs) | complete | from the map; these **measure** |
 
-- `golden-prisoner-normal-kill`, `-dir5`, `-dir6`, `-dir8` — the normal band
-- `golden-prisoner-power-kill-dir9`, `-dir10`, `-dir11`, `-dir12` — the power band
+All twelve melee attack directions are runtime-verified, from one staged
+fight: a level-1 gladiator against the tutorial prisoner, both unarmoured,
+`fight_mode` `misc`.
 
-The power band is the stronger evidence and the reason matters. Its candidates
-were derived from the battle map by an author with no access to any capture,
-and committed before a single power session ran; eight later sessions matched
-them exactly, none diverging. The normal band's candidates were authored *from*
-captures, so each one's first observation confirmed nothing — it is what the
-candidate was fitted to. Prefer the power band as the model for how to do this.
+**Prefer the power and quick bands as the model.** Their candidates were
+derived from the battle map by an author with no access to any capture and
+committed before a single session of that band ran; the build then matched
+them exactly. The normal band's candidates were authored *from* captures, so
+each one's first observation confirmed nothing — it is what the candidate was
+fitted to. Never author a candidate from a capture.
 
-### How to run it
+### What the probes measured (the important part)
 
-```
-powershell -File tools\runtime-capture\run-capture.ps1 `
-  -FixturePath test\fixtures\ss2-1v1\<candidate>.json `
-  -SessionId <unique> -ObservationId <unique>
+A probe pair differs in exactly one injected value and is predicted to differ
+in a channel the capture genuinely observes. Twenty sessions produced:
 
-powershell -File tools\runtime-capture\run-campaign.ps1 `
-  -Family prisoner-power-kill -Autopilot "walkright*5,power_attack" `
-  -Rounds 12 -StopWhenComplete
-```
+- **`rollneeded` bracketed to a single integer per band** — quick misses at 26
+  and hits at 27, normal 43/44, power 62/63, all matching
+  `round(ratio * 100 * K)`. Because 44 hits while 43 misses, the comparison is
+  `diceroll >= rollneeded`, not `>`. An audit strengthened this: a strict
+  reading is impossible under *every* rounding convention and *every* ratio,
+  and the same six observations independently confirm both the
+  `(attack+9)/(defence+9)` ratio and `Math.round` over `ceil`. One unstated
+  premise remains — it assumes `rollneeded = 100 - chance`, which only the
+  map's byte reading settles.
+- **The critical-deflection threshold is 100, inclusive.** Both arms ran at
+  hit-roll 50, direction 5; deflection roll 99 dispatches `critical`, 100
+  dispatches `normal`, everything else byte-identical. Note this measures the
+  constant term and the boundary only — with helmet and greaves at 0 the
+  formula yields 100 for any coefficients. The armoured fixtures attack the
+  operand mix.
+- **The armour-selection sample is consumed before the equipped test** —
+  removal roll 66 gives 7 draws, 67 gives 8. Weakest of the three: it confirms
+  something the map already asserted flatly, and the extra draw's label and
+  position are echoed, so what is measured is "one extra draw, no state
+  change".
 
-`run-campaign.ps1` loops sessions until every attack direction in a family has
-a golden. It exists because the wrapper **observes** `attack_direction` rather
-than forcing it: the game draws it (`randomBetween(5,8)` for normal, `(9,12)`
-power, `(1,4)` quick) before the recording window arms, so which candidate a
-run is evidence for is only known once the trace is read. `campaign.mjs
-ingest-round` therefore ingests each session against every candidate in the
-family and keeps the one that MATCHES.
-
-Speed: a round is ~14s, down from 66s, because the player frame rate is locked
-to 960. That is a time dilation, not a frame shortcut — every frame still
-executes in order — and it was validated by capturing six sessions at 120/240/
-480/960 against already-promoted candidates and confirming all six matched.
-Measured curve: 30fps 66s, 120 23.7s, 240 18s, 480 18.3s, 960 14.3s. It
-plateaus because Ruffle goes CPU-bound near 300 effective fps and ~7s of each
-round is fixed setup.
+Unplanned findings: a miss consumes only pre-dispatch draws (3 normal, 2
+power/quick), so the runtime does not short-circuit on the roll; and the quick
+band draws no knockback roll while normal and power do, independently
+confirming the directions 5–12 knockback gate.
 
 ### What a capture actually proves — read before trusting a golden
 
-An adversarial pass could not break the arithmetic but did break the
-provenance claim. The details are in the runtime-capture doc under "What a
-match actually establishes"; the short version:
+Full account in `docs/integration/ss2-runtime-capture.md` under *What a match
+actually establishes*. Short version:
 
-- **Genuinely observed:** the ordered mutation trace, the semantic events
-  (including hit-vs-miss and the dispatched method), the final state, the
-  observed attack direction and fight mode, and the *number* of draws.
-- **Echoed, not observed:** every `roll` line's label, bounds, value and call
-  site. The wrapper serves its tape from a tap on `Math.random`, which takes no
-  arguments, so those fields are copied from the candidate under test. The
-  sample comparison can only fail on draw count.
-- **Never compared at all:** `expected.calculation` and `expected.mutation`.
-- Two chain weaknesses: the simulated-evidence rejection is one editable string
-  in the trace meta line (a synthetic trace with it rewritten reproduces a
-  committed observation's digest byte for byte), and session independence is
-  two operator-supplied strings.
+- **Observed:** the ordered mutation trace, the semantic events (including
+  hit/miss and the dispatched method), the final state, `attack_direction`,
+  `fight_mode`, and the **number** of draws.
+- **Echoed from the candidate, not observed:** every roll line's label,
+  bounds, value and call site. The wrapper serves its tape from a tap on
+  `Math.random`, which takes no arguments.
+- **Never compared:** `expected.calculation` and `expected.mutation`.
+- The simulated-evidence rejection is one editable string in the trace meta
+  line, and session independence is two operator-supplied strings.
 
-Two blind spots were closed in code: the wrapper now reports `overdraw`, the
-count of draws made after the tape ran out — previously invisible, because
-those fall through to the live RNG and are logged only as `dbg` lines that
-`delog` strips — and ingest refuses a nonzero count as the divergence it is.
-It also mints a `launchNonce` the operator does not supply.
+### Non-negotiable rules (each learned the hard way)
 
-### The probes — measurement rather than agreement
-
-Ten fixtures in five pairs (`candidate-probe-*`), each differing in exactly one
-injected value and predicted to differ in a genuinely observed channel. All ten
-captured and matched. What they measured:
-
-- **`rollneeded` bracketed to a single integer per band**: quick misses at 26
-  and hits at 27, normal 43/44, power 62/63. All three match
-  `round(ratio * 100 * K)`. Because 44 hits while 43 misses, the comparison is
-  `diceroll >= rollneeded`, not `>` — previously indistinguishable.
-- **The critical-deflection threshold is exactly 100, inclusive.** Both arms
-  ran at hit-roll 50 direction 5 and differ in one field: deflection roll 99
-  dispatches `critical`, roll 100 dispatches `normal`. Everything else is
-  byte-identical.
-- **The armour-selection draw is consumed before the equipped test**: removal
-  roll 66 gives 7 draws, roll 67 gives 8, the extra being `armour-selection-1`
-  burned on a defender wearing nothing.
-- Two unplanned findings: a miss consumes only the pre-dispatch draws (3 normal,
-  2 power/quick), so damage and the critical sample are derived before the hit
-  test and the runtime does not short-circuit; and the quick band draws no
-  knockback roll while normal and power do, independently confirming the
-  directions 5–12 knockback gate.
-
-### Non-negotiable rules (learned the hard way)
-
-- The licensed SWFs are read-only and hash-verified before and after every
-  capture. Never copy, export or commit game assets, extracted scripts, or
-  original files.
-- **Never shortcut the game's own frames.** Jumping past the prologue once
-  tripped the game's character-tampering screen. The prologue is not a
-  cutscene: it skins the hero and builds the villain via `unleash_hell(0)`.
-  Locking the frame rate is fine — every frame still runs.
+- Licensed SWFs are read-only and hash-verified before and after every
+  capture. Never copy, export or commit game assets or extracted scripts.
+- **Never shortcut the game's own frames.** Jumping past the prologue tripped
+  the game's character-tampering screen. The prologue is construction — it
+  skins the hero and builds the villain. Locking the frame rate is fine; every
+  frame still runs.
 - A candidate becomes golden ONLY via >=2 matching observations from >=2
-  independent sessions. Never hand-write a golden or an observation.
-- Derive candidates from the battle map, never from a capture. Otherwise the
-  later capture confirms a fit rather than a prediction.
+  sessions. Never hand-write a golden, observation or manifest.
+- **Derive candidates from the battle map, never from a capture.**
 - `tools\runtime-capture\validate-vehicle.ps1` must PASS after ANY wrapper edit.
-- Snapshot before risky work: `tools\runtime-capture\save-state.ps1 snapshot
-  <name>`. Known-good: `verified-good-1701`, `pre-arena-path`. It refuses to
-  run while Ruffle is open.
+- Use `git commit -F <file>` for any message containing quotes.
+- **Snapshot before every session, not only levelled ones** — see the save
+  correction below.
 
-### Known broken / in flight
+### Two corrections made late, both worth knowing
 
-- **`-SaveDirectory` is not usable yet.** Its protective half is verified — a
-  session with its own store provably cannot touch the real save — but Ruffle
-  wrote a fresh empty store rather than reading the seeded copy, so the
-  navigator found no gladiator and stalled on the slot screen. Parallel capture
-  is blocked on understanding that.
-- The wrapper emits `spell_id`, and the pipeline projects it, but no spell
-  capture has been attempted.
+**The prisoner route is not save-neutral.** An earlier claim (mine) said it
+never reaches a flush site. Wrong: `refresh_gladiators` flushes
+unconditionally and is called from root frames 35 and 84, which the navigator
+passes through at navSteps 0 and 1. Every capture has flushed the store twice.
+What is true and was *measured*: the write is a near-identity rewrite, so
+`ss2_data.sol` stays byte-identical (679 bytes, `6A06E9E8…`) while its mtime
+moves. The data is safe; the route avoiding the flush is not why. The same
+function has a **reset branch** that blanks every character slot when the
+gladiator count reads `undefined`/`0`/`NaN` — almost certainly the clobbering
+the launcher warns about.
 
-### The next move, and why
+**Seven goldens cited a manifest that did not exist.** The campaign driver
+named manifests by attack direction, six probe arms share direction 5, and
+they overwrote one another in one settle loop. Fixed (named by candidate,
+`overwrite: false`), all ten recovered by brute-forcing `createdAt` so the
+goldens stayed byte-identical, and the coverage test now walks every golden
+instead of one family's four.
 
-The tutorial-prisoner staging is close to exhausted: it produced the eight
-goldens and the ten probe arms, and **22 of the 47 candidates are unreachable
-from it**. They need armour on a combatant (the deflection threshold is always
-100 here because helmet and greaves are 0), the bow weapon mode (the archer
-controllers, and with them bombard/snipe/bash), a `tournament` fight mode (the
-defeat gate ends any non-tournament fight on the first hit that reaches
-hitpoints), or the spell ingress.
+---
 
-All of those need **a gladiator past level 1 fighting in the ordinary arena**,
-which also removes the prologue entirely, since `daybreak` only routes a
-level-1 hero to the dungeon. That requires following the game's own win →
-reward → level-up → foyer chain, including whatever decision the level-up
-screen demands — an unattended run must answer it identically every time or
-captures stop being reproducible. That route is being mapped from the bytecode
-into `docs/integration/ss2-arena-route.md`.
+## Next steps, in order
+
+### 1. Fold four preconditions into the navigator, THEN level a gladiator
+
+This is the critical path and the first save-mutating action. An adversarial
+audit of `docs/integration/ss2-arena-route.md` found four things that would
+have bitten. Do not start without them:
+
+- **Bound the session by wall clock.** `time_of_day` advances via
+  `setInterval(day_night_cycle, 1500)` — 1.5s wall clock — during everything
+  except the battle itself. At `>= 200` (about 4m24s of non-battle time from
+  24) the game enters a **special event** that permanently mutates charisma,
+  magicka or gold and then saves it through town square. Re-assert
+  `_global.time_of_day = 24` at each town-square rest (an in-vocabulary write
+  the game's own buttons make), and log it.
+- **Hard-abort on root frames 160–169.** Never let a generic advance step
+  press `special_button1`/`special_button2`.
+- **Gate the level-up press on `_root.statpoints`, not
+  `game.hero.statpoints`.** Button 2283 reads the *display mirror*, maintained
+  by an `enterFrame` clip action. Pressing it in the same execution slot as
+  the four decrements takes the refusal arm and parks forever. Allow >=1 frame.
+- **The frame-113 timeout must abort and log, never re-issue
+  `gotoAndPlay("daybreak")`.** Re-entering the span mid-way retains the
+  existing `day_night` clip and can flip its parity to a permanent hang.
+
+Spend all four level-up points into **vitality** every time. An audit traced
+all 34 `vitality` references: its only derivation is
+`hitpointsmax = herolevel*10 + vitality*20`. It touches no input to
+`attack_chances`, the damage roll, the deflection threshold or the controller
+selector — so a levelled gladiator stays comparable with the 22 goldens.
+
+Level 4 is the tournament gate (`tournament_level_required` 4 for a fresh
+gladiator).
+
+### 2. Capture the tournament rank-1 bout, not a duel and not a generated rank
+
+Two agents converged on this independently, and it corrects an earlier plan.
+
+- **Duels are not a capture target at all.** `randomise_gladiator` generates
+  the opponent per entry using `RandomNumber` **opcode** draws for appearance,
+  stat distribution and a matched armour suit. Opcode draws can be neither
+  injected nor recorded, so a duel opponent cannot be reproduced even with a
+  full tape.
+- **Tournament ranks 2..N are regenerated on every fresh launch**
+  (`tournament_in_progress != true`), and matching compares the full final-state
+  projection of **both** sides — so a generated opponent can never clear the
+  two-session gate.
+- **Rank 1 is built by `unleash_hell(tournament_number)` from hard-coded DNA
+  literals — zero villain-side RNG.** That is the one reproducible armoured
+  opponent, at the cost of winning the prior bouts in the same launch.
+
+### 3. Capture the families already authored and waiting
+
+- `candidate-tournament-*` (3) — the defeat gate's first-blood term, never
+  exercised. Outside tournament mode any hit reaching hitpoints ends the fight.
+- `candidate-armoured-*` (5) — armour absorption, the equality quirk, strict
+  overflow, a **real** deflection threshold (helmet 6 / greaves 2 → 93, and
+  the 92/93 bracket excludes every rival operand reading), and `remove_armour`
+  destroying a specific piece.
+- Pass `-WatchFields` with the per-piece `_defence` names. The wrapper's
+  default list omits them and ingest refuses a trace missing a field the
+  fixture stages. `watchFields` is now additive; leaving it empty reproduces
+  every existing golden exactly.
+- The ~5 legacy candidates needing a non-lethal hit need tournament *staging*,
+  not new fixtures.
+
+### 4. The spell family has never been captured
+
+The wrapper emits `spell_id` and the pipeline projects it, but no spell
+session has run. Before one can: the wrapper's `magic_damage_character` hook
+is registered with the `damagecharacter` label and emits no `magic-damage`
+event (`ss2-capture-wrapper.as`, the `registerSlot` for it). It needs the
+right hook label and an event carrying the `damage_method` argument.
+
+---
+
+## Known defects and open items
+
+**Evidence chain**
+- `overdraw` and `launchNonce` are validated at ingest then **discarded** —
+  neither reaches the observation record, so a reviewer holding only the repo
+  cannot verify the over-draw guard was satisfied. `overdraw` is also optional
+  at ingest; a trace without it silently carries no assurance. No test covers
+  either. Fix: make it mandatory for `injected-tape-runtime`, carry both into
+  `capture.*`, assert nonce uniqueness in the promotion gate.
+- **69 divergence reports were deleted as direction-lottery noise, and that
+  was a misjudgement.** An audit re-read all 89 raw probe traces and found
+  every measurement replicates across all twelve directions with zero
+  exceptions — far stronger than the two-session gate. The raw traces survive
+  under ignored `captures/` (155 sessions). Regenerate and commit them, and
+  state per-measurement replication counts.
+- Ingest drops no-op writes, so a candidate omitting the unconditional
+  breastplate-stamina write would still match. Observed evidence discarded.
+
+**Tooling**
+- `-SaveDirectory` is **not usable**. Its protective half is verified (a
+  session with its own store provably cannot touch the real save), but Ruffle
+  writes a fresh empty store instead of reading the seeded copy — confirmed the
+  seed lands at exactly the right path, byte-identical. Parallel capture is
+  blocked on understanding that.
+- `campaign.mjs loadFamily` matches `fixtureId.startsWith("candidate-" + f)`,
+  so `--family armour` also sweeps `candidate-armoured-*`. Should require a
+  `-`-delimited segment boundary.
+- `campaign.mjs` indexes families by `scenario.attackDirection`, so a spell
+  family would collide all members on `undefined`.
+- The ~7s fixed setup per round (hash verify, FFDec compile, Ruffle start) is
+  now ~half a round. Hoisting the wrapper compile out of the campaign loop is
+  the easy win.
+
+**Adapter follow-ups from the seam widening**
+- `toCanonicalCombatantSource` should emit `resources` from `armourclass`,
+  `staminaleft`, `ammo_left`, `charisma`, the armour piece ratings and the
+  enchantment fields, **on both sides** — the resolver refuses a write to an
+  undeclared resource by design.
+- `vanillaWritesForResolvedAction` needs a `RESOURCE` branch so writes reach
+  `armourclass`.
+- `createEffectRecordingRuleSet` is now redundant; use `lastResolvedAction`.
+- **A drawn battle cannot settle through the bridge.** The resolver produces
+  and settles draws; vanilla dispatches only `combatwon`/`combatlost`, so a
+  draw has no arena label and `reportArenaLabel` is the only thing that arms
+  the final gate. A draw's acknowledgement should be the completed death
+  animations with no arena transition. The resolver side is pinned as a
+  contract to code against.
+
+**Docs**
+- `docs/ss2-adapter-contract.md` "canonical-shape gaps" is partly stale.
+- `docs/roadmap.md` has stale rows (Stage 4 arena layout, campaign save).
+- `ss2-runtime-capture.md`: the trace grammar's `end` row does not document
+  `overdraw`/`launchNonce`; the `var` row omits `spell_id`; the `event` row
+  omits `magic-damage`; §Reading divergent traces still says an over-draw is
+  invisible.
+- An unresolved tension worth settling: `ss2-runtime-capture.md` says
+  `getphase` accepts only the current controller's labels, while the battle map
+  reads the phase machine as never consulting the controller frame. If the map
+  is right, the autopilot's gate is stricter than the build — safe, but
+  untested. One round issuing a label to a controller that does not offer it
+  settles it.
+
+---
+
+## Working agreement for parallel agents
+
+Nine ran concurrently this session and it worked, on these rules: exclusive
+file ownership per agent, no agent runs a state-mutating git command (one
+owner commits), no agent launches Ruffle or touches the installation or the
+save, and adversarial verifiers write nothing at all. The two adversarial
+passes were the highest-value agents of the session — both found real defects
+in committed work, including two of mine.
+
+A separate design track is researching endless progression in
+`docs/design/endless-progression-brief.md`. It is deliberately disjoint:
+design must never flow into candidate authoring, or a capture confirms a fit
+rather than a prediction.
 
 ## On the PC with Swords & Sandals II installed
 
