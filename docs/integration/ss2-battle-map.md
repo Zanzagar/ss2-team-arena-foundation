@@ -1889,11 +1889,83 @@ same `constructDNA` call that persists every other stat, and restored from DNA
 indices 18 and 19 on every re-skin. Any statement that "no tool path can change
 attack or defence, not even levelling" is wrong about the build.
 
-What this section deliberately does **not** do is the reachability arithmetic
-for any particular fixture. Whether a given `attack`/`defence`/`herolevel`/
-`vitality`/`stamina` combination is reachable depends on the starting gladiator,
-the number of levels won and how the four points per level were spent — that is
-a separate calculation, and nothing here should be read as having done it.
+### The reachability arithmetic, done (2026-08-31)
+
+This section previously stopped here, saying the arithmetic for any particular
+fixture was a separate calculation it had not done. It is done now, by
+`tools/stat-vector-reachability.mjs`, which derives every distinct
+`scenario.hero` in `test/fixtures/ss2-1v1/` from `battlevalues`' own formulas
+and the progression budget. Run it rather than trusting the table below.
+
+**The budget.** `heroDNA` seeds all eight stats at 1 (indices 16-22),
+`initwarrior` grants `statpoints = 9` to a new gladiator and `0` when a
+`charDNA` is restored, and each level-up grants exactly 4 that the commit
+button will not release until all are spent. So a character at `herolevel` L
+carries stats summing to **13 + 4L** — 17 at level 1 — none below 1, and after
+creation they only ever increase. Every reachable vector is pinned by:
+
+```text
+stamina   = (staminamax - 100) / 10
+vitality  = (hitpointsmax - herolevel * 10) / 20
+speed     = (13 + 4 * herolevel) - (the pinned stats + stamina + vitality)
+weapon    = the id whose [3]/[4] equal (min_damage - 2*strength, max_damage - 2*strength)
+```
+
+speed is the only free stat once the fixture and a herolevel are fixed, so
+"which herolevels work" is a one-line search, not a search over allocations.
+
+**The answer for the 22 fixtures this project wrote off as unbuildable: seven
+of them are reachable and fifteen are not.**
+
+| Hero vector | Fixtures | Verdict |
+| --- | ---: | --- |
+| `atk 1 def 1 str 10`, hp 30, stam 110 | 22 | level 1, all 9 creation points into strength, `weapon0`. The committed baseline. |
+| `atk 1 def 1 str 10`, hp 300, stam 110 | 8 | **herolevel 4**, vitality 13, speed 1 — 12 of the 12 points won go to vitality. Also 6, 8, … |
+| `atk 3 def 3 str 30`, hp 250, stam 150 | 5 | **herolevel 11**, vitality 7, speed 7, stamina 5, weapon **24** (hacking, gate `strength >= 12`). Also 13, 15, … 23. |
+| `atk 3 def 2 str 7`, hp 40, stam 130 | 2 | **herolevel 2**, vitality 1, speed 3, stamina 3, weapon **41** (bashing, gate `strength >= 3`), `greaves 4` + `boot 4` = 20. |
+| `atk 11 def 11 str 5 cha 5`, hp 60, stam 100 | 15 | **Unreachable.** Three grounds, below. |
+| spell family (magicka only) | 7 | No `attack`/`defence` pinned; every `staminamax` derives. |
+
+**Why the `attack 11 / defence 11` family cannot be built, in decreasing order
+of how much it would take to overturn:**
+
+1. **The weapon row does not exist, and this ground is absolute.**
+   `min_damage 12 / max_damage 20` at `strength 5` requires a weapon whose
+   `[3]/[4]` are `(2,10)`. None of the build's 90 weapon ids — 80 shop, plus
+   `weapon0` and the nine off-shop — carries that pair. `grievous-knockback`
+   needs the same `(2,10)` at `strength 9`, which is why it belongs to this
+   family however its strength/damage signature reads. `battlevalues` derives
+   `min_damage` from the weapon id on every call, so this holds for a created
+   hero, a DNA-built one and a staged one alike: a staged `min_damage` is
+   overwritten at the next phase transition.
+2. **The point budget cannot cover the vector.** `hitpointsmax 60` admits only
+   `(L 2, vitality 2)` and `(L 4, vitality 1)`, budgets of 21 and 29. The
+   pinned stats alone — `attack 11 + defence 11 + strength 5 + charisma 5`, plus
+   `magicka` at its floor because these fixtures omit it — need **33** before
+   vitality, stamina or speed get anything.
+3. **`staminamax 100` needs `stamina 0`**, below the created-gladiator floor.
+   This one is NOT absolute and the distinction matters: the tutorial prisoner's
+   `unleash_hell` literal carries `stamina 0`, and his `staminamax 100` is a
+   value the promoted goldens measured. A DNA-built character clears this ground
+   and still fails the first two.
+
+**What this changes about the capture plan.** The champion family needs a
+gladiator at herolevel 11 holding weapon 24, which costs 4542 against a
+`goldpieces` start of 2500 — so it needs won purses, not just won bouts. The
+duel pair needs herolevel 2 and weapon 41 at 1714, which the starting purse
+covers outright: **it is the cheapest unbuilt family in the corpus and should be
+captured first.** The 15 unreachable fixtures are not a capture problem at all;
+they are 15 fixtures asserting a weapon that is not in the game, and belong with
+the other contradicted scalars.
+
+**Two assumptions worth naming.** `initwarrior` has a two-armed branch writing
+`0` at `+0x0b1f` and `9` at `+0x0b41`; the arm selection has not been read
+out, and the budget above assumes the 9-arm for a new gladiator — which the
+committed prisoner vector independently satisfies at sum 17. And the entry
+handler on button 775 carries a `game_mode`/`herolevel < 12` demo chain whose
+effect on progression past level 12 has not been read out; herolevel 11 is the
+champion family's lowest solution and the only one below that boundary, which
+is a reason to prefer it rather than a demonstration that the others fail.
 
 ## UI and movie-clip map
 
