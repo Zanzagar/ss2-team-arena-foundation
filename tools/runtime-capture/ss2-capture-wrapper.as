@@ -784,6 +784,8 @@ var shopKind = "weapon";      // "weapon" -> "armour" -> done
 var shopItem = 0;             // the id currently being offered
 var shopTries = 0;
 var shopScanTicks = 0;
+var shopSettleFrame = -1;
+var shopSettleTicks = 0;
 // Category pages, highest tier first. Weapon shop labels are byte-verified in
 // the route map: bashing1..3 at 48/56/64, hacking1..3 at 72/80/88,
 // slashing1..3 at 96/106/116, ranged1..3 at 124/131/139, getitem at 147. The
@@ -1089,6 +1091,16 @@ function stepArenaNavigator() {
         var shopFrame = Number(answering._currentframe);
         var getitemFrame = (shopKind == "weapon") ? 147 : 184;
         if (shopFrame >= getitemFrame) {
+            // Let the getitem page SETTLE before reading its operands. The
+            // confirm button reads `itemcost` as a bare GetVariable resolving on
+            // the shop clip's own timeline, and buyweapon populates it on the
+            // way in - so confirming on the first frame that crosses the label
+            // reads it before it exists, which is how a purchase once ran with
+            // an undefined cost.
+            if (shopSettleFrame != shopFrame) { shopSettleFrame = shopFrame; return; }
+            shopSettleTicks++;
+            if (shopSettleTicks < 3) return;
+            shopSettleTicks = 0;
             if (shopConfirm(shopKind)) {
                 arenaLog("shop-bought",
                     "\"kind\":\"" + shopKind + "\",\"item\":" + jnum(shopItem) +
