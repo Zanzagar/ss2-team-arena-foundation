@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-armoured-deflection-threshold-cleared",
+  "observationId": "obs-adc2-a1",
+  "observationDigest": "beb8afe674af91ba0d8be56ca1b1874661ac642ed5f844feefc080a26f18ddfa",
+  "sessionId": "session-adc2",
+  "recordedAt": "2026-08-31T06:08:46.327Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 5,
+      "actual": 8
+    },
+    {
+      "path": "/scenario/hero/staminaleft",
+      "expected": 105,
+      "actual": 98
+    },
+    {
+      "path": "/scenario/villain/staminaleft",
+      "expected": 105,
+      "actual": 102
+    },
+    {
+      "path": "/finalState/hero/staminaleft",
+      "expected": 105,
+      "actual": 98
+    },
+    {
+      "path": "/finalState/villain/staminaleft",
+      "expected": 105,
+      "actual": 102
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-armoured-deflection-threshold-cleared",
+  "observationId": "obs-adc1-a1",
+  "observationDigest": "81f9bbd79dcfddb5266cfa0d79fd437df6630d3aa2800e08a6edc470ab21ec62",
+  "sessionId": "session-adc1",
+  "recordedAt": "2026-08-31T06:07:25.730Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 5,
+      "actual": 4
+    },
+    {
+      "path": "/scenario/hero/staminaleft",
+      "expected": 105,
+      "actual": 104
+    },
+    {
+      "path": "/scenario/villain/staminaleft",
+      "expected": 105,
+      "actual": 94
+    },
+    {
+      "path": "/samples/length",
+      "expected": 7,
+      "actual": 6
+    },
+    {
+      "path": "/mutationTrace/0/after",
+      "expected": 57,
+      "actual": 289
+    },
+    {
+      "path": "/mutationTrace/0/before",
+      "expected": 79,
+      "actual": 300
+    },
+    {
+      "path": "/mutationTrace/0/path",
+      "expected": "/villain/armourclass",
+      "actual": "/hero/hitpoints"
+    },
+    {
+      "path": "/finalState/hero/hitpoints",
+      "expected": 300,
+      "actual": 289
+    },
+    {
+      "path": "/finalState/hero/staminaleft",
+      "expected": 105,
+      "actual": 104
+    },
+    {
+      "path": "/finalState/villain/armourclass",
+      "expected": 57,
+      "actual": 79
+    },
+    {
+      "path": "/finalState/villain/staminaleft",
+      "expected": 105,
+      "actual": 94
+    }
+  ]
+}

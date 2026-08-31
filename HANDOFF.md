@@ -219,6 +219,68 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+**The wrong-side guard does not protect the arena route, and 9 of 20 armed
+captures were mislabelled. CRITICAL, and found live.**
+
+Twenty-two `run-arena.ps1` rounds were run against
+`candidate-armoured-deflection-threshold-cleared` on 2026-08-31 (sessions
+`session-adc1` … `session-adc22`; twenty armed, one aborted, one produced no
+direction). Splitting them by which combatant the first `damagecharacter` write
+landed on:
+
+| Who actually swung | n | `attack_direction` values observed |
+| --- | ---: | --- |
+| hero | 11 | 8, 8, 7, 8, 7, 6, 8, 8, 6, 7, 7 |
+| **villain** | **9** | 4, 10, 11, 20, 3, 2, **5**, 20, 10 |
+
+**Every one of the twenty carries `"attackerSide":"hero"` in its meta line, and
+`capture-refused-wrong-side` was logged exactly zero times.**
+
+This is the failure `captureAllowedNow`'s own comment calls out by name — "arming
+on the villain's swing would file a trace labelled 'hero' that ingest has no way
+to contradict: a false observation, which is worse than no observation." The
+guard is written correctly but is skipped wholesale on this route:
+
+```
+var attacker = gameRoot().game_attacker;
+if (attacker != undefined) {          // <-- on the arena route it IS undefined
+    ...
+    dbg("capture-refused-wrong-side");
+```
+
+`game_attacker` is evidently not set at the moment `captureAllowedNow` runs here.
+The guard is not dead everywhere — six `capture-refused-wrong-side` lines exist
+in older prisoner-route captures — so this is arena-specific.
+
+**Two things follow, and the second is the dangerous one.**
+
+1. *The battle map's `randomBetween(5, 8)` for `normal_attack` is confirmed,
+   sharply.* All eleven hero swings landed in 6–8 and none outside. The
+   out-of-range directions in the archive (2, 3, 4, 10, 11, 20) are the villain's
+   attacks, not a wider hero range. Direction 20 in particular belongs to no
+   documented hero band.
+
+2. *Direction does NOT discriminate, and must not be used as if it did.*
+   `session-adc18` is a villain swing at **direction 5** — inside the hero's own
+   range. Its mutation path is `/hero/hitpoints` and its method is `critical`.
+   Had the target fixture expected a hero-side mutation, that trace could have
+   MATCHED while being attributed to the wrong combatant, and the promotion gate
+   needs only two such.
+
+Every one of the nine was in fact caught, by `/mutationTrace/0/path` diverging
+(`/villain/armourclass` expected, `/hero/hitpoints` observed). **That is
+incidental, not a designed defence.** It holds only because every currently
+reachable fixture happens to expect a villain-side mutation.
+
+The fix belongs in `ss2-capture-wrapper.as` and so needs the vehicle gate re-run;
+the wrapper was frozen for this session's supervised captures, so this is
+reported rather than fixed. The shape it should take is a REFUSAL when the
+attacker cannot be identified, not a skip — `if (attacker == undefined) return
+false;` — because "I could not tell who swung" and "the right combatant swung"
+are the two cases the current code merges, and it merges them in the unsafe
+direction. Note that this is the same defect class as the `isNum` trap: an
+undefined read taking the permissive branch.
+
 **A third working forgery against the promotion gate. CRITICAL.** Hook
 attribution is not merely unverified — `reason` is stripped from BOTH sides
 before comparison (`src/golden/observation.js:753-760` and `:803-808`,
