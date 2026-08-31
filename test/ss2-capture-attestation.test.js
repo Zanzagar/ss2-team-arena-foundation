@@ -34,6 +34,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { CaptureTraceError, ingestSs2CaptureTrace } from "../src/golden/capture-ingest.js";
+import { SS2_PRE_NONCE_OBSERVATION_DIGESTS } from "../src/golden/pre-nonce-observations.js";
 import {
   ObservationValidationError,
   SS2_CAPTURE_ATTESTATION_KEYS,
@@ -510,19 +511,16 @@ test("promotion refuses two observations minted by the same player launch", () =
   );
 });
 
-test("promotion accepts distinct nonces, absent nonces, and a mix of the two", () => {
+test("promotion accepts distinct nonces, and refuses a nonce-free record it cannot place", () => {
   const withNonce = (suffix, launchNonce) =>
     injectedTapeRecord({
       observationId: `obs-ok-${suffix}`,
       sessionId: `session-ok-${suffix}`,
       end: wrapperEnd({ launchNonce })
     });
-  // An ARCHIVED trace, ingested through the one documented hatch. A fresh
-  // injected-tape trace can no longer omit the nonce: an adversarial pass
-  // showed the forgery it exists to stop still worked by simply deleting the
-  // key from a duplicated trace, so absence is refused at ingest now. What the
-  // hatch models here is the only honest way a nonce-less record exists — a
-  // trace captured before the field did.
+  // A nonce-free record, made the only way one can still be made: through the
+  // archived-trace hatch, which the live capture path never passes. Ingest has
+  // refused a fresh injected-tape trace without the nonce since cc42503.
   const withoutNonce = (suffix) =>
     injectedTapeRecord({
       observationId: `obs-ok-${suffix}`,
@@ -531,22 +529,91 @@ test("promotion accepts distinct nonces, absent nonces, and a mix of the two", (
       options: { allowMissingOverdraw: true }
     });
 
-  const cases = {
-    "two distinct nonces": [withNonce("d1", "111-1"), withNonce("d2", "222-2")],
-    // Legacy records carry no nonce at all. Absence must never be treated as a
-    // shared value, or every committed golden would stop promoting.
+  const distinct = [withNonce("d1", "111-1"), withNonce("d2", "222-2")];
+  const promotion = promoteSs2CandidateToGolden(baseFixture, distinct, manifestFor(distinct));
+  assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(promotion.matches.length, 2);
+
+  // THIS IS THE FORGERY, and until the pre-nonce waiver was enumerated it
+  // promoted. Both records are nonce-free, so neither shares a nonce with the
+  // other; both carry their own id and sessionId; both match the candidate;
+  // and their comparison projections are identical, which is what the pairwise
+  // gate is looking FOR. Absence used to mean "legacy, wave it through". It now
+  // means "name the record", and a record minted today cannot be named.
+  for (const [label, observations] of Object.entries({
     "two records with no nonce": [withoutNonce("n1"), withoutNonce("n2")],
     "one of each": [withNonce("m1", "333-3"), withoutNonce("m2")]
-  };
-  for (const [label, observations] of Object.entries(cases)) {
-    const promotion = promoteSs2CandidateToGolden(
-      baseFixture,
-      observations,
-      manifestFor(observations)
+  })) {
+    assert.throws(
+      () => promoteSs2CandidateToGolden(baseFixture, observations, manifestFor(observations)),
+      (error) =>
+        error instanceof PromotionError &&
+        /carries no capture.launchNonce and is not one of the records that predate the field/
+          .test(error.message),
+      label
     );
-    assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN, label);
-    assert.equal(promotion.matches.length, 2, label);
   }
+
+  // And the waiver is a set of DIGESTS, not of shapes: it is not enough to look
+  // like a pre-nonce record. The end-to-end proof that the enumerated records
+  // still promote is "the committed evidence still promotes untouched under the
+  // nonce gate" above, which runs the real candidate against real records.
+  assert.equal(SS2_PRE_NONCE_OBSERVATION_DIGESTS.has(withoutNonce("n1").digest), false);
+});
+
+// ---------------------------------------------------------------------------
+// The pre-nonce waiver, which is the only way a nonce-free record still promotes
+// ---------------------------------------------------------------------------
+
+/**
+ * The size the list had when it was frozen. It is a CEILING, not an equality:
+ * entries leave when the record they name is re-captured with a nonce, and
+ * nothing captured from here on can ever qualify to join, because ingest
+ * refuses to emit a nonce-free injected-tape-runtime record at all. So a list
+ * that has grown is a list somebody widened to let something through.
+ */
+const PRE_NONCE_CEILING = 58;
+
+test("the pre-nonce waiver may only ever shrink", () => {
+  assert.ok(
+    SS2_PRE_NONCE_OBSERVATION_DIGESTS.size <= PRE_NONCE_CEILING,
+    `the pre-nonce waiver has grown to ${SS2_PRE_NONCE_OBSERVATION_DIGESTS.size} entries. It is the ` +
+    "hatch that lets a nonce-free record promote, and no capture taken since cc42503 can qualify for " +
+    "it. Adding an entry is a claim that a record predating 2026-08-30 23:18 was overlooked; if that " +
+    "is really what happened, lower PRE_NONCE_CEILING's justification here rather than raising it."
+  );
+});
+
+test("every waived digest names a committed record that actually lacks a nonce", () => {
+  // A digest in that file is a promotion the gate will not refuse, so an entry
+  // that names nothing is a hole with no record behind it. And because a digest
+  // covers the whole record and validateSs2Observation verifies it against the
+  // contents, an entry names one exact record byte for byte — it cannot be
+  // moved onto different content by relabelling.
+  const byDigest = new Map(committedObservations.map((observation) => [observation.digest, observation]));
+  for (const digest of SS2_PRE_NONCE_OBSERVATION_DIGESTS) {
+    const observation = byDigest.get(digest);
+    assert.ok(observation, `waived digest ${digest} names no committed observation record`);
+    assert.equal(
+      Object.hasOwn(observation.capture, "launchNonce"),
+      false,
+      `${observation.observationId} carries a nonce and has no business in the pre-nonce waiver`
+    );
+    assert.equal(validateSs2Observation(observation), observation);
+  }
+});
+
+test("no committed record lacks a nonce without being waived", () => {
+  // Not a rule the gate needs — an unwaived nonce-free record simply cannot
+  // promote. It is a tripwire on the corpus: it means every nonce-free record
+  // in the repository today is one this waiver was written against, so a
+  // nonce-free record appearing later is visible as an addition rather than
+  // blending into 58 lookalikes.
+  const unwaived = committedObservations
+    .filter((observation) => !Object.hasOwn(observation.capture, "launchNonce"))
+    .filter((observation) => !SS2_PRE_NONCE_OBSERVATION_DIGESTS.has(observation.digest))
+    .map((observation) => observation.observationId);
+  assert.deepEqual(unwaived, [], "these committed records carry no nonce and are not waived, so they cannot promote");
 });
 
 test("a shared nonce never discards divergence evidence", () => {
