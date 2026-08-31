@@ -87,7 +87,8 @@ check PR state with `git ls-remote github "refs/pull/*/head"`.
   the scenario does not determine.
 
 ► **THE PAIRWISE GATE'S DORMANCY NUMBERS ARE WRONG, and the gate is weaker than
-  recorded.** "162 leaves" is a full-record count, not the comparison projection's
+  recorded.** **Both numbers in this bullet are wrong — see the note below it.**
+  "162 leaves" is a full-record count, not the comparison projection's
   (142); over the surface it names at least 10 leaves can differ, not 0, and 2 of
   them MUST differ in every legitimate promotion. The gate is LOGICALLY unable to
   fire on the promotion path. **The largest hole in the pipeline is now this: two
@@ -306,19 +307,34 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
-1. **The champion family cannot be captured, and the fixtures must be
-   re-derived.** This is a harder finding than the one it replaces, and it moves
-   the five `candidate-champion-*` fixtures into the same bucket as the fifteen
-   impossible-hero fixtures. Three independent arithmetic blocks, each byte-backed:
+1. ~~**The champion family cannot be captured, and the fixtures must be
+   re-derived.**~~ **RETRACTED 2026-08-31 (`2d0b077`). ALL THREE ARITHMETIC
+   BLOCKS BELOW ARE FALSE. Do not act on this item; capture the armoured family
+   instead (item 2).**
 
-   - The fixtures demand hero `attack` 3 and `defence` 3. **The build's only
-     gladiator is `attack` 1 / `defence` 1, and no tool path can change either** —
-     not `-StageHero` (see below), not the shop, not levelling.
-   - `hitpointsmax` 250 needs `herolevel*10 + vitality*20 = 250`, so an ODD
-     `herolevel` — and no reachable (herolevel, vitality) pair produces it for a
-     gladiator this tooling can build.
-   - `staminamax` 150 needs charDNA `stamina` 5. Nothing in the tooling writes
-     `stamina`.
+   This was the file's top-ranked next step while the corrections block at the
+   head of the same file already called its first premise false. A session that
+   read the list and not the block would have spent a window re-deriving five
+   fixtures that are capturable as written. **A retraction at the top of a file
+   does not reach a reader who starts at the section that tells them what to do:
+   retract AT THE INSTRUCTION, not only above it.**
+
+   The three blocks, and what each is refuted by — run
+   `node tools/stat-vector-reachability.mjs` for the current answer:
+
+   - ~~"no tool path can change `attack`/`defence` — not levelling"~~ **False.**
+     Root frame 227's level-up panel carries one `+` button per base stat,
+     `attack` (1602) and `defence` (2252) included, and `constructDNA` persists
+     them. Corrected in the block at the head of this file.
+   - ~~"`hitpointsmax` 250 … no reachable (herolevel, vitality) pair"~~ **False.**
+     `L=11, vitality 7` gives `110 + 140 = 250`. Six further odd levels also work.
+   - ~~"`staminamax` 150 needs `stamina` 5. Nothing in the tooling writes
+     `stamina`"~~ **False.** `stamina` is an ordinary level-up stat, button 2254.
+
+   The champion family is reachable at `herolevel 11` (vitality 7, speed 7,
+   stamina 5, weapon 24). It is NOT the cheapest target — weapon 24 costs 4542
+   against a 2500 start, so it needs won purses. See
+   `docs/integration/ss2-battle-map.md` § "The reachability arithmetic, done".
 
    **The byte answer to why staged hero fields die** — the question runbook §2A.5
    left open, and it is not the `experience` hypothesis. Overlay frame 1
@@ -375,6 +391,16 @@ ones that change what the next session should DO are marked ►.
   it does, and the gate is DORMANT by measurement (0 of 162 leaves can differ
   while both still match). It is a precondition for any field exclusion, not a
   fix. Land no exclusion before it.
+► **The "162 leaves" dormancy measurement does not reproduce, and neither does
+  its correction.** Measured 2026-08-31 over all 67 committed records:
+  full-record leaves range **101-184** and the matcher projection's **86-157**.
+  No record carries 162 under either, so "162" is not a full-record count and
+  "142" is one record's projection rather than a constant. A leaf count is a
+  PER-RECORD quantity and no single number describes the surface. The dormancy
+  conclusion ("0 can differ") was not re-measured and is now unconfirmed, not
+  refuted — re-measure it before relying on it, and before landing any field
+  exclusion that depends on the gate being a precondition.
+
 ► **A candidate was fitted to an observation, and it predates this session.**
   `staminaleft` 105 was transcribed after the map predicted 110. The same hero
   block may have carried it into other fixtures — **audit the corpus before

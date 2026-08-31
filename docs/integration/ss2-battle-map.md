@@ -1953,10 +1953,40 @@ of how much it would take to overturn:**
 gladiator at herolevel 11 holding weapon 24, which costs 4542 against a
 `goldpieces` start of 2500 — so it needs won purses, not just won bouts. The
 duel pair needs herolevel 2 and weapon 41 at 1714, which the starting purse
-covers outright: **it is the cheapest unbuilt family in the corpus and should be
-captured first.** The 15 unreachable fixtures are not a capture problem at all;
+covers outright. The 15 unreachable fixtures are not a capture problem at all;
 they are 15 fixtures asserting a weapon that is not in the game, and belong with
 the other contradicted scalars.
+
+► **CORRECTION, same day, and the error was mine.** This paragraph first said the
+duel pair "is the cheapest unbuilt family in the corpus and should be captured
+first." **That is wrong, and an adversarial pass caught it.** It ranked families
+by the gold a hero costs to build from scratch and never asked which heroes are
+ALREADY BUILT. Three independent grounds, each checked:
+
+1. **The armoured family's hero already exists.** That family (8 fixtures) needs
+   `L=4, vitality 13`, `weapon0`, no armour — and the committed snapshot
+   `level4-vitality-tournament-gate` is a level-4 gladiator with vitality 13.
+   `4*10 + 13*20 = 300`, exactly its `hitpointsmax`. Marginal cost: **zero gold,
+   zero levels, no purchase.** The duel pair needs a NEW gladiator on a specific
+   creation vector.
+2. **The 1714 is weapon-only.** Both duel fixtures also pin `greaves 4` and
+   `boot 4` (`armourclass_max` 20), which is unbudgeted armour on top.
+3. **The duel vector needs a WRAPPER change.** The wrapper spends all four
+   level-up points into `vitality` by policy; `attack 3 / defence 2` is
+   unreachable under it, so capturing the pair means editing the wrapper and
+   re-running `validate-vehicle.ps1`.
+
+And a fourth reason not to lead with it: `candidate-duel-firstblood-normal-kill`
+carries `provenance.kind: "transcribed-observation"` from `obs-20260830-e1`. It is
+one of the five transcriptions, so the promotion gate refuses its own source
+record as evidence — putting it first points a supervised window at a fixture
+that cannot promote from the record it was copied from.
+
+**The armoured family is the cheapest real evidence available.** Reachability
+arithmetic ranks what is BUILDABLE; it does not rank what is CHEAP, because it
+cannot see the snapshots. Do not read a "reachable" verdict from
+`tools/stat-vector-reachability.mjs` as a capture priority — cross it against
+the snapshot list in `HANDOFF.md` first.
 
 **Two assumptions worth naming.** `initwarrior` has a two-armed branch writing
 `0` at `+0x0b1f` and `9` at `+0x0b41`; the arm selection has not been read

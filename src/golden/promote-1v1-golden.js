@@ -467,6 +467,12 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   // THE OBSERVATIONS MUST AGREE WITH EACH OTHER, NOT ONLY EACH WITH THE FIXTURE.
   // DORMANT TODAY, AND THAT IS THE POINT — it is a PRECONDITION, not a fix.
   //
+  // NOTE 2026-08-31: the leaf COUNT below does not reproduce. Measured over all
+  // 67 committed records, full-record leaves range 101-184 and this matcher
+  // projection's range 86-157; NO record has 162 under either. The dormancy
+  // claim itself was not re-measured, so treat the count as unverified and the
+  // conclusion as unconfirmed rather than as a number to quote.
+  //
   // Measured before landing: probing all 162 leaves of a committed observation,
   // perturbing each one and re-digesting, ZERO can differ between two records
   // while both still match their candidate. So this loop cannot currently
