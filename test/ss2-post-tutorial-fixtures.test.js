@@ -215,14 +215,33 @@ test("every post-tutorial fixture explicitly stages fight_mode tournament", () =
   for (const id of POST_TUTORIAL_FAMILY) {
     assert.equal(byId.get(id).scenario.fightMode, "tournament", id);
   }
-  const legacyTournamentOnly = fixtures.filter(
-    (fixture) => !POST_TUTORIAL_FAMILY.includes(fixture.fixtureId) &&
-      fixture.scenario.fightMode === "tournament"
+  // The second half used to assert that NO fixture outside this family staged
+  // tournament mode. That was a snapshot of a moment mistaken for an invariant,
+  // and it cost something real: the champion family was authored, found it
+  // could not stage `fight_mode` without failing here, and DROPPED the key -
+  // forfeiting one of the few channels a capture genuinely reads from the game,
+  // on a bout that was the first chance to assert it.
+  //
+  // The concern the clause actually protects is narrower: a LEGACY candidate,
+  // authored before any of this existed, must not silently acquire the mode,
+  // because those fixtures were never staged for it. So the rule is stated
+  // positively - a fixture may stage tournament mode only if it belongs to a
+  // family declared capable of it - and adding a family is a deliberate line
+  // here rather than a test failure to work around.
+  const TOURNAMENT_CAPABLE_PREFIXES = [
+    "candidate-tournament-",
+    "candidate-armoured-",
+    "candidate-champion-"
+  ];
+  const undeclared = fixtures.filter(
+    (fixture) => fixture.scenario.fightMode === "tournament" &&
+      !POST_TUTORIAL_FAMILY.includes(fixture.fixtureId) &&
+      !TOURNAMENT_CAPABLE_PREFIXES.some((prefix) => fixture.fixtureId.startsWith(prefix))
   );
   assert.deepEqual(
-    legacyTournamentOnly.map((fixture) => fixture.fixtureId),
+    undeclared.map((fixture) => fixture.fixtureId),
     [],
-    "no fixture outside these families stages tournament mode; that is why they were authored"
+    "a fixture stages tournament mode without belonging to a family declared capable of it"
   );
 });
 
