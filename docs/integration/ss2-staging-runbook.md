@@ -813,8 +813,41 @@ if (attacker != undefined) {          // <-- on the arena route it IS undefined
 ```
 
 `game_attacker` is evidently not set at the moment `captureAllowedNow` runs here.
-The guard is not dead everywhere — six `capture-refused-wrong-side` lines exist
-in older prisoner-route captures — so this is arena-specific.
+**Correction, 2026-08-31.** Both sentences that stood here were wrong, and they
+were mine. I wrote that the guard "is not dead everywhere — six
+`capture-refused-wrong-side` lines exist in older prisoner-route captures — so
+this is arena-specific." Those six matches are in compiled wrapper SOURCE copies
+under `captures/wrapper-cache/` and `captures/vehicle-check/`, not in any trace.
+Across 268 archived rufflelogs the refusal appears **zero** times, and the defect
+was **universal**, not arena-specific.
+
+The cause was one word in one expression: the guard read
+`gameRoot().game_attacker` — `_level1.game_attacker` — and the game never writes
+that path. All 296 `game_attacker` references live inside `sprite:862[overlay]`
+frames 1 and 52, and the only two writes are bare `SetVariable` instructions
+inside `changeCombatants`, which in AVM1 resolve up the scope chain to the clip
+that defined the function. The value lives on the **overlay clip** — the same
+object the wrapper already reads `attack_direction` from at arming time.
+
+I also proposed `if (attacker == undefined) return false;` as the fix. Applied to
+the path as it stood, that would have blocked **every** capture on every route —
+21 of 21 armed rounds and all 193 archive captures — because the read never
+resolves. Fixing the object had to come first.
+
+**Both are now fixed and the guard is proved to fire in both directions**
+(commit `2b483a8`). `stub-game.as` had omitted `game_attacker` entirely, so
+`validate-vehicle.ps1` could not exercise the side guard at all — the gate this
+project mandates after every wrapper edit never noticed the guard was dead,
+because a stub that omits the field a guard reads cannot test that guard, and
+its silence reads exactly like a pass. With the stub binding the attacker:
+
+| stub binds | launcher claims | marker | outcome |
+| --- | --- | --- | --- |
+| hero | hero | `attacker-resolved-hero` | 32 trace lines, MATCH, gate PASSES |
+| villain | hero | `capture-refused-wrong-side` | 2 lines, nothing arms, ingest refuses |
+
+The second row is the first observed refusal in the project's history. A run
+whose log carries no `attacker-resolved-<side>` line has a dead guard again.
 
 **Two things follow, and the second is the dangerous one.**
 

@@ -3,7 +3,7 @@
 ## State at the end of the 2026-08-31 session
 
 22 promoted goldens and **no runtime evidence yet for the champion, armoured or
-tournament families**. **586 tests, all passing, 0 skipped** in a capture-bearing
+tournament families**. **602 tests, all passing, 0 skipped** in a capture-bearing
 worktree.
 
 The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
@@ -14,9 +14,9 @@ history includes `ecf4510` — and the 2026-08-31 session added the commits on
 ### Expected test profiles
 
 - A capture-bearing operator worktree with the complete ignored raw-trace
-  archive runs all **586 tests: 586 passed, 0 skipped, 0 failed**.
-- A fresh clone or worktree with none of those ignored traces runs **586 tests:
-  585 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  archive runs all **602 tests: 602 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **602 tests:
+  601 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
   existence check; the committed observation and divergence integrity checks
   still run.
 - A partial raw-trace archive does **not** skip: it fails and names every
@@ -169,32 +169,44 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
-1. **Capture the champion bout. The tooling blocker is gone; a NEW and better
-   understood one replaced it.** `run-arena.ps1` now exposes `-WatchFields`, so
-   the family finally has a vehicle that carries the eleven extra fields, the
-   `-Stage*` flags AND a snapshot guard. Three attempts ran on 2026-08-31 and
-   **captured nothing**, for reasons now backed by a trace rather than by
-   reasoning. Read
-   [`ss2-staging-runbook.md` §2A.5](docs/integration/ss2-staging-runbook.md)
-   before touching the staging string; the short version:
+1. **The champion family cannot be captured, and the fixtures must be
+   re-derived.** This is a harder finding than the one it replaces, and it moves
+   the five `candidate-champion-*` fixtures into the same bucket as the fifteen
+   impossible-hero fixtures. Three independent arithmetic blocks, each byte-backed:
 
-   - The route WORKS. It beat the ladder and reached John the Butcher at
-     110/86 — the fifteenth sighting of exactly the decoded numbers — and
-     staging applied at every bout including that one.
-   - `captureAllowedNow` refused all bout long on BOTH conditions.
-     `hero.herolevel` was WRITTEN as 5 and READ as 4 at arming time (staging
-     `herolevel:5` and `experience:0` together looks self-cancelling, but that
-     is **not yet verified from the bytes — verify it before editing the
-     string**). And `staminaleft` peaked at 107 of 110, never full, because it
-     carries across bouts and `battlevalues` refills it only at `<= 0`.
-   - The two configurations tried produce each other's wanted value: unstaged,
-     the hero levels to 5 and the gate wants 4; staged with `experience:0`, it
-     stays at 4 and the gate wants 5.
+   - The fixtures demand hero `attack` 3 and `defence` 3. **The build's only
+     gladiator is `attack` 1 / `defence` 1, and no tool path can change either** —
+     not `-StageHero` (see below), not the shop, not levelling.
+   - `hitpointsmax` 250 needs `herolevel*10 + vitality*20 = 250`, so an ODD
+     `herolevel` — and no reachable (herolevel, vitality) pair produces it for a
+     gladiator this tooling can build.
+   - `staminamax` 150 needs charDNA `stamina` 5. Nothing in the tooling writes
+     `stamina`.
 
-   Only the two direction-5 members can go through `run-arena.ps1` at all — the
-   quick and power band members need `-Autopilot`, which it does not forward.
-   Winning is still not required: the wrapper arms on the first
-   `checkattackroll` and closes on that call's return.
+   **The byte answer to why staged hero fields die** — the question runbook §2A.5
+   left open, and it is not the `experience` hypothesis. Overlay frame 1
+   (`initialise`) re-runs once per turn and calls
+   `skincharacter(_root.game.hero, this.hero)` → `initcharacter(hero, avatar,
+   hero.charDNA)`, which rewrites all 40+ DNA fields, then `battlevalues`. The
+   villain is never re-skinned there — which is exactly why `-StageVillain`
+   survives to arming and `-StageHero` does not. **Nothing in the build derives
+   `herolevel` from `experience`**, so the runbook's `experience:0` story was a
+   coincidence: the staged run's experience sits inside the unstaged
+   distribution, and nothing was suppressed. Battle-time `-StageHero` is a
+   one-turn write on the hero and a durable write on the villain.
+
+   **The "arrive empty" idea for the stamina gate is also wrong** and should not
+   be tried: overlay frame 62 refills the hero's stamina AND hitpoints on every
+   won bout, so a hero arriving at the rank-1 bout already has a full bar. The
+   only remaining stamina risk is the number of walk actions before the first
+   `checkattackroll`.
+
+   Do NOT edit the staging string to fit. Re-derive the family's hero from the
+   gladiator the project actually has — `attack` 1, `defence` 1, `magicka` 1,
+   `charisma` 1, `stamina` 1, `vitality` 1 + 4 per level — and recompute the
+   chance, roll and damage chain from that. The champion OPPONENT is unaffected:
+   `hitpointsmax` 110 and `armourclass` 86 are hard-coded DNA and were confirmed
+   again live (fifteen sightings).
 
 2. **Capture `candidate-armoured-*` (5) and `candidate-tournament-*` (3).**
    Both reachable with the tooling as it stands, and neither needs the
@@ -249,8 +261,41 @@ if (attacker != undefined) {          // <-- on the arena route it IS undefined
 ```
 
 `game_attacker` is evidently not set at the moment `captureAllowedNow` runs here.
-The guard is not dead everywhere — six `capture-refused-wrong-side` lines exist
-in older prisoner-route captures — so this is arena-specific.
+**Correction, 2026-08-31.** Both sentences that stood here were wrong, and they
+were mine. I wrote that the guard "is not dead everywhere — six
+`capture-refused-wrong-side` lines exist in older prisoner-route captures — so
+this is arena-specific." Those six matches are in compiled wrapper SOURCE copies
+under `captures/wrapper-cache/` and `captures/vehicle-check/`, not in any trace.
+Across 268 archived rufflelogs the refusal appears **zero** times, and the defect
+was **universal**, not arena-specific.
+
+The cause was one word in one expression: the guard read
+`gameRoot().game_attacker` — `_level1.game_attacker` — and the game never writes
+that path. All 296 `game_attacker` references live inside `sprite:862[overlay]`
+frames 1 and 52, and the only two writes are bare `SetVariable` instructions
+inside `changeCombatants`, which in AVM1 resolve up the scope chain to the clip
+that defined the function. The value lives on the **overlay clip** — the same
+object the wrapper already reads `attack_direction` from at arming time.
+
+I also proposed `if (attacker == undefined) return false;` as the fix. Applied to
+the path as it stood, that would have blocked **every** capture on every route —
+21 of 21 armed rounds and all 193 archive captures — because the read never
+resolves. Fixing the object had to come first.
+
+**Both are now fixed and the guard is proved to fire in both directions**
+(commit `2b483a8`). `stub-game.as` had omitted `game_attacker` entirely, so
+`validate-vehicle.ps1` could not exercise the side guard at all — the gate this
+project mandates after every wrapper edit never noticed the guard was dead,
+because a stub that omits the field a guard reads cannot test that guard, and
+its silence reads exactly like a pass. With the stub binding the attacker:
+
+| stub binds | launcher claims | marker | outcome |
+| --- | --- | --- | --- |
+| hero | hero | `attacker-resolved-hero` | 32 trace lines, MATCH, gate PASSES |
+| villain | hero | `capture-refused-wrong-side` | 2 lines, nothing arms, ingest refuses |
+
+The second row is the first observed refusal in the project's history. A run
+whose log carries no `attacker-resolved-<side>` line has a dead guard again.
 
 **Two things follow, and the second is the dangerous one.**
 
