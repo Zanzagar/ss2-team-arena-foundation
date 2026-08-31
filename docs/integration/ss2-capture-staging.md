@@ -315,8 +315,76 @@ sessions behind `test/fixtures/ss2-1v1-golden/`:
 | Villain (prisoner) | hp 10/10, armour 0/0, every stat 0, damage 1–3, stamina 95/100 at action time |
 | Status flags | all `undefined` on the persistent objects until something sets them; the wrapper normalizes them to `false` (map §Combatant state objects) |
 | Autopilot | `walkright*5,normal_attack` — five walks carry the hero from `longrange_warrior` into `closerange_warrior`, where the three melee labels live |
-| Stamina drift | the five walks cost stamina: 110 → 105 hero, 100 → 95 villain. Staged stamina is a function of the autopilot step count, and an early fixture diverged on exactly this |
+| Stamina drift | hero 110 → 105, villain 100 → 95 — **both measured, neither derived.** The hero's five walks do not explain the villain's −5, and the bytes forbid the derivation this row used to give. See the correction below |
 | Attack direction | **observed, not forced** — drawn before the recording window arms, so a family needs one candidate per direction |
+
+**Corrected — the hero's walks cannot move the villain's stamina.** The stamina
+row used to read *"the five walks cost stamina: 110 → 105 hero, 100 → 95
+villain"*, deriving both numbers from the hero's autopilot. Re-read from the
+bytes for this revision, in `nextphase` (overlay
+`sprite:862[overlay]/frame:52/DoAction@0x240c7f`, function defined at `+0x3193`):
+
+```text
++0x32a1..+0x32c2  game_attacker.staminaleft -= game_attacker.staminacost
++0x32c3..+0x3304  game_attacker.staminaleft += 1 + Math.round(game_attacker.stamina / 3)
++0x3347           check_stats(game_attacker)
+```
+
+Both writes target `game_attacker` and nothing else. Of the build's 43
+`staminacost` references, one is the read at `+0x32bb` above and the other 42
+are writes, every one of them of the form `game_attacker.staminacost = …`
+(`+0x3b37` is the walk: `Math.round(movement_speed / 2)`).
+
+`staminaleft` itself has 42 references build-wide, and censusing every one of
+them settles the question outright — **`+0x32a7` is the only write in the build
+that decreases `staminaleft`, and it is charged to `game_attacker`.** Every
+other write raises it or pins it:
+
+| Site | Effect |
+| --- | --- |
+| `check_stats` `+0x1122` / `+0x114b` | clamp to `staminamax`, floor at `0` |
+| `nextphase` `+0x32c9` | `+= 1 + Math.round(stamina / 3)` |
+| `nextphase` `+0x349b` | `+= Math.round(staminamax / 4)`, behind `spell_boundless_energy > 0` |
+| `+0x521d`, `+0x5af7`, `+0x5b9a`, `+0x6894` | `+= bonus` |
+| `damagecharacter` `+0x1928`, `magic_damage_character` `+0x14cc` | `+= ceil(damage × breastplate / 100)` on the character **taking** the hit — `0` for a bare combatant |
+| `+0x8e1d`, `battlevalues` `+0x3b38` (only when already `<= 0`) | `= staminamax` |
+| `sprite:2249/frame:1` `+0x0b9c` | `_root.game.villain.staminaleft = staminamax` — villain only |
+| `sprite:862[overlay]/frame:62` `+0x01a4` | `_root.game.hero.staminaleft = staminamax` — hero only |
+
+The rest are reads: the stamina bars and their tooltips (overlay frames 5 and
+20, `sprite:751[combat_panel]`), the hero's `rest`-phase test at overlay frame 1
+`+0x0d2e`, and three villain-AI tests — `villain_cast_spells` `+0x0a5a` (drink a
+potion below half `staminamax`), and `+0x03e8` / `+0x0b33` in the villain
+decision block `DoAction@0x23f835` (act at all only above `10`; choose `rest`
+below 40%). **No write anywhere lets one combatant's turn decrement the other's
+stamina.**
+
+What the bytes *do* permit is the villain spending its own turns.
+`changeCombatants` swaps the roles every phase — `+0x2ba2` binds
+`game_attacker` to `game.villain`, `+0x2c18` binds it back to `game.hero`, and
+`+0x2bc5` then calls `villainChooseAction` — so while the hero walks five times
+the villain takes phases of its own, and each of those runs the subtraction
+above against the villain. That is the only mechanism the build offers, and the
+capture wrapper's own side guard cites the same two offsets and the same fact
+(*"on the arena route the villain fights back"*,
+`ss2-capture-wrapper.as:1966`). It is **not** established that this is what
+produced the −5: the villain's actions come from `villainChooseAction`, not
+from `-Autopilot`, and neither the turn count nor the per-turn `staminacost`
+was recorded. Worse for anyone hoping to pin it, that chooser **reads the
+villain's own `staminaleft`** — it will not act below `10` and prefers `rest`
+below 40% of `staminamax` (`+0x03e8`, `+0x0b33`) — so the quantity feeds back
+into the decisions that move it. Do not treat the villain's 95 as derived from
+anything.
+
+Both numbers are transcriptions, and the repository says so. The committed
+`test/fixtures/ss2-1v1-divergences/provisional-prisoner-kill--obs-20260830-t1-6bf4f120.json`
+holds the map-derived prediction against what the runtime returned:
+`/scenario/hero/staminaleft` **expected 110, actual 105**;
+`/scenario/villain/staminaleft` **expected 100, actual 95**. The prediction was
+a fresh bout at full stamina on both sides; the fixture was re-authored to the
+runtime's two numbers, and the "five walks" explanation was written afterwards
+to account for them. It accounts for the hero's, mechanically at least, and not
+for the villain's at all.
 
 The one operator-controlled lever **in this loop** is the saved gladiator in the
 slot the navigator loads: `run-capture.ps1 -Navigate prisoner` has `-Autopilot`
@@ -430,6 +498,52 @@ The experimental-design contract these pairs have to keep is asserted in
 `test/ss2-probe-fixtures.test.js`, which fails if a later edit quietly turns a
 probe back into a pair whose arms differ only in echoed values.
 
+#### Corrected — four of the twelve kill goldens rest on one independent observation, not two
+
+The promotion gate requires two matching observations, and all twenty-two clear
+it on paper. But for four of them the **first** cited observation is the record
+the candidate was authored from, so that match was guaranteed before any capture
+ran. Candidate and observation land in the *same commit*, at the same file size:
+
+| Golden | Cited observations | Copied from | Landed together | Second observation |
+| --- | --- | --- | --- | --- |
+| `golden-prisoner-normal-kill` | `obs-20260830-t1`, `obs-camp3` | `obs-20260830-t1` | `135f2115`, 15:45 | 17:56 |
+| `golden-prisoner-normal-kill-dir8` | `obs-20260830-u1`, `obs-camp4` | `obs-20260830-u1` | `5f45627`, 16:00 | 17:56 |
+| `golden-prisoner-normal-kill-dir6` | `obs-diag`, `obs-gold3` | `obs-diag` (`obs-20260830-auto1.json`) | `19aead3`, 16:19 | 17:32 |
+| `golden-prisoner-normal-kill-dir5` | `obs-nav6`, `obs-camp1` | `obs-nav6` (`obs-20260830-auto2.json`) | `5317cec`, 17:18 | 17:56 |
+
+`135f2115` states the method and draws the opposite conclusion in the same
+breath: *"candidate-prisoner-normal-kill is authored directly FROM that
+observation record (scenario and tape copied verbatim from the live state dump
+…), so it carries no transcription. … obs-20260830-t1.json is observation 1 of
+the 2 the promotion gate requires."* A copy cannot fail to match its source. So
+what these four carry is **one** independent observation each — the second,
+which is genuine evidence.
+
+Three things this does **not** say, because the distinction is the whole point:
+
+- **The measurements are not in question.** The game really did produce those
+  outcomes, and the second observation of each pair says so independently. What
+  is wrong is the *count* of independent evidence, not the numbers.
+- **The other eighteen are unaffected in this respect.** The power, quick and
+  probe candidates were authored as predictions *before* any matching
+  observation existed (`d1da29e` 18:14 and `de3b2e1` 18:49, against probe
+  observations at 19:19; `d1da29e`'s own message: *"nothing here is runtime
+  evidence"*), and both of each one's cited observations came afterwards. Their
+  `scenario` block is inherited from `candidate-prisoner-normal-kill-dir5` —
+  identical for all ten probes, and differing only in `attackDirection` for the
+  power and quick kills — and so descends from a transcription, which is correct
+  practice, since a fixture has to describe a state a capture can actually
+  reach. Their tape and expected outcome do not.
+- **`provenance.kind` cannot tell you which is which.**
+  `src/golden/run-1v1-fixture.js` rejects any candidate that does not declare
+  `synthetic-static-map` with `runtimeVerified: false`, so a transcribed
+  candidate and a derived one carry identical provenance **by construction**.
+  That field records the rule the corpus is held to, not the history of any
+  particular file. To establish how a number got into a fixture, read the
+  authoring commit and the divergence report beside it — not the provenance
+  block.
+
 ## What a session costs
 
 **The prisoner route writes the save on every run.** An earlier version of this
@@ -475,7 +589,7 @@ on is most of this page:
 - Use a **dedicated capture slot**, and copy `ss2_data.sol` before the session
   and restore it after. Without that, session 2 of a family is staged
   differently from session 1 — which is exactly the class of divergence this
-  pipeline already had to chase once, over five walks' worth of stamina drift.
+  pipeline already had to chase once, over the approach's stamina drift.
 
   **This is now largely mechanised, and the mechanism is worth knowing exactly**,
   because its guarantees are narrower than "the save is protected".
@@ -687,7 +801,7 @@ and one runnable command line each — read it for *how*, and this table for
 | Group | Fixtures | Uncaptured | Binding constraint, as it stands |
 | --- | --- | ---: | --- |
 | A | prisoner kills + probes | 0 | **none** — all 22 promoted, all three bands complete |
-| **H** | `candidate-armoured-*` | 5 | **no staging blocker** — reachable with `-StageVillain`, runbook §3 — but 22 live rounds produced 0 matches. Attrition, `staminaleft` and the dead wrong-side gate; see below |
+| **H** | `candidate-armoured-*` | 5 | **no staging blocker** — reachable with `-StageVillain`, runbook §3 — but 42 live rounds have produced 0 matches. The wrong-side gate is now repaired and direction 5 lands; `staminaleft` is the one field still standing. See below |
 | **I** | `candidate-tournament-*` | 3 | **none. Reachable now**; runbook §4. `tournament-nonlethal-normal-hit` is the cheapest capture in the set |
 | **J** | `candidate-champion-*` | 5 | conditional, and **possibly the same 2/10-hero problem in another costume** — the opponent is reproducible, but four of the five hero values the fixtures assert have no writer in the tooling. Open; see below |
 | B | duel | 2 | **no longer the opponent.** A second, *lower*-level gladiator (`herolevel < tournament_level_required`), plus two weapon ids that this revision names |
@@ -709,15 +823,19 @@ corresponds to no weapon row in the build. That is a fixture edit, and it is
 not this document's to make.
 
 **Read the H and I line carefully, because it has been over-read once.** "No
-staging blocker" is not "a session will produce a golden". Twenty-two live
-arena rounds against one Group H fixture on 2026-08-31 produced **zero**
-matches and six committed divergence reports, and none of the six failed on
-staging: five failed on the observed `attack_direction`, one (`adc18`) matched
-the direction and failed on `/mutationTrace/0/path` because the villain had
-swung, and all six carried a `staminaleft` difference underneath. Those are
-sampling and attribution costs, not staging costs, and the distinction is the
-one this table exists to make — but a reader planning a supervised window needs
-both numbers. The per-fixture arithmetic is under Group H.
+staging blocker" is not "a session will produce a golden". **Forty-two** live
+arena rounds against one Group H fixture on 2026-08-31 — `session-adc1`–`adc22`
+before the wrong-side guard was repaired and `adc30`–`adc49` after — produced
+**zero** matches and **eleven** committed divergence reports, and not one of the
+eleven failed on staging. In the first batch of six, five failed on the observed
+`attack_direction` and one (`adc18`) matched the direction and failed on
+`/mutationTrace/0/path` because the villain had swung. In the second batch of
+five, **nothing failed except `staminaleft`** (`adc47` also carries a hero
+`hitpoints` dent from the villain swing the repaired guard refused). All eleven
+carry a `staminaleft` difference. Those are sampling, attribution and
+unspecified-state costs, not staging costs, and the distinction is the one this
+table exists to make — but a reader planning a supervised window needs all the
+numbers. The per-fixture arithmetic is under Group H.
 
 The runbook's own scoreboard says "9 more behind one read-only weapon-table
 sweep". **That sweep has been done** — [the item tables](ss2-item-tables.md)
@@ -762,6 +880,15 @@ The last four rows read **inferred** at the last revision, with the note that
 "only the kill tape is unobserved". They have since been captured; all twelve
 melee directions now carry a kill golden.
 
+**Read "verified" narrowly on the first four rows.** The four `normal-kill`
+candidates were each authored from the first observation cited for them, so one
+of their two promotion observations is a copy of the fixture rather than a test
+of it — see
+[four of the twelve kill goldens](#corrected--four-of-the-twelve-kill-goldens-rest-on-one-independent-observation-not-two).
+The outcomes are real; the independent-evidence count is one, not two. The eight
+`power-` and `quick-` rows do not have this problem: those candidates predate
+every observation cited for them.
+
 The three bands are separate campaign families: their injectable tapes differ
 (normal draws `randomBetween(min,max)` then a 1–20 critical; power takes
 `max_damage` with a 5–20 critical; quick takes `min_damage` with a −20..20
@@ -799,7 +926,7 @@ arbitrary one.
 | `min_damage 21` / `max_damage 23` at `strength 10` | `weapon0`, the starting weapon — **do not shop** |
 | `hitpointsmax 300` | `herolevel 4` with **`vitality 13`** |
 | `staminamax 110` | `stamina 1` — the tutorial value |
-| `staminaleft 105` | five walks from 110, or stage it |
+| `staminaleft 105` | **nothing derives this** — it is transcribed from the prisoner capture (below). Stage it, or expect it to diverge |
 | `armourclass_max 0` | all eight pieces 0 — **do not buy armour** |
 | `attack`/`defence`/`charisma`/`magicka 1`, `strength 10` | untouched tutorial values, i.e. a **vitality-only** levelling |
 
@@ -882,11 +1009,35 @@ drift.
   fixture *if the hero is the one swinging*. On the arena route he is not,
   about half the time — see the next bullet — so budget nearer **sixteen**.
 
-- **Corrected — the wrapper does have an attacker-side gate, and it is dead.**
-  This bullet used to read "the wrapper has no attacker-side gate either". It
-  has one: `captureAllowedNow` refuses when the observed attacker disagrees with
-  the launcher's `attackerSide`. The refusal has **never fired anywhere**, and
-  the reason is a scope mismatch rather than anything about this route:
+- **Corrected twice — the wrapper's attacker-side gate was dead, and has since
+  been repaired and measured working.** Read the rest of this bullet as history;
+  the planning advice at the end of it is superseded. Current state, measured
+  from the tree rather than from a commit message:
+
+  - `captureAllowedNow` now reads `overlayClip().game_attacker` and **fails
+    closed** — `isHero == isVillain` (both false, i.e. unresolved) is itself a
+    refusal (`ss2-capture-wrapper.as:1966`).
+  - Seven capture sessions log `capture-refused-wrong-side` once each —
+    `session-adc{32,34,35,36,45,47,48}` — where the whole prior census of 268
+    logs had zero.
+  - Nineteen `.rufflelog` files carry `attacker-resolved-hero` and **zero**
+    carry `attacker-resolved-villain`, which is the line the repaired guard
+    emits only after it has actually resolved the identity. A run whose log
+    carries neither line has a dead guard again; that is what the line is for.
+  - A refusal costs nothing: the wrapper re-arms on the hero's next attack in
+    the same bout. `adc47`'s one non-stamina divergence — hero `hitpoints` 288
+    rather than 300 — is the predicted price of waiting through a villain swing,
+    not a new problem.
+
+  Direction 5 consequently lands now: `adc33`, `adc35`, `adc37` and `adc42` are
+  clean direction-5 hero swings, which is what makes `staminaleft` the sole
+  remaining blocker in the next bullet.
+
+  The history, because the failure mode is worth recognising again. This bullet
+  once read "the wrapper has no attacker-side gate either". It had one:
+  `captureAllowedNow` refuses when the observed attacker disagrees with the
+  launcher's `attackerSide`. That refusal had **never fired anywhere**, and the
+  reason was a scope mismatch rather than anything about this route:
 
   - the guard reads `gameRoot().game_attacker`, and `gameRoot()` returns
     `_level1`;
@@ -898,9 +1049,11 @@ drift.
   - so `attacker` is `undefined`, and the guard's `if (attacker != undefined)`
     skips the comparison wholesale rather than refusing.
 
-  Measured, not inferred. Of 268 archived `.rufflelog` files, **zero** contain
-  `capture-refused-wrong-side`, and so do zero `.jsonl` traces. A whole-tree
-  grep of `captures/` returns exactly six paths, and they are three archived
+  Measured, not inferred — **as of the 268-log census; the tree now holds 292
+  logs and seven of them do carry the refusal, see the head of this bullet.** Of
+  those 268 archived `.rufflelog` files, **zero** contained
+  `capture-refused-wrong-side`, and so did zero `.jsonl` traces. A whole-tree
+  grep of `captures/` then returned exactly six paths, and they were three archived
   wrapper *sources* plus the three `.swf` binaries compiled from them — not six
   log lines, and all three are arena-era builds. The twenty-two `session-adc*`
   arena rounds
@@ -915,56 +1068,97 @@ drift.
   All twenty-two meta lines read `"attackerSide":"hero"`, and the guard logged
   nothing. Nine mislabelled traces with a live guard present is a direct proof
   that the read is undefined at arming time on this route; the byte fact above
-  is why it is undefined on every other route too. **Treat the guard as absent
-  when planning.** (The live half of that proof is arena-only: the prisoner
-  route never gives the villain a turn, so a *working* guard would also have
-  logged zero there. It is the scope mismatch, not the log census, that
-  generalises.)
+  is why it was undefined on every other route too. **That instruction — "treat
+  the guard as absent when planning" — no longer applies; the guard is repaired
+  and fires.** (The live half of that proof is arena-only: the prisoner
+  never **swings**, so a *working* guard — which only tests at arming, and the
+  wrapper only arms on an attack — would also have logged zero there. It is the
+  scope mismatch, not the log census, that generalises. This used to read "never
+  gives the villain a turn"; that is stronger than the evidence and the bytes
+  contradict it. `changeCombatants` alternates `game_attacker` every phase, and
+  the prisoner's `staminaleft` moved 100 → 95 in the very capture the goldens
+  come from — which, per §*The staged fight*, only its **own** phases can do.
+  The prisoner takes turns; it just never attacks on them.)
 
-  Two planning consequences. A villain swing is not a wasted round, it is a
-  **poisoned** one — it produces a complete trace labelled `hero`. Today those
-  are caught only because `/mutationTrace/0/path` diverges, which holds only
-  while every reachable fixture expects a villain-side mutation; `session-adc18`
-  is a villain swing at direction **5**, so the direction alone must never be
-  used to attribute a swing. And the wrong-side rate is what turns eight bouts
-  into sixteen: of the twenty rounds that produced an attributable swing, 11
-  were the hero's, so `0.55 × 0.25 ≈ 0.14` — about one usable bout in seven.
-  Observed: **0 usable direction-5 hero swings in 22 rounds** (one aborted
-  before arming, one armed without a `damagecharacter` write). At that rate a
-  clean sweep of twenty is a ~5% outcome, so it is bad luck rather than a
-  contradiction — but plan for the measured rate, not for the 1-in-4.
+  Two planning consequences **from the dead-guard era**, both now discharged by
+  the repair. While the guard was dead a villain swing was not a wasted round
+  but a **poisoned** one — it produced a complete trace labelled `hero`, caught
+  only because `/mutationTrace/0/path` diverged, which held only while every
+  reachable fixture expected a villain-side mutation. `session-adc18` is a
+  villain swing at direction **5**, so *direction alone must never be used to
+  attribute a swing* — that lesson stands whatever the guard is doing. And the
+  wrong-side rate was what turned eight bouts into sixteen: of the twenty rounds
+  that produced an attributable swing, 11 were the hero's, so
+  `0.55 × 0.25 ≈ 0.14`, about one usable bout in seven, and **0 usable
+  direction-5 hero swings in 22 rounds** (one aborted before arming, one armed
+  without a `damagecharacter` write) — a ~5% outcome, bad luck rather than a
+  contradiction. **Budget from the repaired rate instead**: with villain swings
+  refused rather than recorded, direction 5 is back to roughly 1 in 4 of the
+  armed rounds (`randomBetween(5, 8)`), and **five** direction-5 hero captures
+  arrived in the first batch behind the fix — `adc33`, `adc35`, `adc37`,
+  `adc42`, `adc47` — four of them diverging on `staminaleft` and nothing else.
 - **New, and measured: `staminaleft 105` diverges on every arena round so far.**
-  All five fixtures assert `staminaleft 105` on **both** sides. All six
-  committed divergence reports for this family — the
-  `candidate-armoured-deflection-threshold-cleared--obs-adc{1,2,3,4,5,18}-a1-*`
-  files under `test/fixtures/ss2-1v1-divergences/` — carry a
-  `/scenario/villain/staminaleft` difference, and three of them carry the
-  hero's too. Every observed value, expected 105 in each case:
+  **Eight** fixtures assert `staminaleft 105`, not five, and each asserts it on
+  **both** combatants and in both `scenario` and `expected.state` — the five
+  `candidate-armoured-*` of this group and the three `candidate-tournament-*`
+  of Group I, which share the hero block (runbook §2). Measured:
+  `grep -rlc '"staminaleft": 105' test/fixtures/` returns **53** files — those 8
+  plus 23 more candidates and 22 goldens — and the villain's 105 in these eight
+  is the hero's number copied across, not a villain-side derivation: the
+  runbook's villain table warrants `staminamax 110` and has no `staminaleft` row
+  at all. **Eleven** committed divergence reports for this family, not six —
+  `candidate-armoured-deflection-threshold-cleared--obs-adc*-a1-*` under
+  `test/fixtures/ss2-1v1-divergences/`. All eleven carry a
+  `/scenario/villain/staminaleft` difference; seven carry the hero's too. Every
+  observed value, expected 105 in each case:
 
-  | round | hero | villain |
-  | --- | ---: | ---: |
-  | `adc1` | 104 | 94 |
-  | `adc2` | 98 | 102 |
-  | `adc3` | — | 102 |
-  | `adc4` | — | 90 |
-  | `adc5` | — | 110 |
-  | `adc18` | 100 | 96 |
+  | round | hero | villain | everything else that differed |
+  | --- | ---: | ---: | --- |
+  | `adc1` | 104 | 94 | direction 4, sample count, villain's swing |
+  | `adc2` | 98 | 102 | direction 8 |
+  | `adc3` | — | 102 | direction 10, villain's swing |
+  | `adc4` | — | 90 | direction 11, villain's swing |
+  | `adc5` | — | 110 | direction 8 |
+  | `adc18` | 100 | 96 | villain's swing, `critical` not `normal` |
+  | **`adc33`** | — | **95** | **nothing** |
+  | **`adc35`** | **104** | **92** | **nothing** |
+  | **`adc37`** | **108** | **100** | **nothing** |
+  | **`adc42`** | **106** | **90** | **nothing** |
+  | `adc47` | 106 | 93 | hero `hitpoints` 288 — a dent carried in from the villain's refused swing |
 
-  No two rounds agree, and the villain's value straddles 105 in both
-  directions. Two of the six — `adc2` and `adc5`, both correct-side hero swings
-  at direction 8 — diverged on **nothing but** `attackDirection` and
-  `staminaleft`, so this is the field that will still be standing between this
-  family and a match on the day the direction finally lands. Stamina is a
+  **Corrected — this is no longer "the field that will still be standing".** The
+  bottom five rows landed in `5a0d565`, one commit after this section was last
+  revised, and they change what it says. Four of them —
+  `adc33`, `adc35`, `adc37`, `adc42` — diverge on `staminaleft` and **nothing
+  whatsoever else**: direction 5 landed, the side guard held, and the entire
+  resolution chain matched (hit roll, `rollneeded`, dice roll, damage selection,
+  critical determination, deflection roll and threshold, armour absorption, the
+  mutation trace and both final states). `staminaleft` is the *only* field
+  between this family and a match, and that is now measured five times over
+  rather than argued.
+
+  Note the hero's column: `106` and `108` are **above** 105, at `staminamax
+  110`. Nothing that spends the approach can produce that, so "five walks from
+  110" cannot be the rule even on the hero's side; the per-phase regen term
+  simply outran `staminacost` on those bouts. Stamina is a
   per-phase quantity, re-read from the bytes for this revision: `nextphase`
   does `staminaleft -= staminacost` at `+0x32a7`–`+0x32c2` and then
   `staminaleft += 1 + Math.round(stamina / 3)` at `+0x32c3`–`+0x3304`, with
-  `check_stats` clamping afterwards. So the value at arming is a function of
-  how many approach turns the bout happened to take — which the arena policy
-  does not fix, and which staging before the walks does not survive.
+  `check_stats` clamping afterwards. **Both writes are on `game_attacker`
+  only** (§*The staged fight that produced the goldens*), and
+  `changeCombatants` re-binds `game_attacker` every phase, so each side's value
+  at arming is a function of **its own** turn count. The hero's is a function of
+  the approach the arena policy does not fix; the villain's is a function of
+  what `villainChooseAction` decided, which the operator does not control at
+  all and `-Autopilot` does not reach. That is the shape of the observed table:
+  both columns straddle 105, and the villain's spans twice the range (90–110
+  against the hero's 98–108) because nothing about it is steered.
   **This row is open**, and it is the cheapest thing a next session could
   settle: either re-author the fixtures' `staminaleft` from an observed arena
   bout (route 3, *capture first, author second*), or establish that the turn
-  count can be pinned. Do not plan Group H as though staging alone clears it.
+  count can be pinned. Do not plan Group H as though staging alone clears it,
+  and do not carry the hero's number onto the villain again — that is where the
+  present 105 came from.
 - **The clamp race is the one genuinely unproven part.** Staging `vitality:2`
   and `hitpoints:80` together is correct only if `battlevalues(villain)` runs
   before the last `check_stats(villain)` inside the 20-frame staging window.
@@ -1538,7 +1732,7 @@ revision and all of them agree (up to ordering, which the tool sorts):
 | every non-`normal_attack` direction on the arena route | one run proving `-Autopilot` with `-ArenaPolicy ''` drives it, through `launch-capture.ps1` — `run-arena.ps1` cannot pass the pair. Never done |
 | the duel pair | a second gladiator at `herolevel` 2–3 |
 | the 5 `candidate-champion-*` | **open** — either a run that contradicts the hero table under Group J, or fixtures re-derived from `attack 1` / `defence 1` / `stamina 1` and a reachable `(herolevel, vitality)` pair |
-| the 5 `candidate-armoured-*` | nothing in staging, but a `staminaleft` the fixtures and the arena route disagree about, plus ~7 bouts per usable direction-5 hero swing |
+| the 5 `candidate-armoured-*` | nothing in staging, and since the wrong-side guard was repaired nothing in sampling either — **only** a `staminaleft` the fixtures and the arena route disagree about, measured five times over on clean direction-5 hero captures |
 
 Nothing on this page any longer claims a fixture is unreachable because its
 opponent cannot be chosen, because parallel capture is impossible, or because

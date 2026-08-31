@@ -458,6 +458,38 @@ _root.game.hero.experienceneeded = round(L*L*(L/5)*300)               // +0x38d3
 if (_root.game.hero.experienceneeded < 125) … = 125                   // +0x398c
 ```
 
+#### The eight `<piece>_defence` fields, named (byte-verified 2026-08-31)
+
+The `(…the other six pieces likewise)` shorthand above hid the fact a fixture
+author needs, so the eight fields are enumerated here with their own assignment
+sites. Every one of them is assigned on **every** `battlevalues` call, and
+`nextphase` runs `battlevalues` for both combatants at every phase transition
+(overlay frame 52 `+0x35f1` attacker, `+0x3605` defender). A fixture that states
+piece ids but no `<piece>_defence` is not under-specified — it is describing a
+state the build cannot hold, because the derived field is rewritten from the
+piece id before the first roll. Staging the derived field alone is worse: it is
+overwritten and the piece id it disagrees with wins.
+
+| Field | Source id | `_global` multiplier | Assignment |
+| --- | --- | --- | --- |
+| `breastplate_defence` | `breastplate` | `breastplate_dval` 16 (`+0x3089`) | `+0x3480` |
+| `helmet_defence` | `helmet` | `helmet_dval` 10 (`+0x3096`) | `+0x34bf` when `helmet <= 25`, `+0x34eb` when `helmet > 25` |
+| `shinguard_defence` | `shinguard` | `shinguard_dval` 6 (`+0x30a3`) | `+0x351f` |
+| `greaves_defence` | `greaves` | `greaves_dval` 3 (`+0x30b0`) | `+0x3546` |
+| `shoulderguard_defence` | `shoulderguard` | `shoulderguard_dval` 8 (`+0x30bd`) | `+0x356d` |
+| `gauntlet_defence` | `gauntlet` | `gauntlet_dval` 5 (`+0x30ca`) | `+0x3594` |
+| `boot_defence` | `boot` | `boot_dval` 2 (`+0x30d7`) | `+0x35bb` |
+| `shield_defence` | `shield` | `shield_dval` 12 (`+0x30e4`) | `+0x35f7`, or the flat `0` at `+0x3623` while `using_bow == true` (test `+0x35e2`) |
+
+Two corrections to the way this range has been quoted elsewhere in the project.
+**The span `+0x3480`–`+0x35e1` covers only seven of the eight.** It ends at the
+`boot_defence` `SetMember`; `shield_defence` is a separate `using_bow` branch
+beginning at `+0x35e2`, and it is the one piece whose contribution can be zero
+while its id is non-zero. And **`helmet_defence` is branched, not flat** — both
+arms assign the field, so "all eight are assigned on every call" stands, but the
+value is `round(herolevel * 0.5 * helmet_dval)` above id 25 and
+`round(helmet * helmet_dval)` at or below it.
+
 The `using_bow` override at `+0x3416` was not previously recorded here, and the
 map's earlier formula list implied the two pairs were independent. They are not:
 it is a plain `if (using_bow)` (`GetMember`, `Not`, `If` past the block), so in
@@ -592,6 +624,204 @@ Maximum ammunition is tiered by character level: 5 below level 9, 10 for levels
 re-tests `herolevel >= 35` redundantly at `+0x3769`, which changes nothing).
 The tier assignment is unconditional, but the `ammo_left` refill that consumes
 it is inside the `battle_started` skip above.
+
+## Stamina: every reader, every writer, and the `staminacost` table
+
+Byte-verified 2026-08-31 against the same installed SWF and fingerprint.
+Reproduce the inventory with:
+
+```powershell
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" `
+  --references 'staminaleft' --max-actions 200
+```
+
+It reports **42 reference lines**. Those resolve to **20 read statements and 15
+write statements**: seven of the writes spend two reference lines each, because
+they read the field they update.
+
+Two claims about `staminaleft` have circulated in this project and they are not
+the same claim. Stated separately:
+
+- **Narrow, and TRUE.** No formula in the attack-resolution chain reads
+  `staminaleft`. `attack_chances`, `checkattackroll` (`+0x2c30`–`+0x3192`), the
+  deflection block (`+0x3030`–`+0x3095`), `remove_armour` and `destroy_armour`
+  contain **zero** references of any kind; the two damage ingresses touch the
+  field only to *add* to it, and the defeat gate reads `hitpoints`. A staged
+  `staminaleft` cannot move a hit chance, a roll, a damage number, a deflection
+  threshold or a death.
+- **Broad, and FALSE.** `staminaleft` is read at twenty sites in the build, and
+  they decide *which phase runs at all* — which buttons exist, whether a forced
+  rest pre-empts the turn, and what the villain chooses. The field is upstream
+  of the chain, not absent from it.
+
+### The twenty readers
+
+| Site | Offsets | What the read decides |
+| --- | --- | --- |
+| `combat_panel` `hero_stamina_potion` clip-action | `+0x0087`, `+0x00c7` | meter text and percentage — presentation only, and note the members it writes are named `hitpoints` and `hitpointpercentage` on the stamina clip too, because both meters are the same component |
+| `combat_panel` `villain_stamina_potion` clip-action | `+0x008a`, `+0x00ca` | same, villain side |
+| overlay frame 1 timeline | `+0x0d2e` | `staminaleft <= 0` forces `getphase("rest")` (§Turn gating, order 2) |
+| overlay frame 5 `DoAction@0x238de2` | `+0x0c0a`, `+0x10a2` | `staminaleft / staminamax * 100 >= 50` wires `taunt` into the shared `longrange_warrior` slot and below it `rest`, one site per facing (§Buttons wired per controller frame) |
+| overlay frame 20 `DoAction@0x23b16b` | `+0x0c15`, `+0x110a` | the same test on `longrange_archer` |
+| `villain_cast_spells` | `+0x0a5a`, `+0x0acf` | `villain.staminaleft < villain.staminamax / 2` rewrites the decision to `drink_potion` and calls `use_item` |
+| `villainChooseAction` | `+0x03e8` | `staminaleft > 10` gates the **entire** action-choice block (the false arm jumps 1,209 bytes past it) |
+| `villainChooseAction` | `+0x0b33`, `+0x0b9f`, `+0x0e22`, `+0x0e8e` | on the `choices > 95` arm of both facings, `staminaleft / staminamax * 100 >= 40` picks `taunt` and below it `rest` |
+| `villainChooseAction` | `+0x1173` | after a movement label is written, `staminaleft > 0` failing replaces it with `rest` |
+| `check_stats` | `+0x110a`, `+0x112f` | the two clamp tests (§`check_stats` is a pure clamp) |
+| `battlevalues` (root frame 35) | `+0x3b1c` | `staminaleft > 0` failing triggers the refill below — inside the `battle_started` skip, so out of battle only |
+
+Note the two AI thresholds differ from the hero's: the villain needs 40% to
+prefer `taunt` and any value above 10 to act normally, while the hero's
+long-range button swap is at 50%.
+
+### The fifteen writers
+
+| Site | Offset | Effect |
+| --- | --- | --- |
+| `nextphase` | `+0x32a7` | `game_attacker.staminaleft -= game_attacker.staminacost` |
+| `nextphase` | `+0x32c9` | `game_attacker.staminaleft += 1 + round(game_attacker.stamina / 3)` |
+| `nextphase` | `+0x349b` | `+= round(game_attacker.staminamax / 4)`, only while `attacker.spell_boundless_energy > 0` (test `+0x347c`) |
+| `damagecharacter` | `+0x1928` | `game_defender.staminaleft += stamina_bonus` (§Attack roll dispatcher for the `ceil(breastplate * damage / 100)` join) |
+| `magic_damage_character` | `+0x14cc` | the same unconditional join on the spell ingress |
+| `check_stats` | `+0x1122` | ceiling at `staminamax` |
+| `check_stats` | `+0x114b` | floor at `0`, which also converts `undefined` and `NaN` to zero |
+| `rest` branch | `+0x521d` | `+= game_attacker.stamina` (`bonus` bound at `+0x5208`) |
+| `drink_potion`, `inventory_action == 6` (test `+0x5aaf`) | `+0x5af7` | `+= round(staminamax * 0.5)` |
+| `drink_potion`, `inventory_action == 7` (test `+0x5b5f`) | `+0x5b9a` | `+= round(staminamax)` |
+| `taunt` branch | `+0x6894` | `+= game_attacker.stamina` |
+| `cast_rejuvinate` | `+0x8e1d` | `= game_attacker.staminamax`, beside the matching `hitpoints` and `armourclass` restores at `+0x8e08` and `+0x8e32` |
+| overlay frame 62 `combatwon` `DoAction@0x24a1c5` | `+0x01a4` | `_root.game.hero.staminaleft = staminamax` on every won bout |
+| `battlevalues` | `+0x3b38` | `= staminamax`, only when the `+0x3b1c` test fails **and** `battle_started` is false |
+| sprite 2249 `initbattle` frame 1 `DoAction@0x6e421b` | `+0x0b9c` | `_root.game.villain.staminaleft = _root.game.villain.staminamax` |
+
+The last two rows and frame 62 together settle where a bout *starts*: the
+villain is refilled unconditionally at `initbattle` (`+0x0b9c`), and the hero is
+refilled on every victory (`+0x01a4`). There is no hero counterpart to
+`+0x0b9c` — the 42-line inventory contains exactly one `staminaleft` write in
+sprite 2249, and it is the villain's. So a mid-ladder hero arrives full because
+it *won*, not because the arena set it, and a first bout depends on whatever
+`battlevalues` last did out of battle.
+
+### `staminacost` by phase
+
+The cost is set inside the phase branch and spent later, in `nextphase`
+(`+0x32a7`). It is therefore **path-determined**: the value of `staminaleft` at
+any `checkattackroll` reflects the actions already taken, not the scenario.
+`--references 'staminacost'` reports **43 lines**: the single read at `+0x32bb`
+and **42 assignment sites**, every one of them below. All 42 are inside overlay
+frame 52 `DoAction@0x240c7f` and all 42 write `game_attacker.staminacost` — no
+phase writes the defender's. This is the table that lets a fixture *derive* a
+`staminaleft` instead of copying one.
+
+| Phase label(s) | Site | `staminacost` |
+| --- | --- | --- |
+| `walkleft` | `+0x3b37` | `round(movement_speed / 2)` |
+| `walkright` | `+0x3d16` | `round(movement_speed / 2)` |
+| `runleft` | `+0x3ef5` | `round(movement_speed / 2)` |
+| `runright` | `+0x407e` | `round(movement_speed / 2)` |
+| `chargeright` | `+0x4214` | `round(movement_speed * 2)` |
+| `chargeleft` | `+0x4480` | `round(movement_speed * 2)` |
+| `jumpright` | `+0x46ec` | `round(movement_speed)` |
+| `jumpleft` | `+0x49c4` | `round(movement_speed)` |
+| `block` | `+0x4ca4` | `7` |
+| `swap_weapons` | `+0x4d35` | `1` |
+| `wincrowd` | `+0x5014` | `3` |
+| `rest` | `+0x5163` | `0 - round(stamina * 15)` — **negative** |
+| `frozen` | `+0x52c6` | `0` |
+| `life_stolen` | `+0x53fa` | `0` |
+| `poisoned` | `+0x552e` | `0` |
+| `burning` | `+0x5662` | `0` |
+| `drink_potion` | `+0x5792` | `0` |
+| `shove` | `+0x5dd3` | `round(strength * 1.5)` |
+| `power_attack` | `+0x603c` | `round(strength * 3)` |
+| `normal_attack` | `+0x61a3` | `round(strength * 2)` |
+| `quick_attack` | `+0x6317` | `round(strength)` |
+| `bash_attack` | `+0x6475` | `round(strength * 2)` |
+| `psyche_up` | `+0x653f` | `round(strength)` |
+| `taunt` | `+0x67bb` | `round(charisma * 2)` |
+| `bombardright` \| `bombardleft` \| `sniperight` \| `snipeleft` | `+0x6bb5` | `round(strength * 3)` — one shared branch (`+0x6b53`–`+0x6b9d`) |
+| `cast_teleport` | `+0x7567` | `round(magicka)` |
+| `cast_adulation` | `+0x76d4` | `round(magicka)` |
+| `cast_weaken_armour` | `+0x77a2` | `round(magicka)` |
+| `cast_whirlwind` | `+0x7900` | `round(magicka)` |
+| `cast_gale` | `+0x7ad0` | `round(magicka)` |
+| `cast_command` | `+0x7c0c` | `round(magicka)` |
+| `cast_ghost_strike` | `+0x7ddd` | `round(magicka)` |
+| `cast_colossus` | `+0x8011` | `round(magicka)` |
+| `cast_little_fat_kid` | `+0x822f` | `round(magicka)` |
+| `cast_lightning_bolt` \| `cast_frightning_bolt` | `+0x842f` | `round(magicka)` — one shared branch |
+| `cast_death_from_above` | `+0x8655` | `round(magicka)` |
+| `cast_swiftsandals` | `+0x8994` | `round(magicka)` |
+| `cast_bloodlust` | `+0x8a97` | `round(magicka)` |
+| `cast_regenerate` | `+0x8be2` | `round(magicka)` |
+| `cast_boundless_energy` | `+0x8cc1` | `round(magicka)` |
+| `cast_rejuvinate` | `+0x8d8f` | `round(magicka)` |
+| `cast_fireball` \| `cast_hell_fireball` \| `cast_dire_fireball` | `+0x8fa7` | `round(magicka)` — one shared branch |
+
+Every `strength`, `charisma`, `magicka`, `stamina` and `movement_speed` above is
+read off `game_attacker` at the moment the branch runs, and `movement_speed` is
+itself `clamp(round(speed * 1.5), 4, 60)` recomputed by `battlevalues` at
+`+0x37d2`.
+
+Five rows of this table contradict figures that have circulated in project
+notes, and the bytes are the arbiter:
+
+| Phase | Circulated | Byte-verified |
+| --- | --- | --- |
+| `bash_attack` | `20` | `round(strength * 2)` |
+| `psyche_up` | `10` | `round(strength)` |
+| snipe | `30` | `round(strength * 3)`, shared with bombard |
+| `rest` | `0` | `0 - round(stamina * 15)` |
+| `shove`, `wincrowd` | absent | `round(strength * 1.5)`, `3` |
+
+The `rest` row is the one that changes arithmetic elsewhere. Because
+`nextphase` spends the cost by subtraction, a negative cost is a **gain**: a
+completed rest adds `round(stamina * 15)` on top of the baseline
+`1 + round(stamina / 3)`, which is why the rest phase can refill a bar in one
+turn rather than trickling it back.
+
+### The per-turn mutation is attacker-only
+
+`nextphase` `+0x32a1`–`+0x3304` is two consecutive statements on
+`game_attacker.staminaleft` — the cost subtraction and the regeneration — with
+**no `game_defender` counterpart anywhere in the function**. The only defender
+touch in that neighbourhood is `check_spells(defender, game_defender)` at
+`+0x3289`. The hitpoint regeneration immediately after (`+0x3305`–`+0x3346`,
+`+= 1 + ceil(stamina / 2)`) is attacker-only for the same reason.
+
+Neither statement is inside a branch. The enclosing function begins at `+0x3193`;
+the four `_x` clamps before them (`If` at `+0x31cc`, `+0x31f8`, `+0x3224`,
+`+0x3250`) all close by `+0x3266`, and the next conditional in the function is
+the `spell_regenerate` test at `+0x33c3` (`If` at `+0x33d7`). So the attacker
+pays and regenerates on **every** phase transition, and a combatant standing
+still as defender neither pays nor recovers until the sides swap. Any simulation
+that regenerates both sides per turn will drift from the build.
+
+### The `taunt` branch restores inline
+
+The `rest` restoration is not the only one. The `taunt` branch carries its own
+copy, and it fires on a completed taunt rather than on a rest:
+
+| Step | Offset | Effect |
+| --- | --- | --- |
+| cost | `+0x67bb` | `staminacost = round(charisma * 2)` |
+| watchdog | `+0x67e4` | `taunttimer++`; at `> 60` (`+0x67ee`) it zeroes the timer, nulls `attacker.struck` (`+0x6812`) and calls `nextphase` (`+0x681f`) |
+| guard | `+0x6835`–`+0x6841` | the restoration runs only while `attacker.struck == null` |
+| hitpoints | `+0x684c` | `game_attacker.hitpoints += 3 + ceil(game_attacker.stamina)` |
+| stamina | `+0x6894` | `game_attacker.staminaleft += game_attacker.stamina` (`bonus` bound at `+0x687f`) |
+| clamp | `+0x68d3` | `check_stats(game_attacker)` |
+| re-arm | `+0x68f0` | `attacker.struck = false` |
+
+Two things about that guard are worth stating precisely, because a note
+elsewhere in the project records the opposite polarity. The decoded test is
+`attacker.struck == null` — the `If` at `+0x6841` jumps **past** the
+restoration when `struck != null`. And the re-arm at `+0x68f0` writes `false`,
+not `null`, which under AVM1 abstract equality is *not* equal to `null`; so the
+block self-disarms after one pass and is re-armed only by the `+0x6812` write
+the 60-tick watchdog performs. A fresh clip whose `struck` is still `undefined`
+also satisfies the guard, because `undefined == null` is true. How many times
+this fires across one taunt is therefore a runtime question, not a decode one,
+and it is not settled here.
 
 ## RNG surface
 
@@ -1528,6 +1758,143 @@ Team mode must declare victory only when a team has no living combatants, wait
 for the final defeat animation, and invoke a one-shot result bridge. It must not
 run vanilla win settlement after the first individual knockout.
 
+## Stat points, the `levelup` panel, and what levelling can change
+
+Byte-verified 2026-08-31. This section exists because the project has been
+operating on the premise that **no path can change the hero's `attack` or
+`defence` — not `-StageHero`, not the shop, not levelling.** The first two are
+not settled here. **The third is false**, and the mechanism is below.
+
+### The eight `+` buttons
+
+Root frame **227** is the label `levelup` (span 227–234; the root label table
+reproduces with `--labels --timeline '^root$'`). It places character **2265** at
+depth 357. Sprite 2265 places exactly eight buttons, one per base stat:
+
+| Depth | Button id | Stat incremented | `++` site |
+| --- | --- | --- | --- |
+| 8 | 1596 | `strength` | `+0x00ad` |
+| 11 | 1600 | `speed` | `+0x00aa` |
+| 14 | 1602 | **`attack`** | `+0x00ab` |
+| 17 | 2252 | **`defence`** | `+0x00ac` |
+| 20 | 2253 | `vitality` | `+0x00ad` |
+| 23 | 1608 | `charisma` | `+0x00ad` |
+| 26 | 2254 | `stamina` | `+0x00ac` |
+| 47 | 2264 | `magicka` | `+0x00ac` |
+
+Every one of the eight is a `DefineButton2` with a single condition record
+(`condition:0`) and the same four-statement body, whose offsets differ only by
+the one or two bytes the stat name costs in the constant pool: a
+`_root.game.hero.statpoints > 0` guard (the `GetMember` at `+0x004a`–`+0x004c`,
+the `If` that skips the body at `+0x005e`–`+0x0060`), a
+`_root.clicksound.start()`, the `Increment` tabulated above, and a
+`statpoints - 1` write-back closing on a `Subtract`/`SetMember` pair at
+`+0x00e1`–`+0x00e4`. There is no per-stat cap, no cost curve, and no exclusion
+for `attack` or `defence`: all eight stats cost one point each.
+
+Grant sites for `statpoints` are equally plain. Root frame 227
+`DoAction@0x6e776b` sets `_root.game.hero.statpoints = 4` at `+0x01b4`; the
+max-level arm of `DoAction@0x6e7945` sets both `_root.game.hero.statpoints` and
+the `_root.statpoints` display mirror to `4` at `+0x1cc2` and `+0x1cd3`. So a
+level-up is worth **four** points, freely assignable, `attack` and `defence`
+included.
+
+The unnamed clip-action on the depth-357 placement
+(`root/frame:227/instance:357/clip-action:0`) copies `statpoints` and each stat
+from `_root.game.hero` up to `_root` for display (`+0x0081` onward). It is a
+mirror, not a source.
+
+### The commit button
+
+Character **2283**, placed on root frame 227 at depth 409, is the panel's
+continue control. Its `condition:0` body reads the `_root.statpoints` mirror at
+`+0x0156`; while any point is unspent it only writes an `inspirato_text`
+warning at `+0x016f`. Once none remain it runs, in order:
+
+| Step | Offset |
+| --- | --- |
+| `_root.backup_char(_root.game.hero)` | `+0x0199` |
+| `_root.clicksound2.start()` | `+0x01af` |
+| `_root.hero.removeMovieClip()` | `+0x01d1` |
+| `_root.restore_char(_root.game.hero)` | `+0x01f5` |
+| `herolevel == 2` → `_global.day = 1`, `_global.time_of_day = 24`, `gotoAndPlay("daybreak")` | `+0x020e`, `+0x0229`, `+0x0234`, `+0x0245` |
+| else `_global.tournament_in_progress == true` → `_root.backup_character(hero)`, `gotoAndPlay("foyer")` | `+0x0264`, `+0x0293`, `+0x029a` |
+| else `gotoAndPlay("townsquare")` | `+0x02b3` |
+
+`backup_char` and `restore_char` are both `DefineFunction2` in root frame 35
+`DoAction@0x3fa9dc` (`+0x2d5a` and `+0x2ed7`), and **each ends by calling
+`constructDNA`** — `+0x2ec5` and `+0x3050`. That is the persistence step.
+
+### Why the spent points survive the per-turn re-skin
+
+Overlay frame 1 re-runs `skincharacter(_root.game.hero, this.hero)` once per
+turn, and `skincharacter` calls `initcharacter(whichcharacter, whichavatar,
+whichcharacter.charDNA)` at `+0x1aa9` of root frame 35 `DoAction@0x40bf76`.
+`initcharacter` rewrites the whole stat block from the DNA string by index:
+
+| DNA index | Field | Assignment |
+| --- | --- | --- |
+| 16 | `strength` | `+0x0766` |
+| 17 | `speed` | `+0x077d` |
+| 18 | **`attack`** | `+0x0794` |
+| 19 | **`defence`** | `+0x07ab` |
+| 20 | `vitality` | `+0x07c2` |
+
+So anything written straight onto `_root.game.hero` and not carried into
+`charDNA` is discarded at the next re-skin — which is the byte reason a
+battle-time `-StageHero` write does not survive. `constructDNA` closes exactly
+that gap. It is a `DefineFunction2` at `+0x1b66` of the same block; it appends
+the live `_root.game.hero` fields in the same order — `attack` read at `+0x1e1b`
+and `defence` at `+0x1e36`, matching indices 18 and 19 — and assigns the
+finished string to `_root.game.hero.charDNA` at `+0x2176`–`+0x2180`.
+
+The round trip is therefore closed: **button → live field → `constructDNA` →
+`charDNA` → `initcharacter` → live field.**
+
+### How the panel is entered
+
+`gotoAndPlay("levelup")` has exactly one site in the build:
+`root/button:775/condition:2` `+0x059e`. Button 775 sits at depth 15 of sprite
+**777**, the `fight_win_stuff` reward overlay. The handler branches first on the
+panel's own `nextleveltext` state (`+0x0469`), then on a `game_mode` /
+`herolevel < 12` demo chain (`+0x0483`–`+0x04d3`), then on `herolevel < 50`
+(`+0x04eb`–`+0x04fb`). Inside that gate it sets `experience` to
+`experienceneeded + 1` (`+0x0512`), increments `herolevel` (`+0x0548`), calls
+`battlevalues` (`+0x0576`) and `constructDNA` (`+0x0588`), and only then jumps
+to the label. The panel is reached from winning a bout, not from a debug route.
+
+### The sibling panel on `createchar`
+
+Sprite **1630**, placed at depth 107 on root frame **65** (`createchar`), is the
+character-creation twin. It carries sixteen buttons at depths 9–70 — the same
+eight `+` handlers reusing ids 1596, 1600, 1602, 1608 plus 1604 (`defence`),
+1606 (`vitality`), 1610 (`stamina`) and 1628 (`magicka`), each paired with a
+refund button (1599, 1601, 1603, 1605, 1607, 1609, 1611, 1629) that is the
+mirror image: guard `<stat> > 1` (`GetMember` at `+0x004c`, `If` at `+0x005c`
+for id 1599), `clicksound.start()`, `<stat> - 1`, then `statpoints++` at
+`+0x00df`. **The floor is the stat, not the point pool** — a refund is refused
+at 1, so no creation path can drive a base stat below 1. The
+creation allowance is `9`: root frame 71 `DoAction@0x4189ab` writes it at
+`+0x033f` and `+0x035c`, and `initwarrior` (root frame 35 `DoAction@0x3ffdcf`)
+carries a two-armed branch writing `0` at `+0x0b1f` and `9` at `+0x0b41` — the
+arm selection is not read out here. Sprite 2265 substitutes ids 2252,
+2253, 2254 and 2264 for four of the eight, which is why an id-only search finds
+twelve `+` buttons in the build rather than eight.
+
+### The premise, answered
+
+**It falls.** `attack` and `defence` are ordinary level-up stats: buttons 1602
+and 2252, one point each, four points per level, persisted to `charDNA` by the
+same `constructDNA` call that persists every other stat, and restored from DNA
+indices 18 and 19 on every re-skin. Any statement that "no tool path can change
+attack or defence, not even levelling" is wrong about the build.
+
+What this section deliberately does **not** do is the reachability arithmetic
+for any particular fixture. Whether a given `attack`/`defence`/`herolevel`/
+`vitality`/`stamina` combination is reachable depends on the starting gladiator,
+the number of levels won and how the four points per level were spent — that is
+a separate calculation, and nothing here should be read as having done it.
+
 ## UI and movie-clip map
 
 | Symbol/instance | ID/context | Role |
@@ -1655,7 +2022,29 @@ this map are reproduced with:
 ```powershell
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels --timeline 'sprite:862'
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels --timeline 'sprite:2249'
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels --timeline '^root$'
 ```
+
+The 2026-08-31 stamina and stat-point sections reproduce with:
+
+```powershell
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references 'staminaleft' --max-actions 200
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references 'staminacost' --max-actions 200
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references 'statpoints' --max-actions 400
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references 'charDNA|constructDNA|backup_char' --max-actions 80
+```
+
+**One method gap, stated rather than hidden.** Everything above reproduces with
+the project inspector except the *placement* table in §Stat points — which
+button character sits at which depth of sprite 2265 and sprite 1630, and that
+sprite 2265 is what root frame 227 places at depth 357. The inspector records a
+`PlaceObject2`/`PlaceObject3` only when it carries a name or class name
+(`parsePlaceObject`, `if (name || className)`), and these placements carry
+neither, so `--references` and `--labels` cannot show them. That grouping was
+read directly from the tag stream. The button *bodies* and the stat each one
+increments are fully covered by `--references 'statpoints'`, so the substantive
+claim does not depend on the gap; the depth ordering does. A `--places` mode on
+the inspector would close it.
 
 These commands print analysis only; do not redirect decompiled game
 code or assets into the repository.

@@ -440,12 +440,46 @@ one:
 | `min_damage 21`, `max_damage 23` at `strength 10` | `weapon_min_damage 1`, `weapon_max_damage 3` | the **starting** weapon. Do **not** pass `-ShopWeapon` |
 | `hitpointsmax 300` | `herolevel * 10 + vitality * 20 == 300` | at `herolevel 4`: **`vitality 13`** |
 | `staminamax 110` | `stamina 1` | the tutorial value |
-| `staminaleft 105` | five walks from 110, or stage it | matches the goldens' observed drift |
+| `staminaleft 105` | stage it — **nothing in the map derives it** | transcribed from one capture; see the note below |
 | `armourclass_max 0` | all eight pieces 0 | do **not** pass `-ShopArmour` |
 | `attack/defence/charisma/magicka 1`, `strength 10` | untouched tutorial values | a **vitality-only** levelling leaves exactly these |
 
+**Corrected — the warrant for `staminaleft 105` was circular.** This row used to
+say the value *"matches the goldens' observed drift"*. The goldens are where the
+number came from, so that warrant reduces to "105 because 105". The actual
+provenance, from the repository's own record:
+
+1. The map-derived prediction for the prisoner bout was a **full bar**. The
+   committed
+   `test/fixtures/ss2-1v1-divergences/provisional-prisoner-kill--obs-20260830-t1-6bf4f120.json`
+   records `/scenario/hero/staminaleft` **expected 110, actual 105** and
+   `/scenario/villain/staminaleft` **expected 100, actual 95**.
+2. The prisoner candidate was then re-authored to the runtime's numbers, and
+   `golden-prisoner-normal-kill` carries hero `105/110`, villain `95/100`.
+3. These eight arena fixtures were created de novo in `6fd3884` with a hero
+   block identical to `candidate-prisoner-normal-kill`'s, same key order,
+   differing in exactly two fields (`hitpoints` and `hitpointsmax`, 30 → 300) —
+   so their 105 is that same measured number, carried across from a different
+   route, a different mode and a different gladiator
+   level. Their **villain's** 105 is the hero's number duplicated; nothing
+   observed a villain at 105, and the villain table below has no `staminaleft`
+   row to warrant one.
+
+So `105` is a measurement, honestly obtained, that has been used far outside the
+bout that produced it. It is not derivable: `battlevalues` refills `staminaleft`
+only when it is already `<= 0` (`+0x3b1c`, §0.2's clamp table), the per-phase
+arithmetic is charged to `game_attacker` only, and the value therefore depends
+on each side's own turn count in the specific bout. Stage it, and treat a
+divergence on it as expected rather than as a failed run — six committed arena
+divergence reports already carry one
+([capture-staging, Group H](ss2-capture-staging.md)).
+
 That is snapshot **`level4-vitality-tournament-gate`** — a vitality-only
 gladiator at level 4 with the starting kit. **The fixtures were authored to it.**
+One row above is not part of it: `staminaleft` is bout state, not saved
+gladiator state — `restore_char` (root frame 35, `DoAction@0x3fa9dc`) holds
+none of the build's 42 `staminaleft` references — so a snapshot cannot
+pin it, and the other rows should not be read as though it could.
 The hero side therefore wants to be *real*, not staged, and the whole
 `hitpoints`-clamp problem disappears with it: root frame 214 full-heals the
 hero at battle construction, so `hitpoints == hitpointsmax` before staging ever
@@ -1006,8 +1040,17 @@ in Family F — fifteen fixtures in total, the same fifteen the handoff records.
 The rest of this section is what to run **after** those fixtures are re-derived,
 not a plan that can be executed against them today.
 
-**Deliberately not patched here.** Candidates are derived from the map and never
-edited to fit a run; a one-token strength edit is still an edit, and two of the
+**Deliberately not patched here.** Candidates are *supposed to be* derived from
+the map and never edited to fit a run — but that is the project's rule, not a
+description of the corpus, and it has been broken at least twice already
+(§2's `staminaleft 105`, and `candidate-duel-firstblood-normal-kill`, which
+sides with the runtime on **all eight** `/scenario` differences in the
+divergence report landed in its own commit `74a07a45` and with the map-derived
+prediction on **none** — six reproduced by value, and the two where the
+prediction said `helmet 2` / `shield 2` and the runtime said `0` dropped from
+the villain block outright). Read it as the
+standard this edit is being held to, not as a warrant for any number already in
+the tree. A one-token strength edit is still an edit, and two of the
 fifteen need more than one token anyway (`candidate-grievous-knockback`'s
 expected knockback force is itself strength-derived, and the three Family E
 members take a different formula — §7). Re-derivation is a fixture change and
