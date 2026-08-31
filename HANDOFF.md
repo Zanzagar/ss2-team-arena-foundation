@@ -231,6 +231,54 @@ has per-fixture commands.
 
 ### Found 2026-08-31, not yet closed
 
+**Correction to my own entry above, and the transcription charge is CONFIRMED
+while my reasoning for it was wrong.**
+
+I wrote that "105 is arithmetically unreachable from the fixture's own inputs"
+and that two combatants sharing a non-derivable number was "the signature of a
+transcribed observation". The conclusion is right and the premise is false: 105
+IS arithmetically reachable, and the live data fixes the step size. Do not repeat
+the unreachability argument.
+
+The transcription is established by the repository's own record, not by
+inference. The eight fixtures were created de novo in `6fd3884`
+(2026-08-30 19:52), and their hero block is byte-identical to
+`candidate-prisoner-normal-kill`'s except `hitpoints` 30 → 300. The decisive
+artifact is committed:
+`test/fixtures/ss2-1v1-divergences/provisional-prisoner-kill--obs-20260830-t1-6bf4f120.json`
+records `/scenario/hero/staminaleft` **expected 110, actual 105**. The
+map-derived prediction was 110 — a fresh bout at full stamina — the runtime
+returned 105, and the fixture was re-authored to the runtime's number. The
+authoring commit says so in the test it added: *"the one staged number that is a
+function of the autopilot step count rather than of a formula"*, *"exactly as
+observed in the promoted prisoner sessions"*. The "five walks from 110"
+derivation the documents now carry first appears three hours AFTER the fixtures.
+
+So this is a candidate fitted to an observation, it predates this session, and
+the same hero block may have carried it into other fixtures. **Check the rest of
+the corpus before trusting any staged scalar.**
+
+### The pairwise gate, landed dormant and deliberately so
+
+`promoteSs2CandidateToGolden` matched every observation against the candidate and
+never against the other observation — so "two matching observations from two
+independent sessions" has always meant two records that each resembled the same
+prediction, never two that resembled each other. `ss2ObservationsMatch` existed,
+was exercised by tests, and was never called from the promotion path.
+
+That gate is now called. **It cannot fire today, and that is recorded rather than
+hidden:** probing all 162 leaves of a committed observation, perturbing each and
+re-digesting, ZERO can differ between two records while both still match their
+candidate. It is a PRECONDITION, not a fix.
+
+It becomes load-bearing the moment any field stops being compared. With the
+prescribed `staminaleft` exclusion patched in, an auditor promoted two records
+differing by 99,992 stamina — one negative, one 10^13 above `staminamax`. That is
+the debris forgery's second symptom exactly.
+
+**Land any field exclusion only after this, never before.** Free to keep: all 29
+cited observation pairs across the 22 goldens already agree under it.
+
 **ANSWERED FROM THE MAP, BLIND TO THE CAPTURES.** `staminaleft` is read by
 **nothing** in the attack-resolution chain, and the pinned 105 is not derivable
 from the fixtures' own inputs. The analysis was done by an agent forbidden from

@@ -1056,6 +1056,7 @@ test("promotion requires two observations from independent sessions", () => {
   );
 });
 
+
 test("a divergent observation blocks promotion and preserves its report", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
   const matching = observationFromFixture(fixture, { observationId: "obs-a", sessionId: "session-a" });

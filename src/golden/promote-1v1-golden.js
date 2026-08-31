@@ -19,6 +19,7 @@
 import {
   SS2_SIMULATED_CAPTURE_METHOD,
   matchSs2ObservationToFixture,
+  ss2ObservationsMatch,
   sha256OfCanonicalJson,
   validateSs2Observation
 } from "./observation.js";
@@ -402,6 +403,48 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     throw new PromotionError(
       "Promotion requires observations from at least two independent capture sessions."
     );
+  }
+
+  // THE OBSERVATIONS MUST AGREE WITH EACH OTHER, NOT ONLY EACH WITH THE FIXTURE.
+  // DORMANT TODAY, AND THAT IS THE POINT — it is a PRECONDITION, not a fix.
+  //
+  // Measured before landing: probing all 162 leaves of a committed observation,
+  // perturbing each one and re-digesting, ZERO can differ between two records
+  // while both still match their candidate. So this loop cannot currently
+  // refuse anything, and it must not be described as closing a hole on its own.
+  //
+  // It exists because the hole opens the moment any field stops being compared
+  // against the fixture. An auditor demonstrated exactly that: with the
+  // prescribed `staminaleft` exclusion patched in, two records differing by
+  // 99,992 stamina — one negative, one 10^13 above `staminamax` — both matched
+  // the candidate and both promoted. That is the second symptom of the debris
+  // forgery closed in cc42503, where two observations differing by 120
+  // fabricated draws corroborated each other.
+  //
+  // `ss2ObservationsMatch` has existed and been exercised by tests the whole
+  // time; it was simply never called from the promotion path, so "two matching
+  // observations from two independent sessions" has always meant two records
+  // that each resembled the same prediction, never two that resembled one
+  // another. This compares the FULL projection rather than the fixture's key
+  // set, which is why it survives a matcher-side exclusion.
+  //
+  // Measured free: all 29 cited observation pairs across the 22 promoted
+  // goldens already agree under it, so no existing golden rests on the weaker
+  // rule. LAND ANY FIELD EXCLUSION ONLY AFTER THIS, never before.
+  //
+  for (let left = 0; left < observations.length; left += 1) {
+    for (let right = left + 1; right < observations.length; right += 1) {
+      const agreement = ss2ObservationsMatch(observations[left], observations[right]);
+      if (agreement.match) continue;
+      const paths = agreement.differences.map((difference) => difference.path).join(", ");
+      throw new PromotionError(
+        `Observations ${observations[left].observationId} and ${observations[right].observationId} ` +
+        `both match ${candidate.fixtureId} but disagree with EACH OTHER at: ${paths}. ` +
+        "Two records that agree with one prediction while contradicting one another are not two " +
+        "independent confirmations of it — they are evidence that the prediction does not pin " +
+        "whatever differs. Re-derive the candidate to cover it, or re-capture."
+      );
+    }
   }
 
   const observedAt = observations
