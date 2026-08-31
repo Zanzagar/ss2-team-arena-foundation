@@ -1,11 +1,12 @@
 # Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
 **This file is the accumulated STATE of the project. The brief for a single
-session lives in [`docs/handoffs/`](docs/handoffs/README.md), numbered `H-NNN`.**
-Starting a session should cost one sentence — "read `docs/handoffs/H-001.md` and
-proceed" — with this file as the state it points at. A handoff must not restate
-what is here; if the two ever disagree, THIS file is right and the handoff was
-frozen at the end of its session. Latest: [H-001](docs/handoffs/H-001.md).
+session lives in [`docs/handoffs/`](docs/handoffs/README.md), stamped
+`YYYY-MM-DD-HHMM--slug`.** Starting a session should cost one sentence — "read
+the latest handoff in `docs/handoffs/` and proceed" — with this file as the state
+it points at. A handoff must not restate what is here; if the two ever disagree,
+THIS file is right and the handoff was frozen at the end of its session. Latest:
+[2026-08-31 12:38 — corpus audit and provenance repair](docs/handoffs/2026-08-31-1238--corpus-audit-provenance-repair.md).
 
 ## READ THIS FIRST — corrections from the 2026-08-31 audit pass
 

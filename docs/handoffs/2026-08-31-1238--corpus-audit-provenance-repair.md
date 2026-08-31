@@ -1,12 +1,26 @@
-# H-001 — 2026-08-31
+---
+handoff:      2026-08-31-1238--corpus-audit-provenance-repair
+written:      2026-08-31 12:38 -0400
+sessionStart: 2026-08-31 09:39 -0400   # first commit; the session opened somewhat earlier
+sessionId:    4a79fa7f-176b-455c-aa91-372038a141af
+agentRuns:    wf_bc86037b-0f9 (13 auditors), wf_7a46fd0f-ac4 (2 docs writers), wf_d2aa6793-7cb (1 writer + 3 verifiers)
+branch:       arena/champion-capture
+commits:      73f7fba..2585952   # 6 commits, all pushed
+suite:        617 passed / 0 failed / 0 skipped
+supersedes:   none
+---
+# Handoff — 2026-08-31 12:38, corpus audit and provenance repair
 
 Written at the end of the corpus-integrity audit and provenance repair session.
 See [`docs/handoffs/README.md`](README.md) for what a handoff is and is not.
 
 ## Where things stand
 
-- Branch `arena/champion-capture` at **`f2a57c4`**, **23 commits ahead of
-  `github/main` (`4409ec7`)**, pushed and in sync with its remote branch.
+- Branch `arena/champion-capture`, ahead of `github/main` (`4409ec7`), pushed
+  and in sync with its remote branch. This session's commits are the
+  `commits:` range in the frontmatter above; confirm the tip yourself with
+  `git log --oneline -1` rather than trusting a hash written before the last
+  commit landed.
 - PRs #1 and #2 are both merged design-track work. **No PR is open for this
   branch.** `gh` is NOT installed — use `git ls-remote github "refs/pull/*/head"`.
 - **617 passed, 0 failed, 0 skipped**, tree clean.
