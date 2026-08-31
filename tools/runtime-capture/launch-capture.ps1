@@ -190,7 +190,25 @@ $gameUrl = ([uri] $installedSwf).AbsoluteUri
 $log = "$sessionDirRelative\$ObservationId.rufflelog"
 $observedAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 $injected = if ($Passive) { 'false' } else { 'true' }
-$env:RUST_LOG = 'avm_trace=info'
+# Ruffle's own default is 'warn,ruffle=info,avm_trace=info'. Overriding it with
+# 'avm_trace=info' alone sets the GLOBAL level to off, which silently suppressed
+# every storage diagnostic Ruffle emits - including the
+# `Unable to read file "..."` warning that names the exact SharedObject key it
+# wanted. That suppression is why the -SaveDirectory failure was misdiagnosed
+# for a whole session as "Ruffle ignores the seeded store".
+#
+# The default is unchanged for ordinary captures, so their raw logs stay
+# byte-comparable with the 163 already archived. A caller may raise it, and an
+# isolated-store session raises it automatically, because that is the session
+# whose failure mode is invisible without it. delog filters on `avm_trace:`, so
+# extra lines are dropped rather than ingested.
+if (-not $env:RUST_LOG) {
+    if ($SaveDirectory) {
+        $env:RUST_LOG = 'warn,ruffle=info,ruffle_frontend_utils=info,avm_trace=info'
+    } else {
+        $env:RUST_LOG = 'avm_trace=info'
+    }
+}
 $ruffleArgs = @(
     '--width', '640', '--height', '420',
     '--filesystem-access-mode', 'allow',
@@ -228,11 +246,44 @@ if ($SaveDirectory) {
     # during the capture lands here and is thrown away with the session
     # directory, which means a capture can no longer mutate the licensed save
     # at all - the clobbering class of bug is removed rather than avoided.
+    # Ruffle rejects every read and write, silently, if any path component is
+    # '..' (ruffle-rs/ruffle#17825). Refuse rather than produce a session that
+    # looks like it ran with an isolated store and actually had none.
+    if ($SaveDirectory -match '\.\.') {
+        throw "-SaveDirectory must not contain '..': Ruffle silently refuses every read and write for such a path."
+    }
     New-Item -ItemType Directory -Path $SaveDirectory -Force | Out-Null
     $masterSave = Join-Path $env:LOCALAPPDATA 'ruffle\SharedObjects'
     if (Test-Path $masterSave) {
         Copy-Item -Path (Join-Path $masterSave '*') -Destination $SaveDirectory -Recurse -Force
     }
+    # ASSERT the seed rather than assume it. Ruffle keys a SharedObject by the
+    # path of the SWF that created it, and the game's store is created by the
+    # GAME on _level1 - so the seeded copy has to land at this exact relative
+    # path, and --save-directory is that tree's root with no extra nesting.
+    #
+    # The absence of this assertion is the whole reason the flag was recorded
+    # as broken. The surviving artifact of that run shows every directory
+    # inside the isolated store was created by RUFFLE four seconds after the
+    # launcher made the root - i.e. the seeded copy was never on disk when
+    # Ruffle read. Nothing was wrong with the flag; the seed had not happened.
+    $seedRelative = 'localhost\Program%20Files%20(x86)\Steam\steamapps\common\' +
+        'Swords%20and%20Sandals%20Classic%20Collection\swf\' +
+        'swords_sandals2_download.swf\ss2_data.sol'
+    $seededSave = Join-Path $SaveDirectory $seedRelative
+    $masterGameSave = Join-Path $masterSave $seedRelative
+    if (-not (Test-Path $masterGameSave)) {
+        throw "No game save to seed from at $masterGameSave; an isolated session would start with no gladiator."
+    }
+    if (-not (Test-Path $seededSave)) {
+        throw "The seed did not land at $seededSave; the isolated session would read an empty store."
+    }
+    $masterHash = (Get-FileHash -LiteralPath $masterGameSave -Algorithm SHA256).Hash
+    $seededHash = (Get-FileHash -LiteralPath $seededSave -Algorithm SHA256).Hash
+    if ($masterHash -ne $seededHash) {
+        throw "The seeded save at $seededSave does not match the master ($seededHash vs $masterHash)."
+    }
+    Write-Host "Seeded the isolated store; ss2_data.sol matches the master ($($masterHash.Substring(0,16)))."
     $ruffleArgs = @('--save-directory', "$SaveDirectory") + $ruffleArgs
 }
 
@@ -247,6 +298,11 @@ if ($Autopilot) {
 }
 $proc = Start-Process -FilePath $ruffle.FullName -ArgumentList $ruffleArgs `
     -RedirectStandardOutput (Join-Path $projectRoot $log) -PassThru -NoNewWindow
+# Record the PID so a caller can close THIS session's window rather than every
+# Ruffle on the machine. Concurrent isolated sessions make `Get-Process ruffle |
+# Stop-Process` an act of sabotage against the other runs.
+Set-Content -LiteralPath (Join-Path $projectRoot "$sessionDirRelative\ruffle.pid") `
+    -Value $proc.Id -Encoding utf8
 $proc.WaitForExit()
 
 if ($SkipPipeline) {

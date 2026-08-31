@@ -68,8 +68,39 @@ function Show-Diagnostics {
         Select-Object -Last 14 | ForEach-Object { $_.Line -replace '^.*avm_trace: ', '' }
 }
 
-if (Get-Process ruffle -ErrorAction SilentlyContinue) {
-    throw 'A Ruffle window is already open; close it before an automated run.'
+# One session at a time is a consequence of SHARING one SharedObject store and
+# nothing else, so the guard lifts exactly when this session has its own. A
+# session given -SaveDirectory reads and writes a private seeded copy and
+# provably cannot touch the real save or another session's - verified live: an
+# isolated session reached the battle, closed its trace, matched a promoted
+# golden, and left the master ss2_data.sol byte-identical.
+if (-not $SaveDirectory -and (Get-Process ruffle -ErrorAction SilentlyContinue)) {
+    throw 'A Ruffle window is already open; close it before an automated run, or give this one its own -SaveDirectory.'
+}
+
+$pidPath = Join-Path $projectRoot "captures\$SessionId\ruffle.pid"
+# A stale pid from an earlier run of the same session id would be waited on and
+# then killed, neither of which is this run.
+Remove-Item -LiteralPath $pidPath -Force -ErrorAction SilentlyContinue
+
+function Stop-ThisSession {
+    # Close THIS session's window by pid. Never `Get-Process ruffle |
+    # Stop-Process`: with concurrent isolated sessions that kills every other
+    # run in flight, and each would then report a navigation failure of its own.
+    if (Test-Path $pidPath) {
+        $sessionPid = (Get-Content $pidPath -Raw).Trim()
+        if ($sessionPid) {
+            Stop-Process -Id ([int] $sessionPid) -Force -Confirm:$false -ErrorAction SilentlyContinue
+            return
+        }
+    }
+    if (-not $SaveDirectory) {
+        # No pid file and a shared store: the serial path, where the only
+        # Ruffle running is ours.
+        Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+    } else {
+        Write-Host 'WARNING: no pid file for this session; leaving other Ruffle processes alone.'
+    }
 }
 
 Write-Host 'Launching instrumented session...'
@@ -105,7 +136,9 @@ $launch = Start-Process -FilePath 'powershell' -PassThru -WindowStyle Hidden `
 # Hash verification of ~107 MB plus the FFDec wrapper compile happen before
 # the window appears, so this wait is deliberately generous.
 $deadline = (Get-Date).AddSeconds($LaunchTimeoutSec)
-while (-not (Get-Process ruffle -ErrorAction SilentlyContinue)) {
+# Wait for THIS session's window, identified by the pid file the launcher
+# writes, so a concurrent run's window is never mistaken for ours.
+while (-not (Test-Path $pidPath)) {
     if ((Get-Date) -gt $deadline) { throw 'The Ruffle window never appeared.' }
     Start-Sleep -Milliseconds 500
 }
@@ -113,7 +146,7 @@ while (-not (Get-Process ruffle -ErrorAction SilentlyContinue)) {
 Write-Host 'Navigating to the battle (no input required)...'
 if (-not (Wait-Log '"step":"battle-ready"' $NavigateTimeoutSec 'the navigator to reach the battle')) {
     Show-Diagnostics
-    Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+    Stop-ThisSession
     $launch.WaitForExit()
     throw 'Navigation failed; see the diagnostics above.'
 }
@@ -138,7 +171,7 @@ if ($LingerSec -gt 0) {
 }
 
 Write-Host 'Closing the window so the pipeline runs...'
-Get-Process ruffle -ErrorAction SilentlyContinue | Stop-Process -Force -Confirm:$false
+Stop-ThisSession
 $launch.WaitForExit()
 Write-Host "Launcher exit code: $($launch.ExitCode)"
 if ($SkipPipeline) {
