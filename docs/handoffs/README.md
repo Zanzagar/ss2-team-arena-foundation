@@ -104,4 +104,5 @@ Keep this shape; it is what worked:
 
 | Handoff | Session | One line |
 | --- | --- | --- |
+| [2026-08-31 14:43 — nonce gate, stat arithmetic, toolchain](2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain.md) | `e386f047` | A record’s own copy stopped counting as the second session; the stat-vector arithmetic settled the 22 written-off fixtures; one shared AGENTS.md for both agents |
 | [2026-08-31 12:38 — corpus audit and provenance repair](2026-08-31-1238--corpus-audit-provenance-repair.md) | `4a79fa7f` | 5 transcriptions found (not 23), provenance made honest, pairwise gate decoupled from the matcher; levelling reopens 22 fixtures |
