@@ -133,11 +133,11 @@ a *reproducible* hero, which the ladder cannot give (below).
 
 **The opponent is reproducible. Confirmed live**, not just from the bytes:
 "John the Butcher", 110 `hitpointsmax`, 86 `armourclass`, identical across
-**eight independent draws**, matching the hard-coded DNA literal `unleash_hell`
+**twelve independent launches**, matching the hard-coded DNA literal `unleash_hell`
 builds him from. `unleash_hell` contains zero RNG of any kind.
 
 **The hero entering that bout is not**, and this was observed rather than
-inferred: in eight of nine ladder runs the hero levelled 4 → 5 after the rank-3
+inferred: in ten of twelve ladder runs the hero levelled 4 → 5 after the RANK-2
 bout, because experience per bout is a *generated* opponent's `character_xp`.
 `staminaleft` also carries across bouts — `battlevalues` resets it only when it
 is already `<= 0`. Both are projected fields, so two sessions differing in
@@ -152,7 +152,7 @@ Hence two things:
 - **Winning the champion bout is not required.** The wrapper arms on the first
   `checkattackroll` and closes the trace on that call's return, so the evidence
   is one action. `run-arena.ps1` treats a closed trace as success. This matters
-  because a vitality-only gladiator loses to him **0 for 8**, and staging the
+  because a vitality-only gladiator loses to him **0 for 12**, and staging the
   hero to 100 strength / 300–400 damage / 999 hitpoints **still lost** — see
   the open question below.
 

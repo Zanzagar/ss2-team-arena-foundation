@@ -1,38 +1,77 @@
 # SS2 leveled-gladiator arena route
 
-Status: read-only static map, recorded 2026-08-30. Companion to
-[the battle map](ss2-battle-map.md); same licensed build, same
-[fingerprint](ss2-build-fingerprint.json), same inspection boundary. It contains
-no game code, artwork, audio, exported scripts, or game binaries — only frame
-labels, symbol names, character ids and instruction offsets.
+Status: **executed map**, recorded 2026-08-30 as a static read and revised
+2026-08-30 against the real build after the route had been run end to end many
+times. Companion to [the battle map](ss2-battle-map.md); same licensed build,
+same [fingerprint](ss2-build-fingerprint.json), same inspection boundary. It
+contains no game code, artwork, audio, exported scripts, or game binaries —
+only frame labels, symbol names, character ids, instruction offsets and derived
+numbers.
 
-Everything below was read from the installed
-`swf/swords_sandals2_download.swf` in place. Nothing was launched, patched,
-copied or exported; no save was touched.
+The byte-level content below was read from the installed
+`swf/swords_sandals2_download.swf` in place; nothing was patched, copied or
+exported. The runtime content comes from the arena capture sessions in
+`captures/arena-*` (gitignored raw logs), which **did** launch the game and
+**did** write the save — that is what the route is for, and §8 is the procedure
+that makes it safe.
+
+### How to read a claim in this document
+
+| Marking | Means |
+| --- | --- |
+| **byte-verified** | read from the SWF action stream at the cited offset |
+| **observed** | read off a live run's own log line in `captures/arena-*` |
+| **inferred** | follows from byte-verified facts but no run has exercised it |
+| **unverified** | neither; §10 lists every one of these and what would settle it |
+
+A first revision of this document was written before anything had been run.
+Six of its claims were wrong and two hazards were missing entirely; each
+correction is marked **Corrected** in place rather than silently rewritten, so
+a reader who remembers the old text can see what changed and why.
 
 ## Why this document exists
 
-Every capture so far reaches its fight the same way: the wrapper loads a saved
-gladiator, jumps to `daybreak`, and the game routes a **level-1** hero into the
-dungeon prologue and the tutorial prisoner. The
-[staging analysis](ss2-capture-staging.md) found 13 of 17 remaining candidate
-fixtures unreachable from that pair — they need armour on a combatant, a
-`tournament` fight mode, or a non-lethal outcome.
+Every capture that produced one of the 22 promoted goldens reaches its fight the
+same way: the wrapper loads a saved gladiator, jumps to `daybreak`, and the game
+routes a **level-1** hero into the dungeon prologue and the tutorial prisoner.
+The [staging analysis](ss2-capture-staging.md) found 13 of 17 remaining
+candidate fixtures unreachable from that pair — they need armour on a combatant,
+a `tournament` fight mode, or a non-lethal outcome.
 
 This document maps the other route: a **leveled gladiator in the ordinary
-arena**, which skips the dungeon branch entirely.
+arena**, which skips the dungeon branch entirely. That route now exists as
+`-Navigate arena` (§9), has been run against the real build many times, and has
+carried a gladiator from level 1 to level 5 and through a tournament ladder to
+the rank-1 champion (§12).
 
 ## Method note — FrameLabel decode
 
-The project inspector does not decode `FrameLabel` (tag 43); the battle map
-records that as an open question for sprite 862. For this map, tag 43 was
-decoded with a throwaway out-of-repo reader that prints label→frame numbers
-only (no action bytes, no assets). Two results settle open items:
+When this map was first written the project inspector did not decode
+`FrameLabel` (tag 43); the battle map recorded that as an open question for
+sprite 862, and tag 43 was decoded here with a throwaway out-of-repo reader
+that printed label→frame numbers only (no action bytes, no assets).
+
+**That is no longer necessary.** `tools/inspect-swf.mjs` now has a `--labels`
+mode (with `--timeline <regex>`), so every label table below is reproducible
+with the project's own read-only tool:
+
+```powershell
+node tools/inspect-swf.mjs $swf --labels --timeline '^root$'
+node tools/inspect-swf.mjs $swf --labels --timeline '862'
+```
+
+The `--labels` output for the root timeline matches the label→frame column of
+the table below exactly. Note that `--labels` prints the **label span** (the
+frames a label owns until the next label), while the table's third column is
+the frame the playhead actually **rests** on — usually the label span's `Stop`,
+which is earlier. `foyer` is the clearest case: label span 203–213, rests at
+208. Two results settle open items:
 
 - **Sprite 862 has exactly eight labels**, at frames 1, 5, 13, 20, 28, 52, 62
   and 74 — the same eight the battle map already verified from the action
-  stream. There is **no ninth label** in the 38–51 gap. The battle map's
-  "cannot be excluded from the action stream alone" caveat can be closed.
+  stream. There is **no ninth label** in the 38–51 gap: `closerange_archer` owns
+  frames 28–51 outright. The battle map's "cannot be excluded from the action
+  stream alone" caveat can be closed, and the battle map has since closed it.
 - The root timeline's 26 labels are listed below. `daybreak` is frame **96**,
   not 113; frame 113 is the last frame of the `daybreak` span and holds the
   routing decision.
@@ -114,14 +153,33 @@ Consequences:
   number before jumping to `daybreak`.
 - Both arms gate on the sunrise clip reaching **exactly** frame 80. The self-
   loop is `gotoAndPlay(_currentframe - 1)`, so the root re-tests frame 113 once
-  every two ticks while `_root.day_night` advances one frame per tick. The
-  existing prisoner navigator clears this wait reliably, so in practice the
-  phase lands on the even sample that includes 80 — but the equality is exact
-  and `day_night` stops at 107 and never returns, so a phase slip would hang
-  the screen forever. **Unverified**: whether the parity is guaranteed or
-  incidental. A run that stalls at root frame 113 with `day_night._currentframe
-  == 107` would settle it; the navigator should time-limit this step and say so
-  in the log rather than waiting silently.
+  every two ticks while `_root.day_night` advances one frame per tick.
+
+  **Corrected — the parity is GUARANTEED on a clean entry, not incidental.**
+  The first revision left this "unverified". It is now byte-verified from the
+  root tag stream: `day_night` is **character 1772 at depth 408**, with a
+  `PlaceObject2` at root frame **96** and a `RemoveObject2` at root frame
+  **150**. So on a clean entry the clip is instantiated as the playhead shows
+  96, its frame 1 displays at root 96, and at root 113 it is on clip frame
+  `113 - 96 + 1 = 18` — even. The 112↔113 oscillation then advances it **two
+  per test**, so only even clip frames are ever sampled, and 80 is even. The
+  clip is reached on the 32nd test of frame 113.
+
+  This also explains the one way to break it, which is not hypothetical:
+  **re-entering `daybreak` from inside the stall.** A `gotoAndPlay("daybreak")`
+  issued while the playhead is at 112/113 never passes frame 150, so the
+  `RemoveObject2` never runs, the same character survives at the same depth,
+  and its playhead is *not* reset — but the root walks 96→113 again, adding 17
+  frames and flipping the clip to odd parity. Frame 80 is then never sampled,
+  `day_night` runs on to its `Stop` at 107, and the screen hangs forever. The
+  game's own re-entries are safe because every one of them (button 775's
+  `tournament_complete` arm, button 2283's `herolevel == 2` arm) arrives from
+  beyond frame 150 and therefore gets a fresh clip.
+
+  The rule this produces for any navigator: **time-limit the daybreak wait,
+  log `day_night._currentframe` on timeout, and never re-issue
+  `gotoAndPlay("daybreak")` to "retry" it.** That is GATE D in
+  `stepArenaNavigator` (§9).
 - The daybreak span costs ~80 ticks ≈ 2.7 s at 30 fps. That is the entire cost
   of the leveled route's approach, against the dungeon prologue's ~84 % of
   current capture runtime.
@@ -144,8 +202,11 @@ Root frame 150 `DoAction@0x5a6490` on entry:
 | 8 | `+0x053e` | `skincharacter(_root.game.hero, this.townhero)` |
 | 9 | **`+0x0585`** | **`save_character(_global.current_character)`** |
 | 10 | `+0x0605` | attach `charsheet` at depth 99888 |
+| 11 | **`+0x07d4`–`+0x0845`** | **`special_event_chance = 1 + RandomNumber(100)`; jump to `special_event` when it is `<= 2`** |
 
-Step 9 is the hazard described in §8.
+Steps 9 and 11 are the two hazards described in §8. Note their order: the save
+flush happens **first**, so by the time step 11 can end the run the write has
+already occurred.
 
 The five building buttons live inside the town clip (character 1809, instance
 `_root.townsquare`, placed at root frame 150 depth 59), all at sprite 1809
@@ -163,12 +224,80 @@ frame 1. Each is a `DefineButton2` whose entire body is a single call at
 Root frame 158 `DoAction@0x5abc80` runs the day/night music and one branch that
 matters: at `+0x0289`–`+0x02bd`, if `_global.time_of_day >= 200` it sets
 `_global.special_event = 1` and jumps the root to `special_event` (frame 160).
-`time_of_day` is written at only four sites in the build — button 1669
-`+0x0104` (=24), button 2283 `+0x023a` (=24), button 775 `+0x0613`
-(`1 + RandomNumber(23)`), and button 1827 `+0x011f` (same) — so **nothing
-advances the clock per fight.** A navigator that establishes `time_of_day = 24`
-the way button 1669 does can loop duels indefinitely without ever tripping the
-special-event branch or needing another `daybreak`.
+
+### `time_of_day` — Corrected
+
+The first revision of this document said `time_of_day` "is written at only four
+sites in the build … so **nothing advances the clock per fight**", and
+concluded that a navigator which sets `time_of_day = 24` can loop duels
+indefinitely. **That is wrong, and it is the single most consequential error the
+first revision made.** It missed the writer that matters.
+
+`day_night_cycle` (root frame 35 `DoAction@0x3ffdcf`, `DefineFunction2` body at
+`+0x0b87`) **increments `time_of_day` every time it runs**:
+
+```text
+if (_global.battle_started != true) {                   // +0x0b87..+0x0b97
+  if (_global.cloudframe == null|undefined) cloudframe = 1;   // +0x0b9c..+0x0bcf
+  if (_global.time_of_day < 200                         // +0x0bd0..+0x0be3
+      && _global.special_event_happening != true) {     // +0x0be9..+0x0bf9
+    _global.time_of_day++;                              // +0x0bfe..+0x0c0b
+  }
+  townsquare.gotoAndStop(time_of_day);                  // +0x0c0c
+  sky.gotoAndStop(time_of_day);                         // +0x0c28
+  village_bg.gotoAndStop(time_of_day);                  // +0x0c44
+  ... moon, clouds, rain ...
+}
+```
+
+It runs from **two** independent sources:
+
+1. **A wall-clock interval.** `initwarrior` installs
+   `setInterval(day_night_cycle, 1500)` at root frame 35 `+0x0a9d`–`+0x0ab3`,
+   once, behind a `timerinit == null` guard at `+0x0a76`. So the clock advances
+   **every 1.5 seconds of real time** on every screen except the battle — the
+   `battle_started != true` gate at `+0x0b87` is what pauses it during a fight.
+   Frame count, frame rate and screen make no difference; only wall time does.
+2. **Six direct calls, one per screen entry.** `day_night_cycle()` is invoked at
+   root frames **96** (`+0x0000`), **150** (`+0x041c`), **160** (`+0x3108`),
+   **179** (`+0x0000`), **187** (`+0x0000`) and **203** (`+0x0000`). Every
+   `daybreak`, town-square, special-event, weapon-shop, magic-shop and foyer
+   entry therefore adds an increment **on top of** the interval.
+
+The four sites the first revision found are the ones that *reset* the clock, not
+the ones that move it: button 1669 `+0x0104` (`= 24`), button 2283 `+0x023a`
+(`= 24`), button 775 `+0x0613` (`1 + RandomNumber(23)`) and button 1827
+`+0x011f` (same). A fifth it also missed is the initialisation:
+`initwarrior` sets `time_of_day = 25` at root frame 35 `+0x0a50`, which is why a
+freshly launched session reads 25 or 26 at the slot screen before any button has
+run.
+
+Consequences a navigator must absorb:
+
+- **A run has a real time budget, denominated in wall-clock seconds.** At the
+  1.5 s interval alone, 200 is reached about 4½ minutes after the last reset.
+  Screen entries make it sooner.
+- **Setting `time_of_day = 24` once is not enough.** It must be re-asserted at
+  each rest, which is what button 1669 and button 2283 both do and what GATE A
+  in §9 replicates.
+- **Observed**, from `captures/arena-tourn-2/arena-tourn-2-obs-a1.rufflelog`:
+  `tod` reads 26 at `hero-loaded`, 25 at `routed-townsquare`, is written back to
+  24 by the navigator at `townsquare` — and then climbs **25 → 27 → 28 → 29 →
+  30** across three tournament bouts with no reset at all, because the
+  tournament loop never returns to town square (§3). The clock does **not** run
+  during the bout itself — arena frame 88 clears `_global.battle_started` at
+  `+0x0413`, so the interval resumes for the reward animation, which is where
+  the +2 between `battle-ready` and `reward` comes from; the +1 into each
+  `ladder-ready` is the foyer's own `day_night_cycle()` call.
+- **Observed, and it measures the interval.** Two runs stalled on a screen and
+  hit the navigator's own ceiling of 150: one at root frame 186 (the weapon
+  shop) after 188 226 ms, one at root frame 208 (the foyer) after 215 414 ms.
+  From the reset value 24 to 150 is 126 increments, so the first gives
+  **1494 ms per increment** — the `setInterval(…, 1500)` at `+0x0a9d`,
+  measured. Two further `ABORT:time-of-day-ceiling` lines in the same capture
+  set are not ceiling hits at all: they fired at 430 ms and 415 ms with
+  `tod` reading `NaN`, and are the AVM1 comparison defect recorded in the
+  wrapper's own `isNum` note, not a clock event.
 
 ### The arena foyer (root frame 203, `_root.foyer`)
 
@@ -253,6 +382,15 @@ message unless `herolevel >= tournament_level_required`. With
 - **`herolevel` 2–3 → duels only.**
 - **`herolevel` 4+ (until tournament 1 is won) → tournament only.**
 
+The `game_mode` disjunction in the gate does no work in this build: it reads
+`"full"` at runtime (§3), so the second arm is always satisfied and the whole
+condition reduces to `herolevel >= tournament_level_required`.
+
+**Observed**: four `ABORT:duel-button-hidden` lines across `captures/arena-*`,
+every one reading `"level":4,"required":4` — a level-4 gladiator asked for a
+duel, and the navigator refused because the game had already hidden the button,
+exactly as the gate predicts.
+
 Winning a tournament raises `current_tournament` (button 778, §5), which raises
 the threshold and re-opens duels up to the next one.
 
@@ -288,14 +426,15 @@ Root frame 214 `DoAction@0x62f594` is where the villain is built:
 | 3 | **`+0x02a9`–`+0x02d5`** | **`hero.hitpoints = hero.hitpointsmax`** — every arena entry is a full heal |
 | 4 | `+0x02d6`–`+0x038e` | build `_root.arena_intro.gladiators`, attach both portraits, apply masks |
 | 5 | `+0x038f`–`+0x03ca` | `skincharacter(game.hero, gladiators.hero)` |
-| 6 | `+0x03cb`–`+0x03f9` | gate: `fight_mode == "duel" && _global.fightstarted != true` |
-| 7 | `+0x0440` | `randomise_gladiator(game.villain, gladiators.villain, game.hero.herolevel)` |
-| 8 | `+0x045e` | `constructvillainDNA(game.villain)` |
+| 6 | `+0x03cb`–`+0x03f9` | **gate opens**: `fight_mode == "duel" && _global.fightstarted != true`. Both `If`s target `+0x046a`, so steps 7–8 are the whole gated body |
+| 7 | `+0x0440` | *(gated)* `randomise_gladiator(game.villain, gladiators.villain, game.hero.herolevel)` |
+| 8 | `+0x045e` | *(gated)* `constructvillainDNA(game.villain)` |
+| — | `+0x046a` | **gate closes**; everything below runs in every mode |
 | 9 | `+0x0482`–`+0x04ba` | if `hero.tournament_ranking == 2`, `unleash_hell(hero.current_tournament)` |
 | 10 | `+0x04cd`–`+0x04fc` | if `hero.herolevel == 1`, `unleash_hell(0)` |
 | 11 | `+0x0503`–`+0x0538` | `skincharacter(game.villain, gladiators.villain)` |
 
-Two byte-level facts matter:
+Three byte-level facts matter:
 
 - **`_global.fightstarted` is read at `+0x03eb` and assigned nowhere in the
   build.** The whole-build reference count for the name is one. So the step-6
@@ -304,6 +443,43 @@ Two byte-level facts matter:
 - Step 10 is **not** gated on `fight_mode`. Any level-1 hero entering
   `arena_intro` gets the prisoner, whichever mode is set. Steps 9 and 10 are the
   only `unleash_hell` sites outside the prologue and the tournament ladder.
+- **Corrected — step 9 is NOT followed by `constructvillainDNA`.** The first
+  revision's step ordering implied it was, because 8 is printed above 9. It is
+  not: the `constructvillainDNA` at `+0x045e` sits *inside* the duel gate. The
+  short-circuit `&&` at `+0x03df` jumps to `+0x03f8` and the second `If` at
+  `+0x03f9` jumps to `+0x046a` — past `+0x0469`, the `Pop` after
+  `constructvillainDNA`. In a tournament, steps 7 and 8 are both skipped, so
+  **the only statement that touches the villain after `unleash_hell` is the
+  `skincharacter(game.villain, gladiators.villain)` at `+0x0527`.**
+
+  That is not a defect, and the reason is worth following through, because it
+  is what makes the rank-1 bout reproducible at all.
+
+  `constructvillainDNA` is a **serialiser**, not a builder: root frame 35
+  `DoAction@0x40bf76` `+0x268c`, it concatenates the character object's fields
+  into a `charDNA` string (`features`, `hairstyle`, the eight armour pieces, and
+  so on, from `+0x26ea` onward). It turns an object into DNA. Nothing in it
+  derives a combat value.
+
+  The builder in the other direction is `skincharacter`, and it is the statement
+  at `+0x0527`. `skincharacter(whichcharacter, whichavatar)` calls
+  **`initcharacter(whichcharacter, whichavatar, whichcharacter.charDNA)`** at
+  `+0x1aa1`–`+0x1ab8`, then `updatecharacter`, `colorhero`, and
+  **`battlevalues`** at `+0x1ad9`. That is what turns a DNA string into a
+  combatant.
+
+  So the tournament path is: `unleash_hell(current_tournament)` builds a
+  **brand-new** `Object` on `_root.game.champion` (`+0x18e4`–`+0x18f5`), writes
+  the hard-coded `charDNA` literal and the name/quote strings into it, and ends
+  — unconditionally, at `+0x2216`–`+0x222e`, past every `which_boss` branch —
+  with `_root.game.villain = _root.game.champion`. At that moment the villain
+  has a DNA string and nothing else. The `skincharacter` at `+0x0527` then
+  parses it and derives every combat field. **No `constructvillainDNA` runs
+  anywhere on this path, and none is needed.**
+
+  **Observed**: `root.game.villain.hitpointsmax` and `.armourclass` read 110 and
+  86 at root frame 220 in every one of the twelve champion bouts — which is only
+  possible if `skincharacter` derived them from the literal.
 
 So **the duel opponent is generated, not drawn from a roster.**
 `randomise_gladiator(whichcharacter, whichavatar, herolevel)`
@@ -332,6 +508,13 @@ draws include the stat distribution itself. A capture cannot choose or
 reproduce a duel opponent. It can only observe one — which is exactly the
 "author the fixture from the observation" route the staging guide already
 documents for the two duel candidates.
+
+**Observed, and it is as stark as the bytes say.** 54 `versus` lines across
+`captures/arena-*` name 43 distinct opponents. Twelve of the 54 are the
+champion, and **every one of the other 42 is unique — not a single generated
+opponent repeated**, in name, `hitpointsmax` or `armourclass`. The only
+reproducible opponent in the whole capture set is the one with no RNG behind it
+(§12).
 
 What the leveled route *does* buy on the villain side is that duel opponents
 **can carry armour and enchanted weapons**, which the all-zero tutorial prisoner
@@ -373,6 +556,39 @@ Nothing clears `fight_mode` between fights. Once set it persists until the next
 selection, so a tournament run keeps `tournament` for every bout in the ladder,
 and a `misc` value from a prologue session survives until the first duel or
 tournament selection.
+
+### `game_mode` reads `"full"`, and every demo cap below is dead — Corrected
+
+The first revision reasoned about this build as the demo, on the strength of
+`_root.fizMode` looking unset, and carried the demo caps into several sections.
+**It is the full build at runtime.**
+
+- `_global.game_mode` is written at exactly two sites, both in
+  `root/frame:10/DoAction@0x3c46b8`: `"full"` at `+0x0102` and `"demo"` at
+  `+0x0115`, selected by `_root.fizMode == "fizzle"` at `+0x00e4`–`+0x00f7`.
+- **`_root.fizMode` is set to `"fizzle"` by the build itself**, at
+  `root/frame:1/DoAction@0x5b66c` `+0x0026` — long before frame 10 reads it. So
+  the `"full"` arm is the one that runs.
+- **Observed**: 32 log lines across `captures/arena-*` report
+  `"gameMode":"full"`, read out of the game at the reward screen. Not one
+  reports `"demo"`.
+
+What that makes dead, in this build:
+
+- **`is_that_virtuous()` is never called.** `constructDNA` invokes it at
+  `root/frame:35/DoAction@0x40bf76` `+0x1b92`, but only behind
+  `fizMode != "fizzle"` at `+0x1b7d`–`+0x1b8d`. Its caps — `herolevel` 12, all
+  eight stats 50, every armour piece 8, `maximum_ammo` 10,
+  `inventory_maxslots` 2 — **do not apply**. A level-5 gladiator with vitality
+  17 has been run past every one of them.
+- The `game_mode == "demo"` arms of the foyer `browse` gate (`+0x024d`), button
+  775 (`+0x047d`) and the shop level refusals (`sprite:1909` `+0x0b56`,
+  `sprite:2023` `+0x0b87`) are unreachable, so the tournament ladder is **not**
+  capped at 3, the level ladder is capped at 50 rather than 12, and shop items
+  above `itemlevel` 12/16 are not "demo locked".
+- Arena frame 231's level-up gate (§4) reads `_root.fizMode` directly rather
+  than `game_mode`, and takes its `fizMode == "fizzle"` arm for the same
+  reason: `herolevel < 50 && current_tournament <= 18`.
 
 This is the answer the staging guide has been waiting on. **`tournament` is
 reachable, cheaply, at low level**: `current_tournament` starts at 1 for a fresh
@@ -424,26 +640,79 @@ The `tournament` span plays 22→36 and rests on frame 36
 (`Stop` at `sprite:2095/frame:36/DoAction@0x62f547`).
 
 So in tournament mode **the opponent is fixed by ranking**, not redrawn:
-`_root.game.villain` is bound before the fight and root frame 214 leaves it
-alone (its `randomise_gladiator` is behind the `fight_mode == "duel"` gate).
+`_root.game.villain` is bound before the fight and root frame 214 never
+*generates* a replacement (its `randomise_gladiator` is behind the
+`fight_mode == "duel"` gate). For ranks 2..N frame 214 leaves the binding alone
+entirely; for rank 1 it rebuilds the same hard-coded opponent from the same
+literal (§2), which is a rebind but not a redraw.
 Rank 1 is the tournament boss from `unleash_hell(tournament_number)`; ranks
 2..N are ordinary generated gladiators at the hero's level. The hero starts at
 `tournament_ranking = tournament_max_gladiators` (foyer frame 1 `+0x0311`) and
 loses one rank per win (arena frame 88 `+0x094f`).
 
+**The `i == 1` arm's `constructvillainDNA` is destructive, and harmlessly so.**
+`constructvillainDNA` **serialises** an object into a `charDNA` string and
+writes it back (`+0x26ba` … `SetMember` at `+0x29a9`), so calling it at
+`+0x0320` on a champion that `unleash_hell` has just built — an object holding
+a hard-coded DNA literal and four name/quote strings and *no* stat fields —
+overwrites that literal with a serialisation of fields that do not exist. It
+does not matter: the champion is rebuilt from the literal by frame 214's own
+`unleash_hell` call before the bout, and never fought from the foyer's copy.
+That is a load-bearing detail for reproducibility, not trivia — §2 traces the
+full path.
+
 Two capture-relevant consequences:
 
-- **The tournament field is inspectable before the first bout.** The ladder
-  names are on screen and the objects are live at `_root.game.villain1` …
-  `_root.game.villainN`. An unattended session can read the whole field's stats
-  and armour at foyer frame 36 and decide whether to proceed — the closest
-  thing to opponent selection this build offers.
+- **The tournament field is inspectable before the first bout — but only
+  partly, and not at rank 1.** The ladder names are on screen and the objects
+  are live at `_root.game.villain2` … `_root.game.villainN`. Two live
+  qualifications the byte reading did not predict, both from the `ladder` dumps
+  in `captures/arena-tourn-2`:
+  - **`_root.game.villain1` is an empty `Object`.** Foyer frame 22 creates it at
+    `+0x02b1`, but the `i == 1` arm then builds the champion into
+    `_root.game.champion` (`+0x02fc`, `+0x0320`) and never writes it back. Every
+    field of rank 1 reads `undefined` in every run — 9 of 9 checked. The
+    champion is readable, just not under that name.
+  - **Derived combat fields are `undefined` until that villain has been
+    fought.** `hitpointsmax`, `armourclass`, `min_damage` and `max_damage` all
+    read `undefined` at the first foyer frame 36 and materialise only after the
+    object has been through `skincharacter` → `battlevalues` as the active
+    villain. What *is* readable up front is the stored side —
+    `attack`, `defence`, and the per-piece armour tiers — which is enough to
+    reject a field but not to model a fight.
+
+  Identity is otherwise stable across bouts, as the byte reading predicted:
+  ranks 2 and 3 report identical `attack`/`defence`/`helmet` in all three dumps
+  of a run. The objects are not immutable, though — in one run rank 3's stored
+  `greaves` read 1 before its bout and 0 after it, so being fought can change
+  them.
 - The tournament fight button is character 2071 (sprite 2095 frame 22 depth
   169); its whole body at `+0x0000` is `_root.gotoAndPlay("arena_intro")`.
-- **A tournament loss ends the character.** `sprite:2249/frame:315/DoAction@0x6e700c`
-  `+0x03a2` branches on `tournament_in_progress == true` into the game-over
-  path instead of the ordinary loss panel. An unattended tournament campaign
-  must treat a loss as terminal for that save slot.
+- **Corrected — a tournament loss does NOT end the character.** The first
+  revision said it did. `sprite:2249/frame:315/DoAction@0x6e700c` `+0x03a2`
+  does branch on `tournament_in_progress == true` into the game-over path
+  instead of the ordinary loss panel, and that much is byte-verified — but
+  losing the *screen* is not losing the *slot*. `save_character` has exactly
+  three call sites in the whole build (root frame 150 `+0x0585`, button 1565
+  `+0x02d6`, button 2042 `+0x020f`), and **none of them is reachable from a
+  bout, from the ladder, from the win chain or from the loss path.** The slot
+  still holds whatever the last town-square entry flushed. **Observed**: 22
+  `ABORT:battle-lost` lines across `captures/arena-*`, including eight losses
+  to the rank-1 champion, and the gladiator survived every one — it lost gold
+  and counters that were never flushed, and nothing else.
+- **The tournament loop never returns to town square, so the whole ladder
+  shares ONE `time_of_day` budget with no reset anchor.** Every exit from a
+  won tournament bout goes to `foyer`, never to `townsquare`: button 775's
+  `tournament_in_progress` arm at `+0x05cf` and button 2283's
+  `tournament_in_progress` arm at `+0x029a` both jump there. Since
+  `time_of_day` is only ever reset by a button (§2) and the two buttons on this
+  loop take the *foyer* arm rather than the resetting one, the clock runs
+  monotonically from the ladder's first bout to its last while
+  `day_night_cycle` fires on every foyer entry (root frame 203 `+0x0000`) and
+  every 1.5 s besides. **Observed**: `tod` 25 → 30 across three bouts in
+  `arena-tourn-2-obs-a1`, with no reset in between. A ladder must therefore be
+  entered with the clock freshly reset and be budgeted whole; there is no
+  mid-ladder anchor to re-assert it from.
 
 ## 4. Reward chain after a win
 
@@ -539,12 +808,30 @@ readiness check for step 8, and it is a genuine wait, not a frame number.
 `fight_win_stuff.nextleveltext` carries the level-up decision to button 775 as a
 **string comparison**. `experiencelast` and `experienceneeded` are derived in
 `battlevalues` (`+0x3853` and `+0x38e1`) as
-`round((L-1)^2 * ((L-1)/5) * 300)` and `round(L^2 * (L/5) * 300)`, with a
-floor near 125 applied at `+0x39a0`. Level 2 therefore spans 60→480 experience,
-and one duel win against a level-2 generated opponent is worth several hundred
-`character_xp`. **A level-2 capture gladiator will usually level up on its first
-or second duel win** — the level-up screen is not an edge case on this route, it
-is the common case.
+`round((L-1)^2 * ((L-1)/5) * 300)` and `round(L^2 * (L/5) * 300)`.
+
+**Corrected — the floor at `+0x39a0` is a flat 125, and level 1 needs 125, not
+60.** The first revision decoded the multiply/round chain but left the floor
+"partly decoded" and quoted the raw formula's ~60 for level 1. The bytes are
+unambiguous:
+
+```text
+if (game.hero.experienceneeded < 125)     // +0x399a..+0x39aa
+  game.hero.experienceneeded = 125;       // +0x39af..+0x39c7
+```
+
+`Less2` against the literal 125, negated, skipping the assignment — so any
+computed value below 125 is raised to exactly 125. Level 1's raw
+`round(1 * 1 * (1/5) * 300)` is 60, which is below the floor. **Observed**: a
+level-1 hero at the reward screen logged `"experience":125,
+"experienceneeded":125`; a level-2 hero logged `480` (the raw formula's value,
+above the floor, so unchanged); a level-4 hero logged `3840`.
+
+The resulting bands: level 1 spans 0→**125**, level 2 spans 60→480, level 4
+spans 1620→3840. One duel win against a generated opponent at the hero's own
+level is worth several hundred `character_xp`. **A level-2 capture gladiator
+will usually level up on its first or second duel win** — the level-up screen is
+not an edge case on this route, it is the common case.
 
 ### Button 775 — the reward button
 
@@ -584,6 +871,18 @@ if (hero.current_tournament >= 19 && hero.tournament_ranking <= 2) {// +0x030a..
 The important line for a capture loop: **an ordinary duel win with no level-up
 returns to `townsquare` directly.** No new day, no `daybreak`, no dungeon test.
 That is the loop a multi-fight session runs in.
+
+Three things about the arm order that matter on the tournament ladder:
+
+- **The level-up arm outranks the tournament arm.** A win that levels the hero
+  goes to `levelup` (`+0x059e`) whether or not a tournament is in progress, and
+  the ladder is only resumed afterwards by *button 2283's* own
+  `tournament_in_progress` arm. **Observed** at every mid-ladder level-up.
+- **The tournament arm goes to `foyer`, never `townsquare`** (`+0x05cf`). With
+  button 2283's matching arm (`+0x029a`), that is the whole reason the ladder
+  shares one `time_of_day` budget — see §3.
+- The `game_mode` disjunction at `+0x047d`/`+0x04bf` reduces to
+  `herolevel < 50` in this build (§3).
 
 ### Tournament victory — button 778
 
@@ -627,7 +926,7 @@ character 2283, placed at root frame 227 depth 409:
 
 ```text
 _root.specials_gained_mov.removeMovieClip(); removeSprite;  // +0x012d..+0x0155
-if (_root.game.hero.statpoints > 0) {                       // +0x0156..+0x016a
+if (statpoints > 0) {          // BARE NAME - see below     // +0x0156..+0x016a
   inspirato_text = <"distribute all your skillpoints" refusal>;  // +0x016f
 } else {
   _root.backup_char(_root.game.hero);                       // +0x017c..+0x019f
@@ -652,12 +951,64 @@ The four points are spent by the eight `+`-buttons on the level-up stat panel
 (strength) in full:
 
 ```text
-if (_root.game.hero.statpoints > 0) {         // +0x004c..+0x0060
-  _root.clicksound.start();                   // +0x0065
-  _root.game.hero.strength++;                 // +0x0093..+0x00ae
+if (_root.game.hero.statpoints > 0) {         // +0x003a..+0x0060
+  _root.clicksound.start();                   // +0x0065..+0x0080
+  _root.game.hero.strength++;                 // +0x0081..+0x00ae
   _root.game.hero.statpoints--;               // +0x00af..+0x00e4
 }
 ```
+
+### The two `statpoints` are not the same variable — Corrected
+
+The first revision rendered button 2283's gate as
+`if (_root.game.hero.statpoints > 0)`. **It is not.** The two gates are written
+differently, and the difference decides whether an unattended run can leave the
+level-up screen at all.
+
+| Site | Bytes | Resolves to |
+| --- | --- | --- |
+| the eight stat buttons, e.g. **1596** `+0x004c` | `Push "statpoints"; GetMember` — the member of the `_root.game.hero` object already on the stack from `+0x003a` | `_root.game.hero.statpoints`, the **real** counter |
+| the continue button **2283** `+0x0156` | `Push "statpoints"; GetVariable` — a bare name with nothing on the stack | `_root.statpoints`, a **display mirror** |
+
+The mirror is maintained by an `enterFrame` clip action on the level-up stat
+panel: `root/frame:227/instance:357/clip-action:0`, which copies
+`_root.statpoints = _root.game.hero.statpoints` at `+0x0081`–`+0x009b` and does
+the same for all eight stat names below that. Character **2265** is placed at
+depth **357** by a `PlaceObject2` at root frame **227** and removed by a
+`RemoveObject2` at root frame **235**, so the mirror is refreshed every frame
+across the whole level-up span and nowhere else.
+
+**Why it matters, and it was confirmed live on the first arena run.** The
+mirror is a frame behind. Spending the fourth point drives
+`game.hero.statpoints` to 0, but `_root.statpoints` still reads the previous
+value until the next `enterFrame`. A navigator that spends four points and
+presses 2283 in the same execution slot reads the stale mirror, takes the
+refusal arm, and gets nowhere. The observed pair, from
+`captures/arena-dry-4/arena-dry-4-obs.rufflelog`:
+
+```text
+"step":"levelup-point","spent":4,"vitality":5,"statpointsHero":0,"statpointsRoot":1
+"step":"levelup-mirror-wait","statpointsRoot":0,"statpointsRootRaw":"0","ticks":1
+```
+
+`statpointsHero` 0 while `statpointsRoot` still reads 1 — exactly one point of
+lag — and the mirror clears on the very next tick. **All 13 level-ups recorded
+across `captures/arena-*` show the identical pair**, with zero variation in
+either value or in the one-tick wait. This is GATE C in §9.
+
+**One overstatement to retract with it.** An earlier audit concluded that
+pressing 2283 early "parks the run forever". It does not: the refusal arm sets
+`inspirato_text` and jumps to the end of the body (`Jump` at `+0x0177`), so it
+is idempotent and retryable. The gate is still right — pressing into it wastes
+frames and muddies the log — but the consequence is a retry, not a hang.
+
+**And one dead call.** Button 2283's `tournament_in_progress` arm calls
+`_root.backup_character(...)` at `+0x0276`. **No such function exists in this
+build**: a whole-build function-name search for `/backup/` returns exactly one
+definition, `backup_char(whichcharacter)`. The call is a no-op and nothing may
+depend on it. What actually preserves the four spent points is the
+`backup_char` at `+0x017c`, which runs `constructDNA` and serialises them into
+`charDNA` before any later `save_character` rebuilds the hero from it.
 
 **What an unattended run should do.** Spend all four points into the *same*
 stat, every time, and record which one in the observation. `vitality` is the
@@ -668,6 +1019,25 @@ every input to `attack_chances`, the damage roll, the deflection threshold and
 the controller selector — untouched. A run that spreads points, or picks a
 different stat per session, makes two sessions of the same "family" no longer
 comparable.
+
+**Observed, and it corroborates the battle map's formula while exposing a
+trap.** The four `levelup-confirm` lines in `captures/arena-*` are:
+
+| `herolevel` | `vitality` after the spend | `hitpointsmax` reported |
+| ---: | ---: | ---: |
+| 2 | 5 | 40 |
+| 3 | 9 | 130 |
+| 4 | 13 | 220 |
+| 5 | 17 | 310 |
+
+None of these matches `herolevel * 10 + vitality * 20` against the vitality on
+the same line — but every one matches it exactly against the vitality *before*
+the four points were spent (level 3 with vitality 5: `30 + 100 = 130`; level 5
+with vitality 13: `50 + 260 = 310`). **`hitpointsmax` on the level-up screen is
+one spend-cycle stale**, because button 775 calls `battlevalues` at `+0x0564`
+*before* jumping to `levelup`, and nothing recomputes it until the next
+`battlevalues` call. Read it there and you will be four vitality points behind.
+The battle map's formula is right; the screen is late.
 
 Note that `herolevel` itself moves regardless, and `herolevel` feeds
 `hitpointsmax`, the `wincrowd`/`psyche_up` button visibility thresholds,
@@ -684,6 +1054,10 @@ between sessions.
 | Armour piece | root `armoury` (170), `_root.armoursmith` (character 1909) | `_root.armoursmith["item"+i].onRelease()` for i in 1..60 (wired by `armourbuttons()`, `sprite:1909/frame:1/DoAction@0x5f1fa9` `+0x0786`), which calls `buyarmour(item, armourpiece, itemlevel)` (`+0x0ba9`; `DefineFunction2` at `+0x11ba`) | `item.itemlevel <= _root.game.hero.herolevel` (`+0x0b77`); `item.itemlevel > 12` refused outside the full game (`+0x0b3d`); then gold |
 | Weapon or bow | root `weaponshop` (179), `_root.weaponsmith` (character 1961) | `_root.weaponsmith["item"+i].onRelease()` for i in 1..80 (wired by `weaponbuttons()`, `sprite:1961/frame:1/DoAction@0x6110ce` `+0x0571`), which calls `buyweapon(item)` (`+0x0941`; `DefineFunction2` at `+0x0bf6`) | `item.itemlevel <= item.attribute_required` (`+0x0929`); `item.itemlevel > 16` refused outside the full game (`+0x08ee`); then gold |
 | Spell/item | root `magicshop` (187) / `church` (195) | `buyitem(whichitem)` on `_root.magicshop` / `_root.church` | not mapped here |
+
+The `item<n>` handlers in that first column are genuinely callable — but **not
+from the shop's entry or `browse` page**, where they do not exist yet. See
+*What running the shop established* at the end of this section.
 
 Weapon slots are banded, and the governing attribute differs per band
 (assignments inside `weaponbuttons()`):
@@ -756,6 +1130,49 @@ at arena frame 88 `+0x0894`) and can buy any weapon whose `itemlevel` is within
 its Agility/Strength. Weapon bands are attribute-gated, **not** level-gated —
 that is the one place the leveled route is cheaper than it looks.
 
+The two `game_mode == "demo"` refusals in the Gates column (`itemlevel > 12`
+for armour at `sprite:1909` `+0x0b3d`, `> 16` for weapons at `+0x08ee`) are
+**dead in this build**: `game_mode` reads `"full"` (§3).
+
+### What running the shop established
+
+Three things the byte reading did not predict, all from live runs:
+
+- **The `item<n>` handlers do not exist on the shop's entry or `browse`
+  pages.** Probed at shop frames 38 and 47, the clip carried `weaponbuttons`,
+  `buyweapon`, `getweaponinfo` and a set of `instanceNNN` slots, and **no
+  `item<n>` property at all**. The per-item `onRelease` bindings are wired by
+  the **category page**, so a navigator has to send the shop to one first. A run
+  that waited on `item60.onRelease` instead entered the weapon shop, reached its
+  `Stop` at root frame 186, and sat there until the GATE A ceiling 188 s later.
+- **The attribute gate really does refuse a vitality-only gladiator
+  everything.** Observed: twenty-five successive refusals walking item ids from
+  40 down to 14, because a vitality-only build has base `strength` and `speed`
+  and `attribute_required` is the hero's governing attribute for the band. This
+  is why §9's staging applies hero attributes at the town square, *before* the
+  shop, and not only at battle start.
+- **The refusal is legible from outside.** `buyweapon` answers by which page it
+  plays — `getitem` (147 weapons / 184 armour) means the hero qualifies,
+  `angry` (27) means it does not. Reading the answer is more robust than
+  reimplementing the gate, and it is what the navigator does.
+
+One hard-won caution about writing gold: `check_for_nan` will silently "repair"
+a NaN `goldpieces` to `herolevel * 1000`. An early version of the shop confirm
+read `itemcost` and `itemnumber` straight off the shop clip on the strength of a
+doc summary; live, both came back `undefined`, `goldpieces -= undefined` gave
+NaN, and a staged 5 000 000 became exactly 4 000. The line is still in the
+captures:
+
+```text
+"step":"shop-bought","kind":"weapon","item":39,"cost":null,"weapon":20,"goldLeft":4000
+```
+
+`"cost":null` is the unreadable operand; `"goldLeft":4000` is
+`herolevel * 1000` for a level-4 hero, i.e. the repair. The plain guard
+`goldpieces < itemcost` did not stop it, because **every** comparison with NaN
+is false in AVM1 — see §9. Numbers read out of the game go through an `isNum`
+check first, always.
+
 ## 7. Loss chain (for completeness)
 
 `sprite:2249/frame:315/DoAction@0x6e700c`: `battlesfought++` (`+0x02d1`),
@@ -766,7 +1183,13 @@ that is the one place the leveled route is cheaper than it looks.
 zero. The panel's button (character 2244, in sprite 2247) returns the root to
 `townsquare`.
 
-## 8. The save-write hazard — read this before scheduling a session
+## 8. The two frame-150 hazards — read this before scheduling a session
+
+Root frame 150 is where this route's risk lives. It does two dangerous things
+on every single town-square entry, in this order: it **flushes the save**, and
+then it **rolls a die that can end the run**.
+
+### 8a. The save-write hazard
 
 **Root frame 150 calls `save_character(_global.current_character)` at
 `+0x0585`, on every entry to the town square.**
@@ -779,10 +1202,14 @@ The whole-build call list for `save_character` is: root frame 150 `+0x0585`,
 button 1565 (new-character confirm) `+0x02d6`, and button 2042 `+0x020f`.
 
 The prisoner route never touches root frame 150 — `daybreak` sends a level-1
-hero straight to `dungeon`. **Every leveled-gladiator route does**, both on the
-way in (frame 113's `herolevel > 1` arm) and on the way back after each win
-(button 775's default arm). There is no path from `daybreak` to `foyer` that
-does not pass through `townsquare`.
+hero straight to `dungeon`. **Every leveled-gladiator route does**, on the way
+in via frame 113's `herolevel > 1` arm: there is no path from `daybreak` to
+`foyer` that does not pass through `townsquare`. It is touched again after every
+**duel** win with no level-up (button 775's default arm at `+0x0706`) and after
+every **level-up** outside a tournament (button 2283's default arm at `+0x02b3`).
+It is **not** touched again during a tournament ladder — both of those buttons
+take their `foyer` arm instead — so a ladder flushes once on the way in and then
+runs to its end unflushed (§3).
 
 Consequences the capture protocol must absorb:
 
@@ -797,6 +1224,15 @@ Consequences the capture protocol must absorb:
   one from an identical gladiator. Without that, session 2 of a family is
   staged differently from session 1 — which is exactly the class of divergence
   the fixture pipeline already had to chase once with stamina drift.
+  **Now implemented**: `tools/runtime-capture/save-state.ps1` snapshots and
+  restores the licensed `ss2_data.sol`, and `run-arena.ps1` refuses to start
+  without a fresh `-Snapshot` name, takes the snapshot itself before anything is
+  launched, and hashes the save before and after. The session protocol document
+  still does not mention any of this — see §11 item 5.
+- **Concurrency is refused on this route.** `run-campaign.ps1 -Concurrency > 1`
+  gives each session its own SharedObject store, which *forks* the save. That is
+  right for the capture campaign and wrong here, because the arena route has to
+  **accumulate** state across bouts.
 - Jumping `_root.gotoAndPlay("foyer")` directly from the slot screen would skip
   `townsquare` and the save. **Do not do this without evidence.** It also skips
   `day_night_cycle`, the `townhero` attach, `constructDNA`, `skincharacter` and
@@ -806,16 +1242,111 @@ Consequences the capture protocol must absorb:
   character-validation screen — and that experiment should be run against a
   throwaway slot, not a capture gladiator.
 
-## 9. Proposed navigator: `-Navigate duel` / `-Navigate tournament`
+### 8b. The 2 % special-event draw — a hazard the first revision missed entirely
 
-A sibling of `stepNavigator` in
-[`ss2-capture-wrapper.as`](../../tools/runtime-capture/ss2-capture-wrapper.as),
-in the same style: a state check that says it is safe to proceed, then the
-game's own call that advances it.
+The first revision described the special event as a `time_of_day >= 200`
+consequence of root frame 158, and left it there. **That is only the second of
+its two triggers, and it is by far the rarer one.** The dominant trigger is an
+unconditional die roll at the end of root frame 150 itself, at
+`+0x07d4`–`+0x0845`:
 
-### A caveat that shapes every step below
+```text
+special_event_chance = 1 + RandomNumber(100);          // +0x07d4..+0x07e5
+if (special_event_chance <= 2                          // +0x07e6..+0x07f8
+    && _global.special_event_happening != true         // +0x07fe..+0x0813
+    && _global.special_for_day != true) {              // +0x0819..+0x082d
+  _root.gotoAndPlay("special_event");                  // +0x0832..+0x0845
+}
+```
 
-The existing navigator advances by two different mechanisms:
+Everything about this is hostile to an unattended run:
+
+- **It is a flat 2 % on EVERY town-square entry**, wholly independent of
+  `time_of_day`, of the hero, of the day counter and of anything a navigator
+  can set. `1 + RandomNumber(100)` is `<= 2` for exactly two of a hundred
+  outcomes.
+- **It cannot be intercepted.** The draw uses the AVM1 `RandomNumber` **opcode**
+  (`+0x07e3`), not `randomBetween`, so the capture wrapper's tape injection —
+  which shadows `Math` and the `randomBetween` helper — cannot see it, record
+  it or replace it. No instrumentation available to this project can.
+- **It cannot be pre-armed away.** The one suppressor a navigator could set,
+  `special_for_day`, is written `true` at exactly one site in the build: root
+  frame **160** `+0x313a` — *inside* the special event it would be suppressing.
+  Its three `false` writers are the frame-10 initialisation (`+0x0643`), button
+  775's `tournament_complete` arm (`+0x0689`) and button 1827 (`+0x0195`).
+  There is no way to arrive at frame 150 with it already set without having
+  already had the event. `special_event_happening` is the same shape.
+- **The jump happens AFTER `save_character`** at `+0x0585`, so by the time a
+  run can detect it the flush has already occurred. That is why aborting on it
+  is safe rather than merely early: nothing is left half-written.
+
+The arithmetic a schedule has to budget: a level 1 → 4 run makes **three to six
+town-square entries**, so **6–12 % of otherwise healthy runs end this way**.
+That is a budgeted failure rate, not a defect. The right handling is the one
+`run-arena.ps1` implements: treat the special-event screens (root frames
+160–169) as a hard abort, and relaunch from the snapshot. `run-arena.ps1`
+classifies `special-event-screen` alongside `battle-lost` in its `$RECOVERABLE`
+set and retries under `-Attempts N`, deliberately *without* restoring the
+snapshot, because the save already holds every completed bout.
+
+**Status: byte-verified, not yet observed.** No `ABORT:special-event-screen`
+line appears in the retained `captures/arena-*` logs — with 12–15 recorded runs
+at roughly 2 % per entry that is unremarkable, but it means the abort path
+itself has been exercised only by the `battle-lost` sibling that shares it.
+
+## 9. The navigator: `-Navigate arena` (`stepArenaNavigator`)
+
+**This section used to propose a navigator. It now describes one that exists.**
+`stepArenaNavigator` lives in
+[`ss2-capture-wrapper.as`](../../tools/runtime-capture/ss2-capture-wrapper.as)
+and is driven by
+[`run-arena.ps1`](../../tools/runtime-capture/run-arena.ps1). The proposal's
+shape survived — a state check that says it is safe to proceed, then the game's
+own call that advances it — but it was rebuilt as a **loop** rather than a
+linear walk, and it grew four hard gates the proposal did not have.
+
+### It is a state machine over the screen, not a step list
+
+`stepNavigator` (the prisoner route) is a one-shot linear walk to a single
+staged fight. This route goes town square → foyer → fight → reward → (level up)
+→ town square and back again, so re-entering a screen is the ordinary case
+rather than an exception. `stepArenaNavigator` is therefore a state machine
+whose state is the screen the game is resting on:
+
+`boot` → `slots` → `load` → `confirm` → `daybreak` → (`prologue` |) `town` →
+(`shop-open` → `shop-answer` → `shop-leave` →) `foyer` → (`ladder` →) `intro` →
+`fight` → `in-battle` → `reward` → (`levelup` →) back to `town` or `foyer`.
+
+### The four gates, and why each exists
+
+Every one of these came from an adversarial audit of the first revision of this
+document, and each is enforced in code rather than left to procedure. **None
+may be relaxed without new evidence.**
+
+| Gate | What it enforces | The section it comes from |
+| --- | --- | --- |
+| **A** | `time_of_day` is re-asserted to 24 at every town-square rest (the write buttons 1669 and 2283 both make), logged on both sides, and the run aborts well below the game's own 200 — default ceiling 150, plus a wall-clock session limit for a stall that never advances the clock | §2 — the clock advances on a 1.5 s interval *and* on six screen entries |
+| **B** | root frames 160–169 are a **hard abort**, never advanced through | §8b — the 2 % draw, plus the `time_of_day >= 200` branch |
+| **C** | button 2283 is pressed only once `_root.statpoints` — the **display mirror** — has read zero on a *later* frame, twice in a row | §5 — the mirror lags the real counter by one point |
+| **D** | the `daybreak` wait is time-limited, logs `day_night._currentframe` on timeout, and **never re-issues `gotoAndPlay("daybreak")`** | §1 — re-entering the span mid-way keeps the old clip and flips its parity to a permanent hang |
+
+Two supporting rules the gates rest on:
+
+- **Terminal screens.** Any root frame `>= 235` (gameover, bugs,
+  `gameover_demo`, `enter_highscore`) is an abort; nothing on this route is
+  above 234.
+- **`isNum` before every numeric test.** AVM1 has one comparison opcode: `>` is
+  `<` with the operands swapped, and `>=` / `<=` are it negated — so **both
+  negated forms return TRUE for NaN**, and every value read out of the game is
+  `undefined` until the frame that initialises it. This bit twice in one run:
+  `tod >= ceiling` aborted the first live arena run at 430 ms with
+  `time_of_day` undefined, and the guard written to fix it,
+  `n > 0 || n <= 0`, did it again (`NaN <= 0` is `!(0 < NaN)`, which is true).
+  The only safe shape is un-negated `<`, twice: `(n < 1) || (0 < n)`.
+
+### A caveat that shapes every phase below
+
+The prisoner navigator advances by two different mechanisms:
 
 - `root.get_char1.onRelease()` at `navStep 2` — a **script-assigned** handler
   (wired at root frame 84 `DoAction@0x419cbc` `+0x0548`), genuinely callable.
@@ -824,129 +1355,384 @@ The existing navigator advances by two different mechanisms:
   tag-defined button actions are not reachable from ActionScript.
 
 Every control on the town-square / foyer / reward / level-up path is a
-`DefineButton2`. So the leveled navigator is mostly of the second kind: it must
-execute each button's body verbatim, in order, with nothing added or omitted,
-and let the game run its own frames in between. Each step below names the
-button it is replicating so the two can be diffed. Where a body draws a random
-number, the navigator must draw one too (AS2 `random(n)` compiles to the same
+`DefineButton2`. So the leveled navigator is mostly of the second kind: it
+executes each button's body verbatim, in order, with nothing added or omitted,
+and lets the game run its own frames in between. Each phase below names the
+button it replicates so the two can be diffed. Where a body draws a random
+number, the navigator draws one too (AS2 `random(n)` compiles to the same
 `RandomNumber` opcode) rather than substituting a constant.
 
-### Steps
+Both halves of "nothing added or omitted" have already been violated once and
+corrected: an early revision **dropped** button 1669's `clicksound2.start()`,
+and another **added** a `clicksound2.start()` to button 1800, whose entire body
+is one `gotoAndPlay("foyer")` call and no sound. Neither would have changed
+an outcome; both would have made the replication a claim the bytes do not
+support. The shop item handlers, by contrast, are the *first* kind — genuinely
+script-assigned — and are called rather than replicated; only the `getitem`
+confirm (character 1952 / 1907) is a `DefineButton2` and has to be replicated.
 
-| # | State check | Action (and the button/site it replicates) |
-| --- | --- | --- |
-| 0 | `root.so_local != undefined` | `root.gotoAndPlay("new_or_continue")` — unchanged from the prisoner navigator |
-| 1 | `root._currentframe >= 52` | `root.gotoAndPlay("load_saved_gladiators")` — unchanged |
-| 2 | `typeof root.get_char1.onRelease == "function"` and `root.so_local.max_gladiators >= 1` | `root.get_char1.onRelease()` — unchanged (real handler) |
-| 3 | `_root.game.hero` has ≥ 6 own properties **and** `Number(root.game.hero.herolevel) > 1` | replicate button 1669: `_global.current_character = root.char_to_load; root.delete_tooltips(); _global.gamephase = 1; root.hero.removeMovieClip(); _global.time_of_day = 24; root.game.hero.score = 0` |
-| 4 | — | `root.gotoAndPlay("daybreak")` (button 1669 `+0x0130`). Abort loudly if the herolevel check in step 3 failed: a level-1 hero here silently becomes a prisoner capture |
-| 5 | `root._currentframe == 150..159` (settles 158↔159); assert it is **not** 114–149 | none — the game routed itself. Log `herolevel`, `current_tournament`, `goldpieces` |
-| 6 | town square settled | replicate button 1800: `root.gotoAndPlay("foyer")` |
-| 7 | `root._currentframe == 208` **and** `root.foyer._currentframe == 21` | read `root.foyer.tournament_level_required` and `root.foyer.duel_button._visible`. This is the branch point |
-| 8a (duel) | `root.foyer.duel_button._visible == true` | replicate button 2066: set `_global.fight_mode = "duel"`; compute `max_arena` from the herolevel ladder; `_global.current_arena = 1 + random(max_arena)`; `root.gotoAndPlay("arena_intro")` |
-| 8b (tournament) | `root.game.hero.herolevel >= root.foyer.tournament_level_required` | replicate button 2069: `_global.fight_mode = "tournament"; root.foyer.gotoAndPlay("tournament"); root.foyer.play()` |
-| 9b (tournament only) | `root.foyer._currentframe == 36` and `root.game.villain` bound | optionally dump the whole ladder (`root.game.villain1..N`) before proceeding; then replicate button 2071: `root.gotoAndPlay("arena_intro")` |
-| 10 | `root._currentframe == 220` | log `herolevel`, `_global.fight_mode`, `_global.current_arena`, villain name/stats — the same diagnostic the prisoner navigator emits at `navStep 5` |
-| 11 | — | replicate button 2128: `_global.fightselected = false; root.gotoAndPlay("arena")` |
-| 12 | `_global.battle_started == true` | hand over to `stepAutopilot` — identical to the existing `navStep 6` |
+### The phases as built
 
-Optional continuation, only for a multi-fight session:
+Each row is a phase of `stepArenaNavigator`. "Log" names the `step` field of
+the `{"t":"dbg","at":"arena"}` line the phase emits, which is how a run is read
+back from `captures/arena-*`.
 
-| # | State check | Action |
-| --- | --- | --- |
-| 13 | `root.arena.fight_win_stuff.button_yes._visible == true` | replicate button 775. Compute its branch from `root.arena.fight_win_stuff.nextleveltext`, `_global.tournament_in_progress` and `_global.tournament_complete`, and take exactly one arm |
-| 14 | `root._currentframe == 234` (only if step 13 took the `levelup` arm) | spend all four points: while `root.game.hero.statpoints > 0`, replicate one stat button's body (`root.game.hero.vitality++; root.game.hero.statpoints--`), then replicate button 2283 |
-| 15 | back at townsquare (158/159) or foyer (208) | loop to step 6 |
+| Phase | State check | Action (and the button/site it replicates) | Log |
+| --- | --- | --- | --- |
+| `boot` | `root.so_local != undefined` (proves frame 10's SharedObject read ran) | `root.gotoAndPlay("new_or_continue")` | `title` |
+| `slots` | `root._currentframe >= 52` | `root.gotoAndPlay("load_saved_gladiators")` | `new_or_continue` |
+| `load` | `typeof root.get_char1.onRelease == "function"` and `so_local.max_gladiators >= 1` | `root.get_char1.onRelease()` — a **real** script-assigned handler | `slot-list` |
+| `confirm` | `root.game.hero` has ≥ 6 own properties, **and `isNum(herolevel)`**, **and `herolevel >= 1`** | button 1669 verbatim, including the `clicksound2.start()` an earlier revision dropped, then `gotoAndPlay("daybreak")` | `hero-loaded` |
+| `daybreak` | root reaches 150–159 (town) or 114–149 (prologue) | none — the game routes itself. **GATE D** bounds the wait | `routed-townsquare` / `routed-dungeon-prologue` |
+| `prologue` | root reaches 214–220 | none — the level-1 arm. The prologue skins the hero, builds the prisoner via `unleash_hell(0)` and sets `fight_mode` itself; nothing may hurry it | — |
+| `town` | root 150–159 | **GATE A**: re-assert `time_of_day = 24`, logging `todBefore`/`todAfter`. Then optional gold staging, hero staging and shop trips; then button 1800 verbatim (one `gotoAndPlay("foyer")` call, **no sound**) | `townsquare` |
+| `shop-open` | the shop clip exists | scan `item<n>` downward for the highest id with a real `onRelease`, sending the shop to category pages until one wires them; call the handler | `shop-page`, `shop-no-handlers` |
+| `shop-answer` | the shop clip settled | read **which page the game played**: `getitem` (147 weapons / 184 armour) means it qualifies, `angry` means it does not. On qualify, replicate the `getitem` confirm (character 1952 / 1907); on refusal, step the id down | `shop-bought` |
+| `foyer` | root 208, and either `tournament_in_progress == true` (→ `ladder` at once) or `foyer._currentframe == 21` (browse settled) | button 2066 verbatim (duel) or button 2069 verbatim (tournament). The duel arm draws its own `1 + random(max_arena)` | `foyer-browse` |
+| `ladder` | `foyer._currentframe == 36` and `root.game.villain` bound | dump every rank's stats and armour, then button 2071: `gotoAndPlay("arena_intro")` | `ladder`, `ladder-ready` |
+| `intro` | root 220 | log the villain, then button 2128: `_global.fightselected = false; gotoAndPlay("arena")` | `versus` |
+| `fight` | `_global.battle_started == true` | reset the fight policy for a fresh bout, hand to `stepAutopilot` | `battle-ready` |
+| `in-battle` | `arena._currentframe >= 250` aborts (loss); otherwise wait for `fight_win_stuff.button_yes._visible` | none | `ABORT:battle-lost` |
+| `reward` | `button_yes._visible == true` — a genuine wait on the two-second tween, not a frame number | button 775, **exactly one arm**, chosen the way the button chooses it | `reward` |
+| `levelup` | root 234 | spend the four points **one per tick**, then **GATE C**, then button 2283's non-refusal arm | `levelup-point`, `levelup-mirror-wait`, `levelup-confirm` |
 
-Steps flagged as uncertain:
+Where the built navigator departs from the proposal, and why:
 
-- **Step 3's `gamephase = 1`.** That is exactly what button 1669 writes, so it
-  is faithful, but it means a leveled hero arrives at town square with the
-  tutorial state machine at phase 1 and picks up the phase-1 and phase-2
-  tooltips (root frame 150 `+0x0484`, root frame 214 `+0x025a`). The tooltips
-  are overlays and every screen entry calls `delete_tooltips()`, so an
-  ActionScript-driven navigator should be unaffected — but this has never been
-  observed for a leveled hero. A single `-Navigate duel` dry run that reaches
-  root frame 220 settles it.
-- **Steps 8a/8b as replications rather than presses.** If a future harness gains
-  real input injection, prefer pressing `_root.foyer.duel_button` for real. The
-  evidence that would settle whether replication is adequate is a side-by-side:
-  one manual duel session and one navigated session against the same save,
-  compared on `_global` state at root frame 220.
-- **Step 14.** Spending stat points has no game function to call — the button
-  body is two statements with no call. This is the least faithful step in the
-  route. The alternative is to avoid it entirely: keep sessions to one fight and
-  restore the save between them, so the level-up screen is never reached.
-- **Step 13's branch selection.** Button 775 chooses by string equality on
-  `nextleveltext`. A navigator that reads the same property and reproduces the
-  same branch is faithful, but the string is written inside a Tween callback, so
-  reading it before `button_yes._visible` is true would race. The state check in
-  step 13 is what prevents that.
+- **`herolevel >= 1`, not `> 1`.** The proposal aborted a level-1 hero. The
+  built navigator lets it route into the dungeon prologue (`prologue` phase)
+  and self-advance, because the game's own prisoner fight is the cheapest
+  level 1 → 2 step available — it is how a fresh gladiator gets onto this route
+  at all. What it refuses is a herolevel that is not a number, which is the
+  case frame 113 has no arm for (§1).
+- **`foyer` has two entry conditions, not one.** Waiting for
+  `foyer._currentframe == 21` alone parked every between-bout return for the
+  full session limit. A tournament already in progress never shows `browse`:
+  foyer frame 1 `+0x035d` jumps straight to `tournament`. Observed as a live
+  stall of 215 s ending in a GATE A ceiling abort before it was fixed.
+- **Stat points are spent one per tick.** Four presses in one execution slot is
+  further from four button presses than four presses in four slots, and GATE C
+  needs a later frame anyway.
+- **Shop items are chosen by trial, not by modelling the gate.** `buyweapon`
+  refuses an item the hero does not qualify for by playing the `angry` page
+  instead of `getitem`, so the wrapper offers an id and reads which page the
+  shop went to. That is the game answering the question. It also had to scan
+  for wired handlers rather than assuming an id exists: a live run entered the
+  weapon shop, reached its `Stop` at root 186, and sat until the GATE A ceiling
+  because item 60 had no `onRelease` — the per-item bindings are wired by the
+  **category page**, not by `browse`.
+
+### The fight policy
+
+The prisoner route's fixed step list cannot serve a duel: the opponent is
+generated at the hero's own level, fights back, and the bout runs many turns.
+The arena route's policy (`arenaPolicy`, default `aggressive` when no explicit
+step list is given) is deliberately the smallest thing that can win one —
+close the distance, then attack — and it issues nothing the controller in scope
+does not offer, so it can only ever press buttons the player could press. It is
+forced off for every route other than `navigate=arena`, rather than merely left
+unset, because a stray policy on a prisoner run would replace that route's
+explicit step list and all 22 promoted goldens depend on the step list being
+exactly what was asked for.
+
+`rest` and `taunt` share one controller slot, chosen by whether stamina is at
+least half, and the wrapper cannot see which is wired — so neither is ever
+issued.
+
+### The capture gate: which bout may be recorded at all
+
+This is the part with no counterpart in the proposal, and it exists because the
+arena route fights **many** bouts per process while only one of them can ever be
+evidence.
+
+`arenaCapture` is **`never` by default**. A levelling run is staging, not
+observation, and a trace emitted from a duel would be an observation of an
+opponent nobody chose and nobody can reproduce (§2). `always` records every
+bout. `champion` arms only for the tournament rank-1 bout — and then only if
+the hero entering it is reproducible:
+
+- `tournament_ranking <= 2` and `tournament_in_progress == true` (which is
+  exactly when foyer frame 22 has bound `game.villain` to the champion);
+- `staminaleft == staminamax`;
+- `herolevel == -ArenaStagedLevel`, when that is given.
+
+Any field it cannot read counts as unstaged. **Observed doing its job**: in
+`captures/arena-champ-1/obs-champ-1-a1.rufflelog` the gate refused 382 times
+across one champion bout, and the two reasons it gave are exactly the two §12
+predicts — `"staminaleft":106,"staminamax":110` (carried in from the previous
+bout) and `"herolevel":4,"stagedLevel":5` (the mid-ladder level-up did not land
+that run). A silent non-match became a visible refusal, which is the whole
+point.
+
+Winning the champion bout is **not** required. The wrapper arms on the first
+`checkattackroll` and closes the trace on that call's return, so the evidence is
+one action, and `run-arena.ps1` treats a closed trace as success.
+
+### Staging (`-StageHero`, `-StageVillain`, `-StageGold`)
+
+`stepStaging` writes `field:value` pairs once `battle_started` is true — past
+the frame-214 full heal, past frame 221's forced `equipped_weapon = 1`, past
+`initbattle` — and repeats for 20 frames because the game re-derives values
+during battle construction. It stops before the action arms, so **no staged
+write can ever appear in the mutation trace**. Every field is reported on the
+trace's `end` line, read back from the game rather than echoed.
+
+Two placements are deliberate:
+
+- **Gold is staged at the town square and nowhere else**, because that is where
+  the shops are reachable from and where `save_character` persists it, and
+  because no combat site reads `goldpieces` — it is the least invasive
+  intervention available.
+- **Hero attributes are staged at the town square as well as at battle start**,
+  because the shop gate reads them and the shop runs before any battle. A
+  vitality-only gladiator has base strength and speed, so every worthwhile
+  weapon is refused — observed live as twenty-five successive refusals from
+  item 40 down to 14.
+
+The distinction that makes staging honest is in §12: an **attribute** is a
+genuine `battlevalues` input, but `min_damage` is one of its **outputs**.
+
+### Still uncertain
+
+- **`gamephase = 1` on a leveled hero.** That is exactly what button 1669
+  writes, so replicating it is faithful, but it means a leveled hero arrives at
+  town square with the tutorial state machine at phase 1 and picks up the
+  phase-1 and phase-2 tooltips (root frame 150 `+0x0484`, root frame 214
+  `+0x025a`). Many runs have now reached root frame 220 and fought without
+  incident, so the practical risk is settled; what has never been checked is
+  whether the tooltip overlays alter anything measurable.
+- **Replication versus a real press.** If a future harness gains real input
+  injection, prefer pressing `_root.foyer.duel_button` for real. The evidence
+  that would settle whether replication is adequate is still a side-by-side:
+  one manual session and one navigated session against the same save, compared
+  on `_global` state at root frame 220.
+- **Spending stat points remains the least faithful step on the route** — the
+  button body is two statements with no call, so there is no game function to
+  invoke. One point per tick is the closest available approximation.
 
 ### What this route does and does not unlock
 
 | Staging blocker | Status on the leveled route |
 | --- | --- |
-| `fight_mode == "tournament"` | **Unblocked.** Level-4 gladiator, `current_tournament == 1`, foyer `browse` → tournament button. Field of four, arena 2 |
-| Armour on the villain | **Unblocked.** `randomise_gladiator` gives duel and tournament opponents armour and enchanted weapons at the hero's level; the matched-suit path at `+0x31e5` sets all eight pieces to `round(herolevel/2)` |
-| Choosing *which* opponent | **Still blocked for duels** (procedural generation mixing `RandomNumber` opcodes). **Partly relieved in tournaments**: the field is pre-generated and inspectable at foyer frame 36 before the first bout |
-| Bow / archer controllers | **Unblocked by a shop trip** — ranged items 61–80, gated on Agility, not level |
+| `fight_mode == "tournament"` | **Unblocked, and now exercised.** Level-4 gladiator, `current_tournament == 1`, foyer `browse` → tournament button. Field of four, arena 2. Reached in 12 of 15 launches (§12) |
+| Armour on the villain | **Unblocked.** `randomise_gladiator` gives duel and tournament opponents armour and enchanted weapons at the hero's level; the matched-suit path at `+0x31e5` sets all eight pieces to `round(herolevel/2)`. Observed: ladder opponents with `helmet` 4 and `greaves` 2 |
+| Choosing *which* opponent | **Still blocked for duels** — 42 generated opponents observed, 42 distinct. **Partly relieved in tournaments**: the field is pre-generated and partly inspectable at foyer frame 36 before the first bout, but rank 1 is not under `villain1` and the derived combat fields are `undefined` until a villain has been fought (§3) |
+| A *reproducible* opponent | **Unblocked, once, at rank 1.** "John the Butcher" from `unleash_hell`'s hard-coded DNA — identical across twelve launches, and the only reproducible opponent in the build (§12) |
+| Bow / archer controllers | **Unblocked by a shop trip** — ranged items 61–80, gated on Agility, not level. But the attribute gate is real: a vitality-only gladiator is refused everything, so the shop trip needs attribute staging first (§6) |
 | Non-lethal finish | Unchanged; the defeat gate is the battle map's, not this route's. Tournament mode is what makes a hitpoint hit survivable |
 | Hero armour / enchantments | Unchanged: outfit the saved gladiator beforehand, now with a real gold income (`round(villain.character_xp * (100 + crowd_interest)/100)` per win) |
 
 ## 10. Everything not verified, with the evidence that would settle it
 
+### Closed since the first revision
+
+| Claim | Now | Settled by |
+| --- | --- | --- |
+| Frame 113's `day_night._currentframe == 80` equality is always sampled | **byte-verified, and guaranteed rather than incidental** | `day_night` is character 1772 at depth 408, `PlaceObject2` at root frame 96 and `RemoveObject2` at root frame 150, so a clean entry puts the clip on frame 18 (even) at root 113 and the 112↔113 oscillation advances it two per test. §1 |
+| `experienceneeded = round(L^2 * (L/5) * 300)`, floor "not fully decoded" | **fully decoded; the floor is a flat 125** | `+0x399a`–`+0x39c7`, plus observed `experienceneeded` of 125 / 480 / 3840 at levels 1 / 2 / 4. §4 |
+| A leveled hero loaded with `gamephase = 1` is unaffected by the tutorial tooltips | **observed not to obstruct** — many runs have reached root 220 and fought | still unmeasured as to whether the overlays change anything; see below |
+| Tournament opponents at ranks 2..N are never regenerated between bouts | **observed** — the ladder dump at foyer frame 36 reports the same field before every bout of a run | `arenaLogLadder`'s `ladder` lines in `captures/arena-tourn-2` |
+| Whether `game_mode` is `"demo"` or `"full"` | **`"full"`** | `_root.fizMode = "fizzle"` at root frame 1 `+0x0026`; observed 32 times. §3 |
+
+### Still open
+
 | Claim | Status | What would settle it |
 | --- | --- | --- |
-| Frame 113's `day_night._currentframe == 80` equality is always sampled | **unverified** — the root re-tests every second tick while `day_night` advances every tick, and `day_night` stops at 107 | a session that stalls at root frame 113; the navigator should log `day_night._currentframe` on timeout |
-| A leveled hero loaded with `gamephase = 1` is unaffected by the tutorial tooltips | **unverified** | one `-Navigate duel` dry run to root frame 220 |
-| Replicating a `DefineButton2` body is behaviourally identical to pressing it | **inferred** from the existing navigator's `navStep 5`, which has worked in every session | a manual-vs-navigated `_global` diff at root frame 220 |
+| The tutorial tooltips a `gamephase = 1` leveled hero picks up change nothing measurable | **unverified** — they have never obstructed a run, which is not the same thing | a `_global` and hero-field diff between a run staged `gamephase = 1` and one staged `gamephase = 5` at root frame 220 |
+| Replicating a `DefineButton2` body is behaviourally identical to pressing it | **inferred** — now from many hundreds of replicated presses across `captures/arena-*` rather than one, but still never compared against a real press | a manual-vs-navigated `_global` diff at root frame 220 |
 | A non-ranged secondary weapon still produces sane `bombard`/`snipe` | **unverified** — `swap_weapons` never checks the type | one round with a cheap non-ranged secondary and `swap_weapons,bombardright` |
-| `experienceneeded = round(L^2 * (L/5) * 300)` | **partially decoded** — the multiply/round chain at `+0x38e1`–`+0x3945` was read, the near-125 floor at `+0x39a0` was not fully decoded | a capture that records `experienceneeded` at two known levels |
-| The `combatwonitem` / `combat_wonitem` label mismatch is inert | **inferred** — the failed `gotoAndPlay` leaves the playhead at 88, which advances into 94 anyway | a tournament-final win capture logging `_root.arena._currentframe` across frames 88–95 |
-| Tournament opponents at ranks 2..N are never regenerated between bouts | **inferred** from the `tournament_in_progress != true` guard at foyer frame 22 `+0x0298` | two consecutive tournament bouts logging `game.villain2..N` identity |
+| The `combatwonitem` / `combat_wonitem` label mismatch is inert | **inferred** — the failed `gotoAndPlay` leaves the playhead at 88, which advances into 94 anyway | a tournament-final win capture logging `_root.arena._currentframe` across frames 88–95. No run has won a tournament yet |
+| The 2 % special-event draw ends runs at the predicted rate | **byte-verified but never observed firing** — no `ABORT:special-event-screen` line exists in the retained captures | enough runs to see it; the abort path itself is shared with `battle-lost`, which has fired 22 times |
+| Why staged combat stats did not change a fight outcome | **explained but not proved** — §12 gives the `battlevalues` recompute as the mechanism | a targeted probe that reads `min_damage` back *during* the bout rather than at battle construction |
 | The magic shop / church `buyitem` routes | **not mapped** | out of scope here; needed only for the spell-ingress fixture group |
 
-## 11. Changes this track would have made elsewhere (not made — other tracks own these files)
+## 11. Changes this track asked for elsewhere
 
-1. **[`ss2-battle-map.md`](ss2-battle-map.md), §Controller frames — "Unverified: …
-   a ninth label in that gap cannot be excluded".** It can now. Decoding tag 43
-   for sprite 862 gives exactly eight labels at frames 1, 5, 13, 20, 28, 52, 62,
-   74. Frames 38–51 carry no label and are unreachable. The caveat should be
-   closed and the decode method noted.
-2. **[`ss2-battle-map.md`](ss2-battle-map.md), §Battle result and reward
-   callbacks.** It attributes `ceil(herolevel^2 * 50)` gold to frame 315 without
-   saying it is the **loss** deduction, and does not record the win reward at
-   all. The win formula is `hero.goldpieces += round(villain.character_xp *
-   (100 + _global.crowd_interest) / 100)` at `sprite:2249/frame:88` `+0x078c`,
-   with a flat 2500 override for `herolevel == 1` at `+0x0894`. It also
-   describes frames 94/189/222/231 as "win item/reward/transition processing";
-   frames 94–188 are specifically the **tournament**-victory screen and are
-   skipped entirely by ordinary wins.
-3. **[`ss2-capture-staging.md`](ss2-capture-staging.md), Group F
-   (`candidate-grievous-knockback`).** It states "no `getphase` label in the
-   whole controller vocabulary maps to direction 30". The battle map's own
-   `attack_direction` table contradicts this: `psyche_up` assigns 30 at
-   overlay frame 52 `+0x669e` (facing right) and `+0x6717` (facing left), on the
-   third consecutive press, range-gated. `psyche_up` is wired on the warrior
-   controllers at `herolevel >= 7` and on the archer controllers at
-   `herolevel >= 3` — which is precisely a leveled-gladiator unlock, so Group F
-   should move out of "no player action is known" and into the leveled route.
-4. **[`ss2-capture-staging.md`](ss2-capture-staging.md), Villain-side staging.**
-   "The opponent is drawn by the game" understates it: the opponent is
-   *generated* by `randomise_gladiator` at the hero's level, mixing
-   `randomBetween` with `RandomNumber` opcodes, so it can never be reproduced
-   even with a fully injected tape. Tournament fields, by contrast, are
-   pre-generated once and inspectable before the first bout.
-5. **[`ss2-runtime-capture.md`](ss2-runtime-capture.md) / the session protocol.**
-   Needs a SharedObject step: back up and restore `ss2_data` around any session
-   that uses the leveled route, because root frame 150 flushes the save on every
-   town-square entry (§8).
-6. **[`tools/inspect-swf.mjs`](../../tools/inspect-swf.mjs).** Adding a
-   `--labels` mode that decodes tag 43 per timeline would make this map, and the
-   battle map's open sprite-862 question, reproducible with the project's own
-   tool instead of a throwaway reader. It stays read-only and prints only
-   structural identifiers.
+This list was written as "changes this track would have made, but other tracks
+own these files". Four of the six have since been made by their owners, and are
+struck here rather than deleted so the ask and the answer stay together.
+
+### Done
+
+1. ~~**[`ss2-battle-map.md`](ss2-battle-map.md), §Controller frames** — close the
+   "a ninth label in that gap cannot be excluded" caveat for sprite 862.~~
+   **Done.** The battle map now records "**Settled**: … the sprite carries
+   exactly eight labels, at frames 1, 5, 13, 20, 28, 52, 62 and 74 … There is no
+   ninth."
+2. ~~**[`ss2-battle-map.md`](ss2-battle-map.md), §Battle result and reward
+   callbacks** — say that `ceil(herolevel^2 * 50)` is the **loss** deduction,
+   and record the win reward.~~ **Done.** The battle map now carries an explicit
+   "**Correction: the reward is not `ceil(herolevel^2 * 50)`**" block with the
+   win formula at `sprite:2249/frame:88` `+0x078c`.
+3. ~~**[`ss2-capture-staging.md`](ss2-capture-staging.md), Group F** — retract
+   "no `getphase` label maps to direction 30"; `psyche_up` assigns it.~~
+   **Done.** Group F now opens with "**Correction.** This group used to read 'no
+   player action is known to produce direction 30'. That was wrong".
+4. ~~**[`ss2-capture-staging.md`](ss2-capture-staging.md), Villain-side
+   staging** — "the opponent is drawn by the game" understates it.~~ **Done.**
+   That section now says the phrase "understates it" and distinguishes the
+   generated duel opponent from the pre-generated tournament field.
+6. ~~**[`tools/inspect-swf.mjs`](../../tools/inspect-swf.mjs)** — add a
+   `--labels` mode that decodes tag 43 per timeline.~~ **Done**, with a
+   `--timeline <regex>` filter. See the method note; this document's label
+   tables are now reproducible with the project's own tool.
+
+### Still outstanding
+
+5. **[`ss2-runtime-capture.md`](ss2-runtime-capture.md) / the session
+   protocol.** Still needs a SharedObject step. The *tooling* has caught up —
+   `tools/runtime-capture/save-state.ps1` snapshots and restores the licensed
+   `ss2_data.sol`, and `run-arena.ps1` refuses to start without a fresh snapshot
+   name, takes the snapshot itself, and hashes the save before and after — but
+   the protocol document still describes no backup/restore around a
+   save-mutating session. A reader following `ss2-runtime-capture.md` alone
+   would not know to take one.
+
+### New, from running the route
+
+7. **[`ss2-battle-map.md`](ss2-battle-map.md), §Controller frames.** Its
+   sprite-862 paragraph still ends "the project's own tooling still cannot
+   reproduce it; a `--labels` mode on `tools/inspect-swf.mjs` would." That mode
+   now exists (item 6), so the sentence is stale.
+8. **[`ss2-capture-wrapper.as`](../../tools/runtime-capture/ss2-capture-wrapper.as),
+   the shopping comment.** It states the derivation as
+   `min_damage = strength + weapons[hero.weapon].weapon_min_damage`. The bytes at
+   `+0x3356` are `round(strength * 2) + weapon_min_damage` — the factor of 2 is
+   missing. The comment's *conclusion* is right and is the reason the shop path
+   exists at all; only the formula is misquoted.
+   [`ss2-capture-staging.md`](ss2-capture-staging.md) already records the
+   correct `round(strength * 2) + weapon_min/max`.
+
+## 12. What running the route established
+
+Everything in this section came from executing the route against the real
+build, not from reading it. Evidence is the gitignored raw logs under
+`captures/arena-*`; each claim names the run it came from.
+
+### The route works, and this is what it costs
+
+| Leg | Means | Result |
+| --- | --- | --- |
+| level 1 → 2 | the game's own dungeon prologue and tutorial prisoner | works, ~7 s |
+| level 2 → 4 | duels from foyer `browse` | works |
+| tournament ladder, rank 4 → rank 2 | tournament 1, field of four, arena 2 | **five of six attempts** in `captures/arena-tourn-2` (a1–a5 reached the rank-1 bout; a6 lost the rank-2 bout) |
+| rank 2 → rank 1 (the champion) | — | **0 for 12** — every champion bout in the retained captures was lost |
+
+Across the retained captures, **12 runs reached the champion bout out of 15
+tournament launches**, and every one of the 12 ended in `ABORT:battle-lost`.
+Six of those were unstaged vitality-only gladiators; the other six had been
+staged (below), including one at `strength 100 / min_damage 300 / max_damage
+400 / hitpoints 999`, and lost anyway.
+
+That is not a blocker for the fixture that bout exists to produce: **winning is
+not required.** The wrapper arms on the first `checkattackroll` and closes the
+trace on that call's return, so the evidence is one action, and `run-arena.ps1`
+treats a closed trace as success.
+
+### The rank-1 champion IS reproducible
+
+**"John the Butcher", `hitpointsmax` 110, `armourclass` 86 — identical across
+twelve independent launches**, read off `_root.game.villain` at root frame 220.
+Twelve `versus` lines, twelve identical triples, zero variation.
+
+That is what `unleash_hell` promises in bytes and now delivers in fact: the
+function builds `_root.game.champion` from a **hard-coded `charDNA` string
+literal** (`+0x1904` for `which_boss == 1`), binds `_root.game.villain` to it at
+`+0x2216`, and contains **zero RNG of any kind** — no `randomBetween`, no
+`RandomNumber` opcode. `skincharacter` at root frame 214 `+0x0527` then derives
+every combat field from that literal (§2). The champion is the one reproducible
+armoured opponent in this build, which is why the capture gate (§9) arms for
+that bout and no other.
+
+The per-`which_boss` decode of those literals — twenty branches, and what the
+rank-1 DNA string means field by field — belongs to
+[`ss2-champion-dna.md`](ss2-champion-dna.md) rather than here.
+
+### The hero entering that bout is NOT
+
+This was observed rather than inferred, and it is the reason the capture gate
+has to refuse rather than assume.
+
+- **The hero's level at the champion bout is decided by RNG.** In **10 of the
+  12** runs that reached it, the hero had levelled 4 → 5 first; in 2 it had not.
+  The cause is that experience per bout is a *generated* opponent's
+  `character_xp` (arena frame 231 `+0x024e`), and that opponent came from
+  `randomise_gladiator`. **The level-up lands after the rank-2 bout**, not the
+  rank-3 one: the `reward` line that reads `"nextleveltext":"YOU HAVE LEVELLED
+  UP!"` is the one that also reads `"ranking":2`, i.e. after the second win. The
+  first win's reward line reads `"63 % TO NEXT LEVEL"` at `"ranking":3`.
+- **`staminaleft` carries across bouts.** `battlevalues` resets it **only when
+  it is already `<= 0`** — `+0x3b1c`–`+0x3b44` reads
+  `if (!(staminaleft > 0)) staminaleft = staminamax`. Arena `initbattle` resets
+  the villain's only, `restore_char` does not carry it, and root frame 214
+  resets `hitpoints` alone. Observed: the capture gate refused a champion bout
+  reporting `"staminaleft":106,"staminamax":110`.
+
+Both are projected fields, so two sessions differing in either cannot match and
+can never clear the two-session promotion gate. Hence `-ArenaStagedLevel` and
+the stamina check in §9's capture gate.
+
+### A tournament loss is not terminal for the save slot
+
+Byte-verified and observed; see §3 for the argument. `save_character` has three
+call sites and none is reachable from a bout, the ladder, the win chain or the
+loss path. **22 `ABORT:battle-lost` lines across the captures, twelve of them to
+the champion, and the gladiator survived every one** — it lost gold and battle
+counters that were never flushed. This is what makes `-Attempts N` sound:
+`run-arena.ps1` relaunches after a loss deliberately *without* restoring the
+snapshot, because the save already holds every completed bout.
+
+### Why staging eleven combat fields changed nothing
+
+The single most useful negative result of the session. The `staged` line in
+`captures/arena-staged-2` records exactly eleven fields applied:
+
+```text
+"at":"staged","applied":"hero.herolevel=5,hero.strength=100,hero.attack=100,
+hero.defence=100,hero.speed=60,hero.min_damage=300,hero.max_damage=400,
+hero.hitpoints=999,hero.hitpointsmax=999,hero.staminaleft=100,hero.staminamax=100"
+```
+
+**All eleven read back correctly** at battle construction — the wrapper reports
+every staged field on the trace's `end` line read back from the game rather than
+echoed. The bout was still lost to a 110-hitpoint, 86-armour opponent, in about
+the same wall clock as an unstaged run, three times out of three.
+
+The mechanism is in `battlevalues`, which **derives** the damage fields rather
+than storing them:
+
+```text
+weapon_min_damage = _root["weapon" + char.weapon][3];       // +0x31be
+weapon_max_damage = _root["weapon" + char.weapon][4];       // +0x31da
+min_damage  = round(strength * 2) + weapon_min_damage;      // +0x3356..+0x3385
+max_damage  = round(strength * 2) + weapon_max_damage;      // +0x3386..+0x33b5
+secondary_min_damage = round(strength * 1) + secondary_weapon_min_damage;  // +0x33b6
+secondary_max_damage = round(strength * 1) + secondary_weapon_max_damage;  // +0x33e6
+```
+
+So **staging `min_damage` writes the output of a formula the game recomputes**,
+and it is recomputed often: `battlevalues` is called from `skincharacter`
+(`+0x1ad9`), from `save_character` (`+0x0231`), from button 775 (`+0x0581`),
+from five `charsheet` frames — and, decisively, from **four sites inside the
+combat overlay itself**, `sprite:862/frame:52` `+0x35f1`, `+0x3605`, `+0x4ea1`
+and `+0x4fab`. A value staged at battle construction does not survive the
+fight.
+
+The rule this produces, and the reason the arena navigator grew a shop:
+
+> **Stage inputs, never outputs.** `strength`, `speed`, `vitality` and
+> `hero.weapon` are genuine `battlevalues` inputs. `min_damage`, `max_damage`,
+> `hitpointsmax`, `armourclass` and `character_xp` are its outputs, and staging
+> them is writing on water.
+
+Buying a weapon changes an input. `hero.weapon` is persistent, survives every
+`battlevalues` call, every save and every relaunch — and the only field the
+wrapper then has to write is **gold**, which no site in `attack_chances`, the
+damage roll, the deflection threshold or the controller selector reads. That is
+the least invasive intervention available.
+
+**Caveat, and it is why §10 still lists this as open**: the *mechanism* above is
+byte-verified, but nothing has yet measured a staged `min_damage` being
+overwritten mid-bout. The targeted probe that would close it is in §10.
 
 ## Reproduce the read-only inventory
 
@@ -955,6 +1741,7 @@ With Node available and `$ss2Install` pointing to the Collection directory:
 ```powershell
 $ss2Install = 'C:\Program Files (x86)\Steam\steamapps\common\Swords and Sandals Classic Collection'
 $swf = "$ss2Install\swf\swords_sandals2_download.swf"
+node tools/inspect-swf.mjs $swf --labels --timeline '^root$'
 node tools/inspect-swf.mjs $swf --references 'dungeon' --around 90
 node tools/inspect-swf.mjs $swf --references 'fight_mode'
 node tools/inspect-swf.mjs $swf --references '"tournament[0-9]+"'
@@ -962,6 +1749,30 @@ node tools/inspect-swf.mjs $swf --function '^randomise_gladiator$' --max-actions
 node tools/inspect-swf.mjs $swf --references 'save_character'
 ```
 
-Frame labels were decoded separately; see the method note. These commands print
-analysis only. Do not redirect decompiled game code or assets into the
-repository.
+For the corrections in this revision specifically:
+
+```powershell
+node tools/inspect-swf.mjs $swf --references 'day_night_cycle'          # §2 - six call sites
+node tools/inspect-swf.mjs $swf --function '^day_night_cycle$'          # §2 - the increment
+node tools/inspect-swf.mjs $swf --references 'setInterval' --around 12  # §2 - the 1500 ms timer
+node tools/inspect-swf.mjs $swf --references 'statpoints' --around 8    # §5 - GetVariable vs GetMember
+node tools/inspect-swf.mjs $swf --references 'special_event_chance' --around 30   # §8b
+node tools/inspect-swf.mjs $swf --references 'special_for_day'          # §8b - four writers
+node tools/inspect-swf.mjs $swf --references 'game_mode'                # §3 - two writers
+node tools/inspect-swf.mjs $swf --references 'fizMode'                  # §3 - set at root frame 1
+node tools/inspect-swf.mjs $swf --function '^battlevalues$' --max-actions 12000   # §4, §12
+node tools/inspect-swf.mjs $swf --function '^unleash_hell$' --max-actions 60      # §12
+node tools/inspect-swf.mjs $swf --function-names 'backup'               # §5 - backup_character does not exist
+```
+
+Two facts in §1 and §5 come from the root **tag** stream rather than the action
+stream — `day_night` is character 1772 at depth 408 (`PlaceObject2` at frame 96,
+`RemoveObject2` at frame 150), and the level-up stat panel is character 2265 at
+depth 357 (placed at frame 227, removed at frame 235). `--labels` shows the
+frame numbers those sit between; the placements themselves were read with a
+throwaway out-of-repo tag walker that prints frame, depth and character id only.
+A `--placements` mode on `tools/inspect-swf.mjs` would make them reproducible
+with the project's own tool, the way `--labels` now does for labels.
+
+These commands print analysis only. Do not redirect decompiled game code or
+assets into the repository.

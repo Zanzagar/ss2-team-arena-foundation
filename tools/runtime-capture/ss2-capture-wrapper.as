@@ -753,8 +753,12 @@ function arenaResetAutopilot() {
 // why, because the wrong way was tried first and looked like it worked.
 //
 // battlevalues DERIVES the damage fields:
-//     min_damage = strength + weapons[hero.weapon].weapon_min_damage
-//     max_damage = strength + weapons[hero.weapon].weapon_max_damage
+//     min_damage = round(strength * 2) + weapon_min_damage      (+0x3356)
+//     max_damage = round(strength * 2) + weapon_max_damage      (+0x3386)
+// where weapon_min/max_damage come from _root.weapon<n>[3] and [4] - eighty
+// root variables, six-element arrays, not a `weapons` collection. (An earlier
+// revision of this comment dropped the factor of two and invented the
+// collection; the conclusion was right, the formula was not.)
 // (root frame 35, battlevalues +0x3356 and +0x3386). So staging `min_damage`
 // writes the OUTPUT of a formula the game recomputes from its inputs. Eleven
 // staged fields were read back correctly at battle construction and changed
