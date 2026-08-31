@@ -1,22 +1,126 @@
 # Transfer handoff — Swords & Sandals II Multiplayer Foundation
 
+## READ THIS FIRST — corrections from the 2026-08-31 audit pass
+
+A 13-agent write-nothing audit checked EVERY hand-authored scalar in all 60
+candidates against a byte-level derivation. **Roughly 3,300 scalars derive
+cleanly with no free parameter; 60 do not.** The corpus is about 98% sound, and
+four claims below this line are now WRONG. They are corrected here rather than
+edited away, because each was load-bearing.
+
+**Baseline is 614 tests, 0 failed, 0 skipped** (was 603 before this pass; the
+"602" written below was already stale when written — `20197f2`'s own message says
+603). `github/main` is **`4409ec7`**, not `e3f14aa`: PR #2
+(`design/endless-progression-readiness`) merged after this file was last touched.
+No PR is open for `arena/champion-capture`. `gh` is NOT installed on this machine;
+check PR state with `git ls-remote github "refs/pull/*/head"`.
+
+► **THE "IMPOSSIBLE" FIXTURES ARE REACHABLE. This is the correction that changes
+  the roadmap.** This file has said no tool path can change hero `attack` or
+  `defence` — "not `-StageHero`, not the shop, not levelling" — and on that basis
+  22 fixtures were written off. **The third clause is false.** Root frame 227
+  (`levelup`) places character 2265, carrying eight `+` buttons, one per base
+  stat, each with the identical body behind a `statpoints > 0` guard:
+  `1596` strength, `1600` speed, **`1602` attack**, **`2252` defence**,
+  `2253` vitality, `1608` charisma, `2254` stamina, `2264` magicka. No per-stat
+  cap, no exclusion. And the writes PERSIST: `constructDNA` reads `hero.attack` at
+  `+0x1e1b` and `hero.defence` at `+0x1e36` into `charDNA`; `initcharacter`
+  restores them from DNA indices 18 and 19; button 2283 calls `backup_char` and
+  `restore_char`, both ending in `constructDNA`. So a spent point survives the
+  per-turn re-skin that discards every `-StageHero` write. Entry is ordinary play
+  — `gotoAndPlay("levelup")` has exactly ONE site in the build, on button 775 of
+  the reward overlay. The wrapper spends all four points into `vitality` BY POLICY
+  (it replicates button 2253 verbatim), to keep sessions comparable. **That is a
+  choice, not a limit.** Verified independently by the main session with
+  `inspect-swf --references 'statpoints'`. Detail is in `ss2-battle-map.md`.
+
+  Still to do: the arithmetic of which exact stat vectors are hittable under "four
+  points per level, all four must be spent" (GATE C will not release the level-up
+  screen until `statpoints` reads 0). Note also that the impossible-hero set is
+  better identified by `attack 11 / defence 11` (15 fixtures) than by the
+  strength/damage signature this file uses, which catches only 14 and misses
+  `candidate-grievous-knockback`; and the `attack 3 / defence 2` duel pair was
+  never counted at all.
+
+► **THE TRANSCRIPTION IS FIVE FIXTURES, NOT THE WHOLE CORPUS.** A digest detector
+  flags 23 candidates; only FIVE are transcriptions. **Digest equality between a
+  candidate and an observation is the signature of a CORRECT PREDICTION, not of a
+  copy** — when a map-derived candidate is right, the confirming observation has an
+  identical scenario and tape by definition. The discriminator is lineage, not
+  identity. Relabelling the other eighteen would have installed eighteen false
+  provenance claims and made ten probe goldens permanently unpromotable. The five,
+  each with the commit that landed fixture and record together:
+  `candidate-prisoner-normal-kill` ← `obs-20260830-t1` (`135f211`),
+  `-dir8` ← `obs-20260830-u1` (`5f45627`), `-dir6` ← `obs-diag` (`19aead3`),
+  `-dir5` ← `obs-nav6` (`5317cec`), and
+  `candidate-duel-firstblood-normal-kill` ← `obs-20260830-e1` (`74a07a4`).
+
+  **Four goldens counted their candidate's own source record as one of their two
+  "independent" observations.** `135f211` says so in plain words and draws the
+  opposite conclusion. That is now REFUSED (`7856e2b`, `141e98a`). The four are
+  NOT yet re-promoted; the eligible records are committed and named in `7856e2b`.
+  What is NOT in question: the goldens' measurements. The game really does produce
+  those outcomes. What was broken is the provenance argument, and for four of them
+  the independence of the pair.
+
+► **THE PRESCRIBED `staminaleft` FIX IS DEAD. Do not write it.** Its premise —
+  that `staminaleft` is inert — is false: the map has it gating which attack
+  buttons exist, forcing the rest phase, and steering the villain AI. Separately,
+  an auditor promoted a golden from two records disagreeing by **99,992 stamina**
+  with the new pairwise gate installed and silent, because this repository's only
+  existing exclusion (`comparableSamples`) is PROJECTION-side, and a
+  projection-side exclusion silences the gate. The sound path is to **fix the
+  capture, not the comparison**: pin the approach-step count so the value is
+  deterministic, turning a silent non-match into a visible refusal. That needs a
+  wrapper edit and supervised rounds. And do NOT "restore" 105 to 110 — 105 is a
+  TRUE description of that route; the defect is that the fixture pins a quantity
+  the scenario does not determine.
+
+► **THE PAIRWISE GATE'S DORMANCY NUMBERS ARE WRONG, and the gate is weaker than
+  recorded.** "162 leaves" is a full-record count, not the comparison projection's
+  (142); over the surface it names at least 10 leaves can differ, not 0, and 2 of
+  them MUST differ in every legitimate promotion. The gate is LOGICALLY unable to
+  fire on the promotion path. **The largest hole in the pipeline is now this: two
+  fabricated observations that are copies of EACH OTHER still promote a new
+  golden.** Before any field exclusion ever lands, make
+  `projectSs2ObservationForComparison` structurally incapable of sharing an
+  exclusion with the matcher.
+
+Also corrected this pass: three circular warrants in the staging docs — including
+`capture-staging.md:318`, which attributed the villain's `100→95` to the HERO's
+five walks, when `+0x32a1..+0x3304` mutate `game_attacker.staminaleft` ONLY, so
+that derivation was impossible — and five wrong rows in the `staminacost` table,
+notably `rest`, which is `0 - round(stamina*15)`, a GAIN, not 0.
+
+Not yet done, in priority order: close the projection/exclusion hazard; re-promote
+the four goldens from eligible records (pipeline only, never by hand); correct the
+CONTRADICTED scalars in non-promoted fixtures (7 of 9 misc-a carry a
+strength/damage triple no weapon row in the build produces; two pin an enchantment
+potency of 5 against a cap of 3; spell `damageMethod: null` for ids 31/32/35 where
+the bytes pass `"burning"` and `"lightning"`; villain blocks omit `<piece>_defence`
+fields `battlevalues` rewrites every phase); the stub rewrite (**only 4 of 15**
+hook slots can change the vehicle gate's PASS/FAIL, and every `dbg` line —
+including every `wrapped:`, `capture-refused-*` and `attacker-resolved-*` — is
+stripped before the match); and the attacker identity, whose record field is
+written 16 lines before the game is loaded.
+
 ## State at the end of the 2026-08-31 session
 
 22 promoted goldens and **no runtime evidence yet for the champion, armoured or
-tournament families**. **602 tests, all passing, 0 skipped** in a capture-bearing
+tournament families**. **614 tests, all passing, 0 skipped** (this paragraph said 602; see the corrections block above) in a capture-bearing
 worktree.
 
 The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
-handoff said 36. PR #1 has since merged — `github/main` is `e3f14aa`, whose
+handoff said 36. PR #1 and PR #2 have since merged — `github/main` is `4409ec7`, whose
 history includes `ecf4510` — and the 2026-08-31 session added the commits on
 `arena/champion-capture`.
 
 ### Expected test profiles
 
 - A capture-bearing operator worktree with the complete ignored raw-trace
-  archive runs all **602 tests: 602 passed, 0 skipped, 0 failed**.
-- A fresh clone or worktree with none of those ignored traces runs **602 tests:
-  601 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
+  archive runs all **614 tests: 614 passed, 0 skipped, 0 failed**.
+- A fresh clone or worktree with none of those ignored traces runs **614 tests:
+  613 passed, 1 skipped, 0 failed**. The skipped test is the raw-trace archive
   existence check; the committed observation and divergence integrity checks
   still run.
 - A partial raw-trace archive does **not** skip: it fails and names every
