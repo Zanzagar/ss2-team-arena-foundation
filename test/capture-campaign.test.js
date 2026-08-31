@@ -26,8 +26,10 @@ import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  SS2_PROJECTED_COMBATANT_KEYS,
   SS2_SIMULATED_CAPTURE_METHOD,
   computeSs2ObservationDigest,
+  deriveExpectedEventsFromSs2Fixture,
   matchSs2ObservationToFixture,
   validateSs2Observation
 } from "../src/golden/observation.js";
@@ -41,11 +43,17 @@ import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js
 import { buildSs2CaptureManifest } from "../tools/runtime-capture/build-manifest.mjs";
 import {
   actionIdentityFor,
+  campaignShapeFor,
+  captureVehicles,
   computeCoverage,
+  extraWatchFieldsFor,
   isFamilyMember,
   loadFamily,
   parseArgs,
-  readFamilyMembers
+  readFamilyMembers,
+  unstageableScenarioFieldsFor,
+  wrapperDefaultWatchFields,
+  wrapperEmittedEventTypes
 } from "../tools/runtime-capture/campaign.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -123,10 +131,26 @@ function observationVariant(id, mutate) {
 // with evidence sets the repository does not (and must not) contain.
 // ---------------------------------------------------------------------------
 
+/**
+ * Copied verbatim into every sandbox.
+ *
+ * The last five are not code the driver runs — they are files it READS.
+ * campaign.mjs derives the wrapper's default watch list and its emittable
+ * event types from `ss2-capture-wrapper.as`, and derives which launcher
+ * exposes `-WatchFields` / `-Stage*` from the launchers' own `param(...)`
+ * blocks, rather than carrying copies of either that could drift. A sandbox
+ * without them is a sandbox where `computeCoverage` cannot answer, and it
+ * says so loudly rather than falling back to a default.
+ */
 const SANDBOX_CODE_FILES = [
   path.join("tools", "capture-session.mjs"),
   path.join("tools", "runtime-capture", "campaign.mjs"),
-  path.join("tools", "runtime-capture", "build-manifest.mjs")
+  path.join("tools", "runtime-capture", "build-manifest.mjs"),
+  path.join("tools", "runtime-capture", "ss2-capture-wrapper.as"),
+  path.join("tools", "runtime-capture", "run-campaign.ps1"),
+  path.join("tools", "runtime-capture", "run-capture.ps1"),
+  path.join("tools", "runtime-capture", "run-arena.ps1"),
+  path.join("tools", "runtime-capture", "launch-capture.ps1")
 ];
 
 const sandboxRoots = [];
@@ -679,7 +703,7 @@ test("coverage ignores an observation that targets the candidate but diverges fr
   assert.equal(row.promotable, false, "a divergent run is never counted towards the two-observation rule");
 });
 
-test("loadFamily refuses a family whose members claim the same attack direction", async () => {
+test("loadFamily refuses a family whose members claim the same attack direction, and names the one-fixture remedy", async () => {
   const twin = cloneJson(dir6Candidate);
   twin.fixtureId = `${dir6Candidate.fixtureId}-twin`;
 
@@ -687,9 +711,83 @@ test("loadFamily refuses a family whose members claim the same attack direction"
 
   await assert.rejects(
     () => sandbox.loadFamily(FAMILY),
-    /has two fixtures for attack direction 6/
+    (error) => {
+      assert.match(error.message, /has two fixtures for attack direction 6/);
+      // The refusal is correct — two fixtures for one identity leave a
+      // divergent round with no single candidate to be reported against — but
+      // a refusal that does not say what to do instead is a dead end. The
+      // remedy is the one-fixture family, spelled as the flag to type.
+      assert.match(error.message, /--family prisoner-normal-kill-dir6-twin/);
+      return true;
+    }
   );
-  await assert.rejects(() => sandbox.computeCoverage(FAMILY), /has two fixtures for attack direction 6/);
+});
+
+test("computeCoverage REPORTS on a family whose members share an action identity", async () => {
+  // The behaviour this replaces: computeCoverage went through loadFamily, so
+  // `plan --family armoured` (and champion, and tournament, and probe, and
+  // spell) refused to print anything at all. Coverage is a per-member report
+  // and never consults the action-identity index; requiring it hid the exact
+  // report an operator needs in order to plan the family as several rounds.
+  // The invariant itself is not weakened: loadFamily still refuses, which is
+  // what ingest-round and seed rely on.
+  const twin = cloneJson(dir6Candidate);
+  twin.fixtureId = `${dir6Candidate.fixtureId}-twin`;
+
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [dir6Candidate, twin],
+    observations: recordsFor(["obs-diag", "obs-gold3"])
+  });
+  const coverage = await sandbox.computeCoverage(FAMILY);
+
+  assert.deepEqual(coverage.rows.map((row) => row.fixtureId).sort(), [
+    "candidate-prisoner-normal-kill-dir6",
+    "candidate-prisoner-normal-kill-dir6-twin"
+  ]);
+  // Each row carries only the evidence aimed at it: the twin is the same
+  // fight under a second id, and it collects nothing, because matching is
+  // keyed on the record's target.
+  const byFixture = new Map(coverage.rows.map((row) => [row.fixtureId, row]));
+  assert.equal(byFixture.get("candidate-prisoner-normal-kill-dir6").observations.length, 2);
+  assert.equal(byFixture.get("candidate-prisoner-normal-kill-dir6-twin").observations.length, 0);
+  assert.equal(coverage.campaign.singleRound, false);
+  assert.deepEqual(coverage.campaign.actionIdentityCollisions, [{
+    key: "attack-direction:6",
+    label: "attack direction 6",
+    fixtureIds: ["candidate-prisoner-normal-kill-dir6", "candidate-prisoner-normal-kill-dir6-twin"]
+  }]);
+  // And loadFamily is unchanged, so the two commands that need the index
+  // still refuse.
+  await assert.rejects(() => sandbox.loadFamily(FAMILY), /has two fixtures for attack direction 6/);
+});
+
+test("no observation can be evidence for two candidates, whatever their action identities", () => {
+  // This is what makes it safe for coverage to stop going through loadFamily.
+  // The index guaranteed one candidate per action identity; the rule that
+  // actually protects promotion is stronger and independent of it —
+  // matchSs2ObservationToFixture compares observation.target.fixtureId, so a
+  // record aimed at one candidate is never counted for another. Asserted over
+  // the whole committed archive, not one family.
+  const claimedBy = new Map();
+  for (const entry of observationEntries) {
+    for (const candidate of candidateEntries.map((item) => item.value)) {
+      if (!matchSs2ObservationToFixture(candidate, entry.value).match) continue;
+      const owner = claimedBy.get(entry.value.observationId);
+      assert.equal(
+        owner,
+        undefined,
+        `${entry.value.observationId} matches both ${owner} and ${candidate.fixtureId}`
+      );
+      claimedBy.set(entry.value.observationId, candidate.fixtureId);
+    }
+  }
+  // And a twin candidate — the same fight under a second id — collects nothing,
+  // because it is not what the record targets.
+  const twin = cloneJson(dir6Candidate);
+  twin.fixtureId = `${dir6Candidate.fixtureId}-twin`;
+  const twinMatch = matchSs2ObservationToFixture(twin, observationById.get("obs-diag"));
+  assert.equal(twinMatch.match, false);
+  assert.deepEqual(twinMatch.differences.map((difference) => difference.path), ["/target/fixtureId"]);
 });
 
 // ---------------------------------------------------------------------------
@@ -890,10 +988,21 @@ test("loadFamily refuses a spell family whose members claim the same spell id", 
       assert.match(error.message, /candidate-spell-lethal-slain\b/);
       assert.match(error.message, /candidate-spell-lethal-slain-twin\b/);
       assert.doesNotMatch(error.message, /attack direction/);
+      // The remedy, named in the refusal: a whole fixture id is a family of one.
+      assert.match(error.message, /--family spell-lethal-slain(-twin)?\b/);
       return true;
     }
   );
-  await assert.rejects(() => sandbox.computeCoverage("spell"), /two fixtures for spell id 32/);
+  // computeCoverage deliberately does NOT refuse: reporting per-member
+  // coverage never consults the identity index, and refusing hid the report an
+  // operator needs in order to plan the family as several one-fixture rounds.
+  const coverage = await sandbox.computeCoverage("spell");
+  assert.deepEqual(coverage.rows.map((row) => row.fixtureId).sort(), [
+    "candidate-spell-lethal-slain",
+    "candidate-spell-lethal-slain-twin"
+  ]);
+  assert.equal(coverage.campaign.singleRound, false);
+  assert.equal(coverage.campaign.actionIdentityCollisions[0].label, "spell id 32");
 });
 
 // ---------------------------------------------------------------------------
@@ -1064,4 +1173,609 @@ test("settle without --manifest-prefix says nothing about it", async () => {
   assert.equal(value, 0);
   assert.equal(lines.some((line) => line.includes("manifest-prefix")), false);
   assert.ok(lines.some((line) => line.includes("Nothing to promote.")), lines.join("\n"));
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — what the driver reads off the wrapper and the launchers
+//
+// Every answer `plan` gives about *why* a candidate is uncaptured is derived
+// from a file in this repository. These tests pin the derivations against the
+// things they are derived from, so a wrapper edit that changes the default
+// watch list or adds an event emit moves the driver's answer with it instead
+// of leaving a stale copy behind.
+// ---------------------------------------------------------------------------
+
+const wrapperSource = await readFile(
+  path.join(REPO_ROOT, "tools", "runtime-capture", "ss2-capture-wrapper.as"),
+  "utf8"
+);
+
+test("the default watch list is parsed from the wrapper, not copied into the driver", async () => {
+  const defaults = await wrapperDefaultWatchFields();
+
+  // Cross-checked against an independent source rather than against a literal
+  // list: the 18 keys ingest projects out of every dump come from
+  // src/golden/observation.js, and the wrapper's own comment says the default
+  // list is those plus the staged-scenario inputs. If the parse were picking
+  // up the wrong array, or a comment, this would fail.
+  for (const key of SS2_PROJECTED_COMBATANT_KEYS) {
+    assert.ok(defaults.includes(key), `the default watch list must cover the projected key ${key}`);
+  }
+  assert.equal(new Set(defaults).size, defaults.length, "the wrapper must not list a field twice");
+  assert.ok(defaults.length > SS2_PROJECTED_COMBATANT_KEYS.length, "the default list is the projected keys PLUS inputs");
+  for (const name of defaults) assert.match(name, /^[a-z][a-z0-9_]*$/, `${name} is not a field name`);
+
+  // And it really is the wrapper's array: every name appears inside the
+  // literal the wrapper declares.
+  const literal = /var\s+DEFAULT_WATCH_FIELDS\s*=\s*\[([\s\S]*?)\]\s*;/.exec(wrapperSource)[1];
+  for (const name of defaults) assert.ok(literal.includes(`"${name}"`), `${name} is not in the wrapper's literal`);
+
+  // `gladiator_dir` is deliberately absent: dumpSide reads it off the fighter
+  // clip after the watch loop, which is why a fixture staging it needs no
+  // extra watch field.
+  assert.equal(defaults.includes("gladiator_dir"), false);
+});
+
+test("the emittable event types are parsed from the wrapper's own emit calls", async () => {
+  const emitted = await wrapperEmittedEventTypes();
+
+  // Cross-checked against an independent scan of the same file rather than
+  // against a literal roster. The wrapper is under active development — the
+  // magic-damage emit landed while this driver was being written — and the
+  // whole point of reading the answer out of the source is that it moves when
+  // the source moves. A test pinning today's set would have to be edited by
+  // whoever changes the wrapper, which is exactly the coupling this avoids.
+  const scanned = new Set(
+    [...wrapperSource.matchAll(/emit\(\{[^}]*?type:\s*"([a-z][a-z-]*)"/g)].map((match) => match[1])
+  );
+  assert.ok(scanned.size >= 4, "the wrapper should emit several event types");
+  assert.deepEqual([...emitted].sort(), [...scanned].sort());
+
+  // The three the physical ingress has always needed must be there, or every
+  // promoted golden's candidate would report a blocker.
+  for (const type of ["defender-hurt", "defender-blocked", "death", "overlay-label"]) {
+    assert.ok(emitted.has(type), `the wrapper must still emit ${type}`);
+  }
+});
+
+test("captureVehicles reads each launcher's staging and watch-field support from its own param block", async () => {
+  const vehicles = await captureVehicles();
+  const byName = new Map(vehicles.map((vehicle) => [path.posix.basename(vehicle.script), vehicle]));
+
+  assert.deepEqual(byName.get("run-arena.ps1"), {
+    script: "tools/runtime-capture/run-arena.ps1", watchFields: false, staging: true
+  });
+  assert.deepEqual(byName.get("run-capture.ps1"), {
+    script: "tools/runtime-capture/run-capture.ps1", watchFields: true, staging: false
+  });
+  assert.deepEqual(byName.get("run-campaign.ps1"), {
+    script: "tools/runtime-capture/run-campaign.ps1", watchFields: false, staging: false
+  });
+  assert.deepEqual(byName.get("launch-capture.ps1"), {
+    script: "tools/runtime-capture/launch-capture.ps1", watchFields: true, staging: true
+  });
+
+  // The operational consequence, derived rather than asserted from prose:
+  // exactly one script exposes both, so a fixture that needs a staged opponent
+  // AND extra watch fields has exactly one vehicle.
+  const both = vehicles.filter((vehicle) => vehicle.watchFields && vehicle.staging);
+  assert.deepEqual(both.map((vehicle) => vehicle.script), ["tools/runtime-capture/launch-capture.ps1"]);
+  // And run-campaign.ps1 — the driver's own wrapper — exposes neither, which
+  // is why it cannot drive any of the staged families as it stands.
+  assert.equal(byName.get("run-campaign.ps1").watchFields, false);
+  assert.equal(byName.get("run-campaign.ps1").staging, false);
+});
+
+test("computeCoverage fails loudly when it cannot read the wrapper it derives from", async () => {
+  const { root, campaign: sandbox } = await createCampaignSandbox({ candidates: [dir6Candidate] });
+  await rm(path.join(root, "tools", "runtime-capture", "ss2-capture-wrapper.as"));
+
+  await assert.rejects(
+    () => sandbox.computeCoverage(FAMILY),
+    (error) => {
+      assert.match(error.message, /Cannot read the capture wrapper/);
+      // Silently falling back to a hard-coded default is the failure this
+      // guards: it would report a watch list the session does not use.
+      assert.match(error.message, /rather than carrying a copy/);
+      return true;
+    }
+  );
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the extra watch fields, derived from each fixture's own
+// staged scenario
+// ---------------------------------------------------------------------------
+
+const defaultWatchFields = await wrapperDefaultWatchFields();
+const extraFor = (fixtureId) => extraWatchFieldsFor(candidateById.get(fixtureId), defaultWatchFields);
+
+test("extraWatchFieldsFor is the fixture's staged fields minus the wrapper's default list", () => {
+  // Composed from two rules that already exist, so it is right for a fixture
+  // nobody has written yet: ingest projects Object.keys(scenario.<side>) out of
+  // the staged dump and refuses when one is missing, and dumpSide writes
+  // exactly the watched fields. The expectations below are therefore
+  // consequences, not a maintained roster — each is recomputed from the
+  // fixture on disk in the loop underneath.
+  //
+  // Stated first, because every expectation below depends on it: the wrapper's
+  // default list still omits the per-piece defence ratings and the weapon
+  // fields. If that changes, these lists change with it, and this assertion
+  // says so rather than leaving a confusing diff.
+  assert.equal(
+    defaultWatchFields.some((name) => name.endsWith("_defence")),
+    false,
+    "the default watch list still omits every <piece>_defence name"
+  );
+  for (const name of ["equipped_weapon", "weapon_enchantment_type", "weapon_enchantment_potency"]) {
+    assert.equal(defaultWatchFields.includes(name), false, `the default list still omits ${name}`);
+  }
+
+  assert.deepEqual(extraFor("candidate-armoured-removal-destroys-helmet"), [
+    "helmet_defence", "shoulderguard_defence"
+  ]);
+  assert.deepEqual(extraFor("candidate-armoured-removal-destroys-shoulderguard"), [
+    "helmet_defence", "shoulderguard_defence"
+  ]);
+  assert.deepEqual(extraFor("candidate-armour-equality-quirk"), ["boot_defence"]);
+  assert.deepEqual(extraFor("candidate-armour-removal-debris"), ["helmet_defence", "shield_defence"]);
+  assert.deepEqual(extraFor("candidate-deflection-threshold-discriminator"), [
+    "greaves_defence", "helmet_defence"
+  ]);
+  assert.deepEqual(extraFor("candidate-snipe-shield-boost"), ["shield_defence"]);
+  assert.deepEqual(extraFor("candidate-armour-overflow-burning"), [
+    "equipped_weapon", "weapon_enchantment_potency", "weapon_enchantment_type"
+  ]);
+  assert.deepEqual(extraFor("candidate-frozen-enchantment-proc"), [
+    "equipped_weapon", "weapon_enchantment_potency", "weapon_enchantment_type"
+  ]);
+
+  // The families the runbook records as needing nothing.
+  for (const id of [
+    "candidate-armoured-deflection-threshold-cleared",
+    "candidate-armoured-deflection-threshold-critical",
+    "candidate-armoured-equality-quirk",
+    "candidate-tournament-nonlethal-normal-hit",
+    "candidate-tournament-boundary-at-max",
+    "candidate-tournament-boundary-below-max"
+  ]) assert.deepEqual(extraFor(id), [], id);
+});
+
+test("every candidate's extra watch fields recompute from its own scenario, and never name gladiator_dir", () => {
+  const known = new Set(defaultWatchFields);
+  for (const entry of candidateEntries) {
+    const fixture = entry.value;
+    const derived = extraWatchFieldsFor(fixture, defaultWatchFields);
+    const staged = new Set([
+      ...Object.keys(fixture.scenario.hero),
+      ...Object.keys(fixture.scenario.villain)
+    ]);
+
+    for (const field of derived) {
+      assert.ok(staged.has(field), `${fixture.fixtureId}: ${field} is not staged by the fixture at all`);
+      assert.equal(known.has(field), false, `${fixture.fixtureId}: ${field} is already watched by default`);
+    }
+    for (const field of staged) {
+      if (known.has(field) || field === "gladiator_dir") continue;
+      assert.ok(derived.includes(field), `${fixture.fixtureId}: ${field} is staged but unwatched and unreported`);
+    }
+    // gladiator_dir is dumped from the fighter clip, never watched.
+    assert.equal(derived.includes("gladiator_dir"), false, fixture.fixtureId);
+    assert.deepEqual(derived, [...derived].sort(), `${fixture.fixtureId}: the list must be stable`);
+  }
+});
+
+test("the five champion candidates each need eleven extra watch fields", () => {
+  // Load-bearing, and new: the champion bout is the handoff's next step, and
+  // the command it names goes through run-arena.ps1 — which exposes no
+  // -WatchFields at all. Every one of the five stages the full per-piece
+  // defence set plus the weapon fields, so ingest would refuse all five.
+  const championIds = candidateEntries
+    .map((entry) => entry.value.fixtureId)
+    .filter((id) => id.startsWith("candidate-champion-"))
+    .sort();
+  assert.equal(championIds.length, 5);
+
+  const expected = [
+    "boot_defence", "breastplate_defence", "equipped_weapon", "gauntlet_defence", "greaves_defence",
+    "helmet_defence", "shield_defence", "shinguard_defence", "shoulderguard_defence",
+    "weapon_enchantment_potency", "weapon_enchantment_type"
+  ];
+  for (const id of championIds) assert.deepEqual(extraFor(id), expected, id);
+});
+
+test("unstageableScenarioFieldsFor finds exactly the fields -Stage* cannot write", () => {
+  // parseStageList refuses a non-numeric value outright (it traces
+  // `stage-refused` and moves on), so a boolean status flag has no staging
+  // route at all. gladiator_dir is a string too, but it is observed off the
+  // fighter clip rather than staged, so it is excluded by name.
+  assert.match(wrapperSource, /function parseStageList/);
+  assert.match(wrapperSource, /stage-refused/);
+
+  const blocked = candidateEntries
+    .map((entry) => ({ id: entry.value.fixtureId, fields: unstageableScenarioFieldsFor(entry.value) }))
+    .filter((entry) => entry.fields.length > 0);
+
+  assert.deepEqual(blocked.map((entry) => entry.id).sort(), [
+    "candidate-lethal-result",
+    "candidate-spell-first-blood-duel",
+    "candidate-spell-lethal-slain"
+  ]);
+  for (const entry of blocked) {
+    for (const field of entry.fields) {
+      assert.equal(typeof field.value, "boolean", `${entry.id}.${field.field} should be a boolean status`);
+      assert.notEqual(field.field, "gladiator_dir");
+      assert.equal(candidateById.get(entry.id).scenario[field.side][field.field], field.value);
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the derived blockers, and the check that falsifies them
+// ---------------------------------------------------------------------------
+
+test("NO promoted candidate carries a derived blocker", async () => {
+  // The falsifiability check for the whole derivation. Every one of the 22
+  // promoted goldens was captured with the tooling exactly as it stands, so a
+  // blocker on any of their candidates would mean the derivation invents
+  // obstacles rather than reading them. This is the assertion that would fail
+  // first if the watch-field rule, the event rule or the staging rule were
+  // over-eager.
+  assert.ok(goldenEntries.length >= 22, "expected the full promoted set");
+  const promotedCandidateIds = new Set(
+    goldenEntries.map((entry) => `candidate-${entry.value.fixtureId.slice("golden-".length)}`)
+  );
+  // Grouped only to keep the test cheap — stripping a trailing `-dirN` folds
+  // the twelve prisoner goldens into three coverage runs. The assertion at the
+  // end proves the grouping missed nothing.
+  const families = new Set([...promotedCandidateIds]
+    .map((id) => id.replace(/^candidate-/, "").replace(/-dir\d+$/, "")));
+
+  const inspected = new Set();
+  for (const family of families) {
+    for (const row of (await computeCoverage(family)).rows) {
+      if (!promotedCandidateIds.has(row.fixtureId)) continue;
+      inspected.add(row.fixtureId);
+      assert.equal(row.hasGolden, true, row.fixtureId);
+      assert.deepEqual(row.blockers, [], `${row.fixtureId} is promoted, so no blocker may be derived for it`);
+      assert.deepEqual(row.extraWatchFields, [], `${row.fixtureId} was captured on the default watch list`);
+      assert.deepEqual(row.notes, [], `${row.fixtureId} was captured, so its fight mode is observed`);
+    }
+  }
+  assert.deepEqual([...inspected].sort(), [...promotedCandidateIds].sort());
+});
+
+test("a fixture whose ingress needs an event the wrapper cannot emit is blocked, naming that event", async () => {
+  // Driven against a DOCTORED copy of the wrapper rather than against whatever
+  // the real one emits today, so the rule is tested rather than the moment.
+  // The spell ingress is the case that matters: ingest keys the spell dispatch
+  // on `events.some(e => e.type === "magic-damage")`, so a wrapper that cannot
+  // emit it cannot produce a spell observation at all — and no flag reaches
+  // that, unlike every other blocker the driver derives.
+  const { root, campaign: sandbox } = await createCampaignSandbox({ candidates: [spellLethal] });
+  const wrapperPath = path.join(root, "tools", "runtime-capture", "ss2-capture-wrapper.as");
+  const doctored = (await readFile(wrapperPath, "utf8"))
+    .replace(/emit\(\{\s*t:\s*"event",\s*type:\s*"magic-damage"[^;]*;/g, "/* removed for this test */;");
+  assert.equal(/type:\s*"magic-damage"/.test(doctored), false, "the emit must actually be gone");
+  await writeFile(wrapperPath, doctored, "utf8");
+
+  const [row] = (await sandbox.computeCoverage("spell-lethal-slain")).rows;
+  const blocker = row.blockers.find((entry) => entry.code === "wrapper-emits-no-event");
+  assert.ok(blocker, `expected a wrapper-emits-no-event blocker, got ${JSON.stringify(row.blockers)}`);
+  assert.deepEqual(blocker.fields, ["magic-damage"]);
+  assert.match(blocker.detail, /No flag reaches this; it is a wrapper change\./);
+
+  // Derived from the fixture's own ingress, not from its family name: the
+  // required event list is deriveExpectedEventsFromSs2Fixture's.
+  const required = deriveExpectedEventsFromSs2Fixture(spellLethal).map((event) => event.type);
+  assert.ok(required.includes("magic-damage"));
+
+  // The same doctored wrapper leaves the physical ingress alone, so the
+  // blocker is specific to the event a fixture actually needs rather than a
+  // blanket verdict on the wrapper.
+  await cp(
+    path.join(REPO_ROOT, "test", "fixtures", "ss2-1v1", `${dir6Candidate.fixtureId}.json`),
+    path.join(root, "test", "fixtures", "ss2-1v1", `${dir6Candidate.fixtureId}.json`)
+  );
+  const [physicalRow] = (await sandbox.computeCoverage(FAMILY)).rows;
+  assert.equal(physicalRow.fixtureId, dir6Candidate.fixtureId);
+  assert.equal(physicalRow.blockers.some((entry) => entry.code === "wrapper-emits-no-event"), false);
+});
+
+test("the spell family's remaining blockers are the staging ones, and a fixture may carry several", async () => {
+  const coverage = await computeCoverage("spell");
+  assert.equal(coverage.rows.length, 8);
+  for (const row of coverage.rows) assert.equal(row.action.ingress, "spell");
+
+  // Wrapper-independent: these come from the fixtures' own staged scenarios.
+  const withStagingBlocker = coverage.rows
+    .filter((row) => row.blockers.some((blocker) => blocker.code === "unstageable-field"))
+    .map((row) => row.fixtureId)
+    .sort();
+  assert.deepEqual(withStagingBlocker, ["candidate-spell-first-blood-duel", "candidate-spell-lethal-slain"]);
+
+  // candidate-spell-lethal-slain carries two at once, and both are reported:
+  // a fixture is not "blocked by" one reason picked out of several.
+  const lethal = coverage.rows.find((row) => row.fixtureId === "candidate-spell-lethal-slain");
+  const codes = lethal.blockers.map((blocker) => blocker.code).sort();
+  assert.deepEqual(codes.filter((code) => code !== "wrapper-emits-no-event"), [
+    "needs-watch-fields", "unstageable-field"
+  ]);
+  assert.deepEqual(
+    lethal.blockers.find((blocker) => blocker.code === "needs-watch-fields").fields,
+    ["breastplate_defence"]
+  );
+});
+
+test("plan names the unobserved fight mode as a note, not as a blocker", async () => {
+  // A first observation of `fight_mode == "tournament"` is a finding, not a
+  // refusal, and the driver has to keep the two apart. The set of already
+  // observed modes is read off the committed runtime observations, so the note
+  // disappears by itself on the first successful tournament capture.
+  const coverage = await computeCoverage("tournament");
+  assert.equal(coverage.rows.length, 3);
+  for (const row of coverage.rows) {
+    assert.deepEqual(row.blockers, [], `${row.fixtureId} has no derivable blocker`);
+    assert.deepEqual(row.notes.map((note) => note.code), ["unobserved-fight-mode"]);
+    assert.match(row.notes[0].detail, /fight_mode "tournament"/);
+  }
+
+  // The archive really has never recorded it, and really has recorded the
+  // other two the note cites.
+  const runtimeModes = new Set(observationEntries
+    .filter((entry) => entry.value.capture.method !== SS2_SIMULATED_CAPTURE_METHOD)
+    .map((entry) => entry.value.scenario.fightMode)
+    .filter((mode) => mode !== undefined));
+  assert.equal(runtimeModes.has("tournament"), false);
+  assert.deepEqual([...runtimeModes].sort(), ["duel", "misc"]);
+
+  // And a family whose mode HAS been observed gets no such note.
+  const misc = await computeCoverage(FAMILY);
+  for (const row of misc.rows) assert.deepEqual(row.notes, [], row.fixtureId);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — campaign shape: one round, or one candidate at a time
+// ---------------------------------------------------------------------------
+
+const shapeOf = async (family) => campaignShapeFor(await readFamilyMembers(family));
+
+test("the prisoner band is a single-round family", async () => {
+  const shape = await shapeOf(FAMILY);
+
+  assert.equal(shape.memberCount, 4);
+  assert.equal(shape.oneFixture, false);
+  assert.deepEqual(shape.actionIdentityCollisions, []);
+  assert.equal(shape.distinctTapes, 1, "one injected tape drives all four directions");
+  assert.equal(shape.singleRound, true, "run-campaign.ps1 can drive the whole family");
+});
+
+test("champion, armoured and tournament are correctly refused as single-tape campaigns", async () => {
+  // The refusal is not a defect in the driver: these families really are
+  // several different fights sharing an id stem. Each fails BOTH invariants
+  // independently — members collide on the action identity, and every member
+  // carries its own injected samples — so neither could be relaxed into a
+  // single round without feeding one member's rolls into another's call order.
+  for (const [family, members, collisions] of [["champion", 5, 2], ["armoured", 5, 1], ["tournament", 3, 1]]) {
+    const shape = await shapeOf(family);
+    assert.equal(shape.memberCount, members, family);
+    assert.equal(shape.singleRound, false, family);
+    assert.equal(shape.actionIdentityCollisions.length, collisions, family);
+    assert.equal(shape.distinctTapes, members, `${family}: every member needs its own tape`);
+    // And the remedy it prints is a family name that really selects one member.
+    assert.equal(shape.oneFixtureFamilies.length, members, family);
+    for (const name of shape.oneFixtureFamilies) {
+      const one = await readFamilyMembers(name);
+      assert.equal(one.length, 1, `--family ${name} must select exactly one fixture`);
+    }
+  }
+
+  // The champion collisions are the two melee bands the DNA decode drives.
+  const champion = await shapeOf("champion");
+  assert.deepEqual(champion.actionIdentityCollisions.map((entry) => entry.label).sort(), [
+    "attack direction 5", "attack direction 9"
+  ]);
+});
+
+test("a one-fixture family is a single-round family by construction", async () => {
+  for (const family of [
+    "armoured-deflection-threshold-cleared",
+    "tournament-nonlethal-normal-hit",
+    "champion-power-hat-removal",
+    "prisoner-normal-kill-dir6"
+  ]) {
+    const shape = await shapeOf(family);
+    assert.equal(shape.memberCount, 1, family);
+    assert.equal(shape.oneFixture, true, family);
+    assert.deepEqual(shape.actionIdentityCollisions, [], family);
+    assert.equal(shape.distinctTapes, 1, family);
+    assert.equal(shape.singleRound, true, family);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the one-fixture campaign, end to end
+//
+// The runbook's answer to the families above is "run them one candidate at a
+// time". That is not a workaround needing new code — `isFamilyMember`'s
+// exact-match arm already makes a whole fixture id a family of one — but
+// nothing exercised every command through it, so nothing said so.
+// ---------------------------------------------------------------------------
+
+test("every uncaptured candidate is addressable as its own one-fixture family", async () => {
+  const goldenIds = new Set(goldenEntries.map((entry) => entry.value.fixtureId));
+  const uncaptured = candidateEntries
+    .map((entry) => entry.value.fixtureId)
+    .filter((id) => !goldenIds.has(goldenFixtureIdFor(id)));
+  assert.ok(uncaptured.length >= 33, `expected the uncaptured set, got ${uncaptured.length}`);
+
+  for (const fixtureId of uncaptured) {
+    const family = fixtureId.replace(/^candidate-/, "");
+    const members = await readFamilyMembers(family);
+    assert.deepEqual(
+      members.map((member) => member.fixture.fixtureId),
+      [fixtureId],
+      `--family ${family} must select exactly ${fixtureId}`
+    );
+    // seed serves it: one member, so one tape, trivially.
+    const loaded = await loadFamily(family);
+    assert.equal(loaded.members.length, 1);
+    assert.equal(loaded.byActionKey.size, 1);
+  }
+});
+
+test("plan, seed, watch-fields, ingest-round and settle all serve a one-fixture family", async () => {
+  // Driven with a candidate that has extra watch fields, so the watch-fields
+  // command has something to say, and against a reference trace so the whole
+  // loop runs.
+  const target = candidateById.get("candidate-armoured-removal-destroys-helmet");
+  const { root, campaign: sandbox } = await createCampaignSandbox({ candidates: [target] });
+  const family = "armoured-removal-destroys-helmet";
+
+  const coverage = await sandbox.computeCoverage(family);
+  assert.equal(coverage.rows.length, 1);
+  assert.equal(coverage.campaign.oneFixture, true);
+  assert.equal(coverage.campaign.singleRound, true);
+  assert.deepEqual(coverage.rows[0].extraWatchFields, ["helmet_defence", "shoulderguard_defence"]);
+
+  const planned = await withCapturedLog(() => sandbox.commandPlan({ family }));
+  assert.equal(planned.value, 0);
+  assert.ok(
+    planned.lines.some((line) => line.includes("ONE-FIXTURE")),
+    `plan must say the family is one fixture:\n${planned.lines.join("\n")}`
+  );
+  assert.ok(
+    planned.lines.some((line) => line.includes('-WatchFields "helmet_defence,shoulderguard_defence"')),
+    `plan must name the flag value:\n${planned.lines.join("\n")}`
+  );
+
+  // seed and watch-fields both write one line to stdout, the two values a
+  // round needs.
+  const stdout = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk) => { stdout.push(String(chunk)); return true; };
+  try {
+    assert.equal(await sandbox.commandSeed({ family }), 0);
+    assert.equal(await sandbox.commandWatchFields({ family }), 0);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+  assert.equal(stdout[0].trim(), path.join("test", "fixtures", "ss2-1v1", `${target.fixtureId}.json`));
+  assert.equal(stdout[1].trim(), "helmet_defence,shoulderguard_defence");
+
+  // Two independent sessions, ingested one at a time, then settled.
+  for (const n of [1, 2]) {
+    await stageSession(root, target, { sessionId: `session-one${n}`, observationId: `obs-one${n}` });
+    const { value, lines } = await withCapturedLog(() => sandbox.commandIngestRound({
+      family, session: `session-one${n}`, observation: `obs-one${n}`
+    }));
+    assert.equal(value, 0, lines.join("\n"));
+    assert.ok(lines.some((line) => line.includes(`MATCH obs-one${n}`) && line.includes(target.fixtureId)));
+  }
+
+  // settle sees the one-member family as promotable and takes it all the way
+  // to the gate — which then refuses, because reference traces are not runtime
+  // evidence. That refusal is the point: the one-fixture mode is a bookkeeping
+  // path, and it does not become a way to promote a fixture from a simulation.
+  const settled = await withCapturedLog(() => sandbox.commandSettle({ family }));
+  assert.equal(settled.value, 1, settled.lines.join("\n"));
+  assert.ok(
+    settled.lines.some((line) => line.includes("PROMOTABLE")),
+    `the one-fixture family reaches the gate:\n${settled.lines.join("\n")}`
+  );
+  assert.ok(
+    settled.lines.some((line) =>
+      line.includes(`Promotion of ${target.fixtureId} blocked`) &&
+      line.includes("synthetic simulator trace")),
+    settled.lines.join("\n")
+  );
+  assert.deepEqual(await jsonFileNames(root, "test", "fixtures", "ss2-1v1-golden"), []);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the watch-fields command
+// ---------------------------------------------------------------------------
+
+async function captureStdout(body) {
+  const chunks = [];
+  const original = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk) => { chunks.push(String(chunk)); return true; };
+  try {
+    const value = await body();
+    return { value, text: chunks.join("") };
+  } finally {
+    process.stdout.write = original;
+  }
+}
+
+test("watch-fields prints the string a round needs, and an empty line when the default suffices", async () => {
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [
+      candidateById.get("candidate-armoured-removal-destroys-helmet"),
+      candidateById.get("candidate-tournament-nonlethal-normal-hit"),
+      dir6Candidate
+    ]
+  });
+
+  const needs = await captureStdout(() => sandbox.commandWatchFields({
+    family: "armoured-removal-destroys-helmet"
+  }));
+  assert.equal(needs.value, 0);
+  assert.equal(needs.text, "helmet_defence,shoulderguard_defence\n");
+
+  // Empty is a real answer, not a failure: most families run on the default
+  // list, and a caller has to be able to tell "nothing extra" from "refused".
+  for (const family of ["tournament-nonlethal-normal-hit", FAMILY]) {
+    const none = await captureStdout(() => sandbox.commandWatchFields({ family }));
+    assert.equal(none.value, 0, family);
+    assert.equal(none.text, "\n", family);
+  }
+});
+
+test("watch-fields refuses a family whose members disagree, exactly as seed refuses divergent tapes", async () => {
+  // The refusal is substantive: -WatchFields installs an Object.watch per
+  // name, the watch fires per assignment, and the mutation trace is compared
+  // in full — so watching a field for one member can add a line to another
+  // member's trace and diverge a run that was otherwise correct. Passing the
+  // union would trade a refusal for an unexplainable divergence.
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [
+      candidateById.get("candidate-armoured-removal-destroys-helmet"),
+      candidateById.get("candidate-armoured-equality-quirk")
+    ]
+  });
+
+  await assert.rejects(
+    () => sandbox.commandWatchFields({ family: "armoured" }),
+    (error) => {
+      assert.match(error.message, /do not agree on the extra watch fields/);
+      assert.match(error.message, /candidate-armoured-removal-destroys-helmet/);
+      assert.match(error.message, /helmet_defence,shoulderguard_defence/);
+      assert.match(error.message, /the default list is enough/);
+      assert.match(error.message, /one candidate at a time/);
+      return true;
+    }
+  );
+
+  // --json reports every member instead of refusing, because a report is not
+  // a command line and cannot mis-serve a round.
+  const listed = await captureStdout(() => sandbox.commandWatchFields({ family: "armoured", json: true }));
+  assert.equal(listed.value, 0);
+  const parsed = JSON.parse(listed.text);
+  assert.equal(parsed.family, "armoured");
+  assert.deepEqual(
+    Object.fromEntries(parsed.members.map((member) => [member.fixtureId, member.fields])),
+    {
+      "candidate-armoured-equality-quirk": [],
+      "candidate-armoured-removal-destroys-helmet": ["helmet_defence", "shoulderguard_defence"]
+    }
+  );
+  assert.deepEqual(parsed.defaultWatchFields, defaultWatchFields);
+});
+
+test("watch-fields is a registered subcommand and takes the same flags as plan", () => {
+  assert.deepEqual(parseArgs(["--family", "armoured-removal-destroys-helmet", "--json"]), {
+    family: "armoured-removal-destroys-helmet",
+    json: true
+  });
 });
