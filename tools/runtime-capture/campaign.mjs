@@ -11,16 +11,19 @@
  *   ingest-round  delog one session's log, ingest it against every fixture
  *                 in the family, keep the one that MATCHES, and install the
  *                 observation record under test/observations/
- *   plan          report per-direction evidence coverage and what is
- *                 promotable
- *   settle        build the capture manifest and promote every direction
+ *   plan          report per-member evidence coverage and what is promotable
+ *   settle        build the capture manifest and promote every member
  *                 that has >= 2 matching observations from >= 2 sessions
  *
- * A "family" is the set of candidate fixtures whose ids share a prefix and
- * differ only in `scenario.attackDirection` — the fixtures a single staged
- * scenario can produce. Selecting the fixture by matching, rather than by
- * parsing a direction out of the trace, means a run is only ever filed as
- * evidence for a candidate it agrees with in full.
+ * A "family" is the set of candidate fixtures whose ids share a
+ * `-`-delimited id segment (`--family armour` is `candidate-armour` and
+ * `candidate-armour-*`, never `candidate-armoured-*`) and differ only in
+ * their action identity — the fixtures a single staged scenario can produce.
+ * The action identity is the attack direction for the physical ingress and
+ * the spell id for the spell ingress; see `actionIdentityFor`. Selecting the
+ * fixture by matching, rather than by parsing an identity out of the trace,
+ * means a run is only ever filed as evidence for a candidate it agrees with
+ * in full.
  *
  * Nothing here fabricates evidence. Observations come from
  * `ingestSs2CaptureTrace`, matching from `matchSs2ObservationToFixture`,
@@ -102,33 +105,128 @@ function divergenceReportPath(fixtureId, observationId) {
 }
 
 /**
- * Load the candidate fixtures of one family, indexed by attack direction.
- * The family is every candidate whose fixtureId starts with
- * `candidate-<family>`; two fixtures claiming one direction is a repository
- * error, not something to guess about.
+ * The action identity of one scenario — a fixture's, or an ingested
+ * observation's.
+ *
+ * `validateSs2OneVsOneFixture` enforces exactly one action identity per
+ * scenario, and `ingestSs2CaptureTrace` projects whichever one the target
+ * fixture stages, so the same rule reads both sides:
+ *
+ *   physical ingress  `attackDirection` — the dispatcher and the death chain
+ *                     both read the `attack_direction` global
+ *   spell ingress     `spellId` — `magic_damage_character` has no direction
+ *                     chain at all, and the wrapper emits `spell_id` instead
+ *
+ * This is the family's index key. Indexing on `attackDirection` alone was a
+ * defect rather than a simplification: a spell family carries no direction,
+ * so every member collapsed onto the single key `undefined` and the family
+ * looked malformed (or, at one member, resolved by accident).
  */
-async function loadFamily(family) {
+function actionIdentityFor(scenario, describe) {
+  const direction = scenario?.attackDirection;
+  const spellId = scenario?.spellId;
+  if ((direction === undefined) === (spellId === undefined)) {
+    throw new Error(
+      `${describe} must carry exactly one action identity: attackDirection for the physical ` +
+      "ingress or spellId for the spell ingress."
+    );
+  }
+  return direction === undefined
+    ? { ingress: "spell", id: spellId, key: `spell-id:${spellId}`, label: `spell id ${spellId}` }
+    : {
+      ingress: "attack",
+      id: direction,
+      key: `attack-direction:${direction}`,
+      label: `attack direction ${direction}`
+    };
+}
+
+/** Stable member order: physical ingress first, then by numeric identity. */
+const INGRESS_ORDER = Object.freeze(["attack", "spell"]);
+function compareActions(left, right) {
+  const byIngress = INGRESS_ORDER.indexOf(left.ingress) - INGRESS_ORDER.indexOf(right.ingress);
+  return byIngress !== 0 ? byIngress : left.id - right.id;
+}
+
+/**
+ * Is `fixtureId` a member of family `family`?
+ *
+ * Membership is `candidate-<family>` exactly, or `candidate-<family>-<rest>`:
+ * a `-`-delimited segment boundary rather than a raw string prefix. The raw
+ * prefix test this replaces is a live collision in this repository, not a
+ * hypothetical — `--family armour` swept the five `candidate-armoured-*`
+ * fixtures along with the three `candidate-armour-*` ones, so a campaign
+ * staged unarmoured would have ingested every round against armoured
+ * candidates too. The exact-match arm is what keeps a whole candidate id
+ * usable as a one-member family (`--family prisoner-normal-kill-dir6`), and
+ * what keeps `candidate-prisoner-normal-kill` — the unsuffixed direction-7
+ * member — inside its own family.
+ */
+function isFamilyMember(fixtureId, family) {
+  if (typeof fixtureId !== "string") return false;
   const prefix = `candidate-${family}`;
+  if (!fixtureId.startsWith(prefix)) return false;
+  return fixtureId.length === prefix.length || fixtureId.charAt(prefix.length) === "-";
+}
+
+/**
+ * Read the candidate fixtures of one family off disk, in stable action order.
+ * Membership only: the uniqueness invariant belongs to `loadFamily`, so this
+ * still answers "which fixtures did `--family <f>` name?" for a family whose
+ * members are not mutually distinguishable.
+ */
+async function readFamilyMembers(family) {
+  if (typeof family !== "string" || family.length === 0) {
+    throw new Error("A family name is required (--family <name>).");
+  }
   const members = [];
   for (const entry of await readJsonDir(CANDIDATE_DIR)) {
     const fixture = entry.value;
-    if (typeof fixture.fixtureId !== "string" || !fixture.fixtureId.startsWith(prefix)) continue;
+    if (!isFamilyMember(fixture.fixtureId, family)) continue;
     validateSs2OneVsOneFixture(fixture);
-    members.push({ fixture, filePath: entry.filePath, direction: fixture.scenario.attackDirection });
+    members.push({
+      fixture,
+      filePath: entry.filePath,
+      action: actionIdentityFor(fixture.scenario, fixture.fixtureId)
+    });
   }
-  if (members.length === 0) throw new Error(`No candidate fixtures match family prefix "${prefix}".`);
-  const byDirection = new Map();
+  if (members.length === 0) {
+    throw new Error(
+      `No candidate fixtures match family prefix "candidate-${family}"; a member id must be ` +
+      "exactly that or continue with a \"-\" segment boundary."
+    );
+  }
+  members.sort((a, b) => compareActions(a.action, b.action));
+  return members;
+}
+
+/**
+ * Load the candidate fixtures of one family, indexed by action identity.
+ *
+ * Two members claiming one identity is a repository error, not something to
+ * guess about: it is the key `ingest-round` files a divergence report under,
+ * so an ambiguous index means a divergent run has no single candidate to be
+ * reported against. Families whose members share an identity — the ten
+ * `candidate-probe-*` arms, the five `candidate-armoured-*` scenarios, the
+ * eight `candidate-spell-*` ones — are not single-tape campaign families in
+ * the first place (`seed` refuses them too, since their tapes differ); they
+ * are run one candidate at a time, as one-member families.
+ */
+async function loadFamily(family) {
+  const members = await readFamilyMembers(family);
+  const byActionKey = new Map();
   for (const member of members) {
-    if (byDirection.has(member.direction)) {
+    const clash = byActionKey.get(member.action.key);
+    if (clash !== undefined) {
       throw new Error(
-        `Family "${family}" has two fixtures for attack direction ${member.direction}: ` +
-        `${byDirection.get(member.direction).fixture.fixtureId} and ${member.fixture.fixtureId}.`
+        `Family "${family}" has two fixtures for ${member.action.label}: ` +
+        `${clash.fixture.fixtureId} and ${member.fixture.fixtureId}. ` +
+        "Family members must be distinguishable by the action identity a trace records."
       );
     }
-    byDirection.set(member.direction, member);
+    byActionKey.set(member.action.key, member);
   }
-  members.sort((a, b) => a.direction - b.direction);
-  return { family, members, byDirection };
+  return { family, members, byActionKey };
 }
 
 async function loadObservations() {
@@ -143,7 +241,7 @@ async function loadGoldenIds() {
 
 /**
  * Evidence coverage for one family: which committed observations match each
- * direction's candidate, how many independent sessions back it, whether a
+ * member's candidate, how many independent sessions back it, whether a
  * golden already exists, and whether the promotion gate would pass now.
  */
 async function computeCoverage(family) {
@@ -159,7 +257,10 @@ async function computeCoverage(family) {
     const goldenId = goldenFixtureIdFor(member.fixture.fixtureId);
     const hasGolden = goldenIds.has(goldenId);
     return {
-      direction: member.direction,
+      // The whole identity, not just its value: a reader of `plan --json`
+      // has to be able to tell a spell id from an attack direction, and the
+      // key is what `ingest-round` looks a divergence target up by.
+      action: member.action,
       fixtureId: member.fixture.fixtureId,
       fixturePath: member.filePath,
       goldenId,
@@ -181,6 +282,7 @@ async function computeCoverage(family) {
 
 function printCoverage(coverage) {
   console.log(`Family "${coverage.family}" — evidence coverage`);
+  const width = Math.max(0, ...coverage.rows.map((row) => row.action.label.length));
   for (const row of coverage.rows) {
     const state = row.hasGolden
       ? "GOLDEN"
@@ -191,14 +293,14 @@ function printCoverage(coverage) {
       .map((observation) => `${observation.observationId}@${observation.sessionId}`)
       .join(", ") || "-";
     console.log(
-      `  dir ${String(row.direction).padStart(2)}  ${state.padEnd(12)} ` +
+      `  ${row.action.label.padEnd(width)}  ${state.padEnd(12)} ` +
       `obs ${row.observations.length} / sessions ${row.sessionCount}  [${cited}]`
     );
   }
   const remaining = coverage.rows.filter((row) => !row.hasGolden).length;
   console.log(remaining === 0
-    ? "  every direction in this family is a promoted golden."
-    : `  ${remaining} direction(s) still short of a golden.`);
+    ? "  every member of this family is a promoted golden."
+    : `  ${remaining} member(s) still short of a golden.`);
 }
 
 /**
@@ -226,11 +328,11 @@ async function ingestAgainst(rawText, fixture) {
  * Turn one finished session's Ruffle log into filed evidence.
  *
  * Every fixture in the family is tried. Exactly one may match: the family's
- * members differ only in attack direction, so two matches would mean the
+ * members differ only in their action identity, so two matches would mean the
  * fixtures are not distinguishable and the family is malformed. On no match
  * the run is a real divergence and a report is written against the fixture
- * for the direction the trace actually recorded (falling back to the
- * family's lowest direction when the trace recorded an unknown one).
+ * for the action identity the trace actually recorded (falling back to the
+ * family's first member when the trace recorded an unknown one).
  */
 async function commandIngestRound(options) {
   const family = options.family ?? "prisoner-normal-kill";
@@ -276,11 +378,30 @@ async function commandIngestRound(options) {
   }
 
   if (matches.length === 0) {
-    // Report against the fixture for whatever direction the run actually
-    // took, so the divergence names the candidate it should have been.
-    const observed = attempts.find((attempt) => attempt.record !== undefined);
-    const direction = observed?.record?.scenario?.attackDirection;
-    const target = loaded.byDirection.get(direction) ?? loaded.members[0];
+    // Report against the fixture for whatever action the run actually took,
+    // so the divergence names the candidate it should have been. The lookup
+    // uses the same action-identity key `loadFamily` indexes by, so a spell
+    // trace resolves on its `spell_id` exactly as a physical one resolves on
+    // its `attack_direction`; reading `attackDirection` here would have
+    // resolved every spell divergence to the family's first member. Each
+    // ingested record is consulted in turn rather than only the first,
+    // because ingest projects the identity the *target* fixture stages.
+    let target;
+    for (const attempt of attempts) {
+      if (attempt.record === undefined) continue;
+      let identity;
+      try {
+        identity = actionIdentityFor(attempt.record.scenario, attempt.record.observationId);
+      } catch {
+        continue;
+      }
+      const resolved = loaded.byActionKey.get(identity.key);
+      if (resolved !== undefined) {
+        target = resolved;
+        break;
+      }
+    }
+    target ??= loaded.members[0];
     const attempt = attempts.find((entry) => entry.member === target);
     console.log(`DIVERGE ${observationId} matches no fixture in family "${family}".`);
     if (attempt?.record === undefined) {
@@ -312,19 +433,31 @@ async function commandIngestRound(options) {
   }
   console.log(
     `MATCH ${record.observationId} agrees with ${member.fixture.fixtureId} ` +
-    `(direction ${member.direction}, digest ${record.digest}).`
+    `(${member.action.label}, digest ${record.digest}).`
   );
   console.log(`  filed at ${outPath}`);
   return 0;
 }
 
 /**
- * Promote every direction whose evidence now satisfies the gate, building
+ * Promote every family member whose evidence now satisfies the gate, building
  * each manifest from the observation records it attests.
  */
 async function commandSettle(options) {
   const family = options.family ?? "prisoner-normal-kill";
-  const manifestPrefix = options.manifestPrefix ?? family.split("-")[0];
+  // `--manifest-prefix` named the old `<prefix>-dir<n>.json` manifest path and
+  // has named nothing since manifests were renamed after the candidate they
+  // attest (see the manifestPath comment below). It is still parsed, because
+  // silently rejecting a flag an operator's script passes is worse than
+  // accepting it — but silently *ignoring* one is its own hazard, so say so
+  // rather than dropping it on the floor. No script in this repository passes
+  // it; if that stays true it can be retired outright.
+  if (options.manifestPrefix !== undefined) {
+    console.log(
+      `Note: --manifest-prefix ${options.manifestPrefix} is ignored and names nothing. ` +
+      "Capture manifests are named after the candidate they attest."
+    );
+  }
   const coverage = await computeCoverage(family);
   const promotable = coverage.rows.filter((row) => row.promotable);
   printCoverage(coverage);
@@ -387,9 +520,9 @@ async function commandSettle(options) {
  *
  * One injected tape drives every round of a family, so the family only makes
  * sense as a campaign if its members agree on the injectable samples — that
- * is what "differ only in attack direction" has to mean in practice.
+ * is what "differ only in their action identity" has to mean in practice.
  * Injection is tape-positional: were the tapes to differ, a round would
- * silently feed one direction's rolls into another's call order and the
+ * silently feed one member's rolls into another's call order and the
  * resulting trace would be an experiment, not evidence. Refuse rather than
  * pick.
  */
@@ -407,7 +540,8 @@ async function commandSeed(options) {
       `round cannot serve them all:\n${detail}`
     );
   }
-  // The lowest direction is an arbitrary but stable choice among equals.
+  // The first member in action order is an arbitrary but stable choice among
+  // equals — every member's tape is byte-identical by the check above.
   process.stdout.write(`${path.relative(ROOT, loaded.members[0].filePath)}\n`);
   return 0;
 }
@@ -443,6 +577,8 @@ function parseArgs(argv) {
       case "--observation": options.observation = next(); break;
       case "--log": options.log = next(); break;
       case "--jsonl": options.jsonl = next(); break;
+      // Vestigial: settle accepts it and reports that it is ignored. See the
+      // note at the top of commandSettle.
       case "--manifest-prefix": options.manifestPrefix = next(); break;
       case "--json": options.json = true; break;
       default: throw new Error(`Unknown option: ${flag}`);
@@ -478,4 +614,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   await main();
 }
 
-export { computeCoverage, loadFamily };
+export {
+  actionIdentityFor,
+  commandIngestRound,
+  commandSettle,
+  computeCoverage,
+  isFamilyMember,
+  loadFamily,
+  parseArgs,
+  readFamilyMembers
+};

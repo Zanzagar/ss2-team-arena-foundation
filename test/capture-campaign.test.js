@@ -37,8 +37,16 @@ import {
   promoteSs2CandidateToGolden,
   validateSs2CaptureManifest
 } from "../src/golden/promote-1v1-golden.js";
+import { simulateSs2CaptureTrace } from "../src/golden/simulate-capture-trace.js";
 import { buildSs2CaptureManifest } from "../tools/runtime-capture/build-manifest.mjs";
-import { computeCoverage, loadFamily } from "../tools/runtime-capture/campaign.mjs";
+import {
+  actionIdentityFor,
+  computeCoverage,
+  isFamilyMember,
+  loadFamily,
+  parseArgs,
+  readFamilyMembers
+} from "../tools/runtime-capture/campaign.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const FAMILY = "prisoner-normal-kill";
@@ -163,15 +171,66 @@ async function createCampaignSandbox({ candidates = [], goldens = [], observatio
   await seed(path.join("test", "fixtures", "ss2-1v1-golden"), goldens, "fixtureId");
   await seed(path.join("test", "observations", "ss2-1v1"), observations, "observationId");
 
-  return import(pathToFileURL(path.join(root, "tools", "runtime-capture", "campaign.mjs")).href);
+  const campaign = await import(pathToFileURL(path.join(root, "tools", "runtime-capture", "campaign.mjs")).href);
+  return { root, campaign };
 }
+
+/**
+ * Stage one finished session inside a sandbox: a reference trace for `fixture`
+ * dressed as the Ruffle stdout log `ingest-round` delogs.
+ *
+ * The trace comes from `simulateSs2CaptureTrace`, the same reference generator
+ * the wrapper is validated against, so nothing here is hand-written. Simulated
+ * traces carry the `synthetic-simulator` method and are never promotable; they
+ * are used only to drive the driver's own bookkeeping, and they never leave the
+ * temp directory. The log wrapper mirrors Ruffle's `RUST_LOG=avm_trace=info`
+ * line shape, which is what `extractCaptureTraceFromRuffleLog` matches on.
+ */
+async function stageSession(root, fixture, { sessionId, observationId }) {
+  const trace = simulateSs2CaptureTrace(fixture, { sessionId, observationId });
+  const logText = trace
+    .trimEnd()
+    .split("\n")
+    .flatMap((line) => ["[INFO  ruffle_core] frame noise, dropped", `[INFO  ruffle_core] avm_trace: ${line}`])
+    .join("\n");
+  const sessionDir = path.join(root, "captures", sessionId);
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(path.join(sessionDir, `${observationId}.rufflelog`), `${logText}\n`, "utf8");
+  return { trace, sessionId, observationId };
+}
+
+/** Run `body` with console.log captured, so a driver command can be asserted on. */
+async function withCapturedLog(body) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.map(String).join(" "));
+  try {
+    const value = await body();
+    return { value, lines };
+  } finally {
+    console.log = original;
+  }
+}
+
+const jsonFileNames = async (root, ...segments) => {
+  try {
+    return (await readdir(path.join(root, ...segments))).filter((name) => name.endsWith(".json")).sort();
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+};
 
 const dir6Candidate = candidateById.get(`candidate-${FAMILY}-dir6`);
 const dir6Golden = goldenById.get(`golden-${FAMILY}-dir6`);
 const dir6ManifestEntry = manifestByObservationIds.get(idKey(["obs-diag", "obs-gold3"]));
 
+/** Two spell candidates whose spell ids differ, so they form a lawful family. */
+const spellLethal = candidateById.get("candidate-spell-lethal-slain");
+const spellDepleted = candidateById.get("candidate-spell-armour-depleted-full-damage");
+
 const summarize = (row) => ({
-  direction: row.direction,
+  action: row.action,
   fixtureId: row.fixtureId,
   goldenId: row.goldenId,
   hasGolden: row.hasGolden,
@@ -389,22 +448,30 @@ test("loadFamily groups the prisoner-normal-kill candidates by attack direction"
   const loaded = await loadFamily(FAMILY);
 
   assert.equal(loaded.family, FAMILY);
-  assert.deepEqual(loaded.members.map((member) => member.direction), [5, 6, 7, 8]);
+  assert.deepEqual(loaded.members.map((member) => member.action.id), [5, 6, 7, 8]);
   assert.deepEqual(loaded.members.map((member) => member.fixture.fixtureId), [
     "candidate-prisoner-normal-kill-dir5",
     "candidate-prisoner-normal-kill-dir6",
-    // The unsuffixed candidate is direction 7; membership is by prefix, not by name.
+    // The unsuffixed candidate is direction 7; membership is by id segment, not by name.
     "candidate-prisoner-normal-kill",
     "candidate-prisoner-normal-kill-dir8"
   ]);
-  assert.deepEqual([...loaded.byDirection.keys()].sort((a, b) => a - b), [5, 6, 7, 8]);
-  for (const [direction, member] of loaded.byDirection) {
-    assert.equal(member.fixture.scenario.attackDirection, direction);
+  assert.deepEqual([...loaded.byActionKey.keys()], [
+    "attack-direction:5",
+    "attack-direction:6",
+    "attack-direction:7",
+    "attack-direction:8"
+  ]);
+  for (const [key, member] of loaded.byActionKey) {
+    assert.equal(member.action.key, key);
+    assert.equal(member.action.ingress, "attack");
+    assert.equal(member.action.id, member.fixture.scenario.attackDirection);
+    assert.equal(member.action.label, `attack direction ${member.fixture.scenario.attackDirection}`);
     assert.equal(path.basename(member.filePath), `${member.fixture.fixtureId}.json`);
     assert.equal(member.fixture.classification, "candidate");
   }
   // The sibling power/quick families share the "candidate-prisoner-" stem and
-  // must not leak in through the prefix rule.
+  // must not leak in through the membership rule.
   for (const member of loaded.members) {
     assert.match(member.fixture.fixtureId, /^candidate-prisoner-normal-kill/);
   }
@@ -426,22 +493,22 @@ test("computeCoverage reports the prisoner-normal-kill family as fully promoted"
   // draw, so pinning the exact set would make this test fail on success —
   // which it did, the first time a later campaign filed three more matching
   // observations against this family.
-  assert.deepEqual(coverage.rows.map((row) => row.direction), [5, 6, 7, 8]);
+  assert.deepEqual(coverage.rows.map((row) => row.action.id), [5, 6, 7, 8]);
   for (const row of coverage.rows) {
-    assert.equal(row.hasGolden, true, `direction ${row.direction} lost its golden`);
-    assert.equal(row.promotable, false, `direction ${row.direction} is golden and cannot be re-promoted`);
+    assert.equal(row.hasGolden, true, `${row.action.label} lost its golden`);
+    assert.equal(row.promotable, false, `${row.action.label} is golden and cannot be re-promoted`);
     // The gate's substance: at least two matching observations, from at least
     // as many distinct sessions as there are observations.
-    assert.ok(row.observations.length >= 2, `direction ${row.direction} has too little evidence`);
+    assert.ok(row.observations.length >= 2, `${row.action.label} has too little evidence`);
     assert.equal(
       row.sessionCount,
       new Set(row.observations.map((observation) => observation.sessionId)).size
     );
-    assert.ok(row.sessionCount >= 2, `direction ${row.direction} lacks independent sessions`);
+    assert.ok(row.sessionCount >= 2, `${row.action.label} lacks independent sessions`);
   }
   // Direction 7 is the family member whose fixture id carries no dirN suffix.
   assert.equal(
-    coverage.rows.find((row) => row.direction === 7).fixtureId,
+    coverage.rows.find((row) => row.action.key === "attack-direction:7").fixtureId,
     "candidate-prisoner-normal-kill"
   );
   // Every cited observation names the file it was actually read from, and the
@@ -461,14 +528,14 @@ test("coverage counts exactly the observations that match each candidate", async
   const loaded = await loadFamily(FAMILY);
 
   for (const row of coverage.rows) {
-    const fixture = loaded.byDirection.get(row.direction).fixture;
+    const fixture = loaded.byActionKey.get(row.action.key).fixture;
     const genuinelyMatching = observationEntries
       .filter((entry) => matchSs2ObservationToFixture(fixture, entry.value).match)
       .map((entry) => entry.value.observationId);
     assert.deepEqual(
       sortedIds(row.observations.map((observation) => observation.observationId)),
       sortedIds(genuinelyMatching),
-      `dir ${row.direction} coverage disagrees with matchSs2ObservationToFixture`
+      `${row.action.label} coverage disagrees with matchSs2ObservationToFixture`
     );
     // No observation is evidence for two directions at once.
     for (const cited of row.observations) {
@@ -502,14 +569,14 @@ test("the settle recipe reproduces every committed golden byte for byte", () => 
 // ---------------------------------------------------------------------------
 
 test("promotable is true for two matching observations from two independent sessions and no golden", async () => {
-  const sandbox = await createCampaignSandbox({
+  const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     observations: recordsFor(["obs-diag", "obs-gold3"])
   });
   const coverage = await sandbox.computeCoverage(FAMILY);
 
   assert.deepEqual(coverage.rows.map(summarize), [{
-    direction: 6,
+    action: { ingress: "attack", id: 6, key: "attack-direction:6", label: "attack direction 6" },
     fixtureId: "candidate-prisoner-normal-kill-dir6",
     goldenId: "golden-prisoner-normal-kill-dir6",
     hasGolden: false,
@@ -525,7 +592,7 @@ test("promotable is true for two matching observations from two independent sess
 });
 
 test("promotable is false once the direction already has a golden", async () => {
-  const sandbox = await createCampaignSandbox({
+  const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     goldens: [dir6Golden],
     observations: recordsFor(["obs-diag", "obs-gold3"])
@@ -539,7 +606,7 @@ test("promotable is false once the direction already has a golden", async () => 
 });
 
 test("promotable is false with fewer than two matching observations", async () => {
-  const sandbox = await createCampaignSandbox({
+  const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     observations: recordsFor(["obs-diag"])
   });
@@ -568,7 +635,7 @@ test("promotable is false when both matching observations come from the same ses
     record.capture.sessionId = "session-shared";
   });
 
-  const sandbox = await createCampaignSandbox({
+  const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     observations: [first, second]
   });
@@ -601,7 +668,7 @@ test("coverage ignores an observation that targets the candidate but diverges fr
   assert.equal(comparison.match, false);
   assert.deepEqual(comparison.differences.map((difference) => difference.path), ["/finalState/hero/staminaleft"]);
 
-  const sandbox = await createCampaignSandbox({
+  const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     observations: [...recordsFor(["obs-diag"]), diverging]
   });
@@ -616,11 +683,385 @@ test("loadFamily refuses a family whose members claim the same attack direction"
   const twin = cloneJson(dir6Candidate);
   twin.fixtureId = `${dir6Candidate.fixtureId}-twin`;
 
-  const sandbox = await createCampaignSandbox({ candidates: [dir6Candidate, twin] });
+  const { campaign: sandbox } = await createCampaignSandbox({ candidates: [dir6Candidate, twin] });
 
   await assert.rejects(
     () => sandbox.loadFamily(FAMILY),
     /has two fixtures for attack direction 6/
   );
   await assert.rejects(() => sandbox.computeCoverage(FAMILY), /has two fixtures for attack direction 6/);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — family membership is by `-`-delimited id segment
+//
+// `--family armour` used to match `fixtureId.startsWith("candidate-armour")`,
+// which also swept the five `candidate-armoured-*` fixtures. That is a live
+// collision in this repository, not a hypothetical: the two families stage
+// different fights — different combatants, different armour, and the armoured
+// five stage `fightMode: "tournament"` while the armour three stage none — so
+// a campaign for either would have spent every round ingesting against the
+// other's candidates as well.
+// ---------------------------------------------------------------------------
+
+const candidateIds = candidateEntries.map((entry) => entry.value.fixtureId).sort();
+const selects = (family) => candidateIds.filter((id) => isFamilyMember(id, family));
+
+test("--family armour selects the armour candidates and none of the armoured ones", () => {
+  assert.deepEqual(selects("armour"), [
+    "candidate-armour-equality-quirk",
+    "candidate-armour-overflow-burning",
+    "candidate-armour-removal-debris"
+  ]);
+  // The exact collision the old prefix rule produced, spelled out.
+  assert.equal(candidateIds.filter((id) => id.startsWith("candidate-armour")).length, 8);
+});
+
+test("--family armoured selects exactly the five armoured candidates", () => {
+  assert.deepEqual(selects("armoured"), [
+    "candidate-armoured-deflection-threshold-cleared",
+    "candidate-armoured-deflection-threshold-critical",
+    "candidate-armoured-equality-quirk",
+    "candidate-armoured-removal-destroys-helmet",
+    "candidate-armoured-removal-destroys-shoulderguard"
+  ]);
+});
+
+test("--family probe and --family spell select exactly their ten and eight candidates", () => {
+  const probes = selects("probe");
+  assert.equal(probes.length, 10);
+  for (const id of probes) assert.match(id, /^candidate-probe-/);
+
+  const spells = selects("spell");
+  assert.equal(spells.length, 8);
+  for (const id of spells) assert.match(id, /^candidate-spell-/);
+});
+
+test("the three prisoner bands select their own members and never a sibling band's", () => {
+  assert.deepEqual(selects("prisoner-quick-kill"), [
+    "candidate-prisoner-quick-kill-dir1",
+    "candidate-prisoner-quick-kill-dir2",
+    "candidate-prisoner-quick-kill-dir3",
+    "candidate-prisoner-quick-kill-dir4"
+  ]);
+  assert.deepEqual(selects("prisoner-normal-kill"), [
+    "candidate-prisoner-normal-kill",
+    "candidate-prisoner-normal-kill-dir5",
+    "candidate-prisoner-normal-kill-dir6",
+    "candidate-prisoner-normal-kill-dir8"
+  ]);
+  assert.equal(selects("prisoner-power-kill").length, 4);
+  // The stem all three share selects all twelve and nothing else.
+  assert.equal(selects("prisoner").length, 12);
+});
+
+test("an exact whole-id match is a one-member family", () => {
+  assert.deepEqual(selects("prisoner-normal-kill-dir6"), ["candidate-prisoner-normal-kill-dir6"]);
+  assert.deepEqual(selects("spell-lethal-slain"), ["candidate-spell-lethal-slain"]);
+  // A truncation of a real id matches nothing: the boundary has to be a "-".
+  assert.deepEqual(selects("prisoner-normal-kill-dir"), []);
+  assert.deepEqual(selects("armou"), []);
+  // The `candidate-` stem is not itself a family name.
+  assert.deepEqual(selects(""), []);
+});
+
+test("readFamilyMembers reads the armour family off disk without the armoured fixtures", async () => {
+  // The on-disk half of the same rule. loadFamily cannot be used here, because
+  // all three armour candidates stage attack direction 5 and it refuses an
+  // ambiguous index — see the key tests below.
+  const members = await readFamilyMembers("armour");
+  assert.deepEqual(members.map((member) => member.fixture.fixtureId).sort(), [
+    "candidate-armour-equality-quirk",
+    "candidate-armour-overflow-burning",
+    "candidate-armour-removal-debris"
+  ]);
+  for (const member of members) {
+    assert.equal(path.basename(member.filePath), `${member.fixture.fixtureId}.json`);
+    assert.equal(member.fixture.classification, "candidate");
+  }
+
+  const armoured = await readFamilyMembers("armoured");
+  assert.equal(armoured.length, 5);
+  // Disjoint, which under the old prefix rule they were not.
+  const armourIds = new Set(members.map((member) => member.fixture.fixtureId));
+  for (const member of armoured) assert.equal(armourIds.has(member.fixture.fixtureId), false);
+});
+
+test("readFamilyMembers refuses a family prefix no candidate matches, and an empty name", async () => {
+  await assert.rejects(
+    () => readFamilyMembers("armou"),
+    /No candidate fixtures match family prefix "candidate-armou"/
+  );
+  await assert.rejects(() => readFamilyMembers(""), /A family name is required/);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — the family index key is the action identity, not the direction
+//
+// A physical fixture is identified by its attack direction; a spell fixture has
+// no direction chain at all and is identified by its spellId. Indexing on
+// `attackDirection` alone collapsed every member of a spell family onto the
+// single key `undefined`.
+// ---------------------------------------------------------------------------
+
+test("actionIdentityFor reads whichever identity the scenario carries", () => {
+  assert.deepEqual(actionIdentityFor({ attackDirection: 6 }, "x"), {
+    ingress: "attack",
+    id: 6,
+    key: "attack-direction:6",
+    label: "attack direction 6"
+  });
+  assert.deepEqual(actionIdentityFor({ spellId: 32 }, "x"), {
+    ingress: "spell",
+    id: 32,
+    key: "spell-id:32",
+    label: "spell id 32"
+  });
+  // The two ingresses share one key namespace and must not alias: spell 6 is
+  // not direction 6.
+  assert.notEqual(
+    actionIdentityFor({ spellId: 6 }, "x").key,
+    actionIdentityFor({ attackDirection: 6 }, "x").key
+  );
+  // Exactly one identity, the same rule validateSs2OneVsOneFixture enforces.
+  for (const scenario of [{}, { attackDirection: 6, spellId: 32 }]) {
+    assert.throws(
+      () => actionIdentityFor(scenario, "candidate-x"),
+      /candidate-x must carry exactly one action identity/
+    );
+  }
+});
+
+test("every committed candidate has an action identity", () => {
+  // The guarantee that makes the key total: no candidate in the repository
+  // falls through actionIdentityFor.
+  for (const entry of candidateEntries) {
+    const identity = actionIdentityFor(entry.value.scenario, entry.value.fixtureId);
+    assert.equal(identity.ingress, entry.value.scenario.spellId === undefined ? "attack" : "spell");
+  }
+  const spellKeys = candidateEntries
+    .filter((entry) => entry.value.scenario.spellId !== undefined)
+    .map((entry) => actionIdentityFor(entry.value.scenario, entry.value.fixtureId).key);
+  assert.equal(spellKeys.length, 8);
+  for (const key of spellKeys) assert.match(key, /^spell-id:\d+$/);
+});
+
+test("loadFamily indexes a spell family by spell id", async () => {
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [spellLethal, spellDepleted]
+  });
+  const loaded = await sandbox.loadFamily("spell");
+
+  // Under the old direction index both members keyed on `undefined` and this
+  // family was reported malformed.
+  assert.deepEqual([...loaded.byActionKey.keys()], ["spell-id:32", "spell-id:34"]);
+  assert.deepEqual(loaded.members.map((member) => member.fixture.fixtureId), [
+    "candidate-spell-lethal-slain",
+    "candidate-spell-armour-depleted-full-damage"
+  ]);
+  for (const member of loaded.members) {
+    assert.equal(member.action.ingress, "spell");
+    assert.equal(member.action.id, member.fixture.scenario.spellId);
+    assert.equal(member.fixture.scenario.attackDirection, undefined);
+  }
+
+  const coverage = await sandbox.computeCoverage("spell");
+  assert.deepEqual(coverage.rows.map((row) => row.action.label), ["spell id 32", "spell id 34"]);
+  for (const row of coverage.rows) {
+    assert.equal(row.hasGolden, false);
+    assert.equal(row.promotable, false, "no spell session has ever run");
+  }
+});
+
+test("loadFamily refuses a spell family whose members claim the same spell id", async () => {
+  const twin = cloneJson(spellLethal);
+  twin.fixtureId = `${spellLethal.fixtureId}-twin`;
+  assert.equal(twin.scenario.spellId, spellLethal.scenario.spellId);
+
+  const { campaign: sandbox } = await createCampaignSandbox({ candidates: [spellLethal, twin] });
+
+  // Named by spell id, not by "attack direction undefined": the diagnosis has
+  // to point at the identity this ingress actually has. Both colliding ids are
+  // named; which is named first is readdir order, so it is not asserted.
+  await assert.rejects(
+    () => sandbox.loadFamily("spell"),
+    (error) => {
+      assert.match(error.message, /Family "spell" has two fixtures for spell id 32:/);
+      assert.match(error.message, /candidate-spell-lethal-slain\b/);
+      assert.match(error.message, /candidate-spell-lethal-slain-twin\b/);
+      assert.doesNotMatch(error.message, /attack direction/);
+      return true;
+    }
+  );
+  await assert.rejects(() => sandbox.computeCoverage("spell"), /two fixtures for spell id 32/);
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — ingest-round, driven by reference traces in a sandbox
+// ---------------------------------------------------------------------------
+
+test("ingest-round files a spell session against the member whose spell id it recorded", async () => {
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [spellLethal, spellDepleted]
+  });
+  await stageSession(root, spellDepleted, { sessionId: "session-sp1", observationId: "obs-sp1" });
+
+  const { value, lines } = await withCapturedLog(() => sandbox.commandIngestRound({
+    family: "spell",
+    session: "session-sp1",
+    observation: "obs-sp1"
+  }));
+
+  assert.equal(value, 0);
+  assert.ok(
+    lines.some((line) => line.includes("MATCH obs-sp1") &&
+      line.includes("candidate-spell-armour-depleted-full-damage") &&
+      line.includes("spell id 34")),
+    `expected a spell-id-labelled MATCH line, got:\n${lines.join("\n")}`
+  );
+
+  assert.deepEqual(await jsonFileNames(root, "test", "observations", "ss2-1v1"), ["obs-sp1.json"]);
+  const filed = await readJson(path.join(root, "test", "observations", "ss2-1v1", "obs-sp1.json"));
+  assert.equal(filed.target.fixtureId, "candidate-spell-armour-depleted-full-damage");
+  assert.equal(filed.scenario.spellId, 34);
+  assert.equal(filed.scenario.attackDirection, undefined);
+  assert.equal(validateSs2Observation(filed), filed);
+  // A reference trace is not runtime evidence and must never read as any.
+  assert.equal(filed.capture.method, SS2_SIMULATED_CAPTURE_METHOD);
+  // No divergence report: the run agreed with a candidate in full.
+  assert.deepEqual(await jsonFileNames(root, "test", "fixtures", "ss2-1v1-divergences"), []);
+});
+
+test("a diverging spell run is reported against the candidate for its own spell id", async () => {
+  // The family holds the spell-32 candidate and an edited spell-34 one; the
+  // session runs the unedited spell-34 scenario, so nothing matches.
+  const edited = cloneJson(spellDepleted);
+  edited.expected.state.hero.staminaleft += 1;
+
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [spellLethal, edited]
+  });
+  await stageSession(root, spellDepleted, { sessionId: "session-sp2", observationId: "obs-sp2" });
+
+  const { value, lines } = await withCapturedLog(() => sandbox.commandIngestRound({
+    family: "spell",
+    session: "session-sp2",
+    observation: "obs-sp2"
+  }));
+
+  assert.equal(value, 1, "a divergence is a failed round");
+  assert.ok(lines.some((line) => line.startsWith("DIVERGE obs-sp2")), lines.join("\n"));
+  assert.ok(
+    lines.some((line) => line.includes("at /finalState/hero/staminaleft")),
+    `the report should name the field that diverged:\n${lines.join("\n")}`
+  );
+
+  // The load-bearing assertion: the report is filed against the spell-34
+  // candidate, resolved through the spell-id key. Resolving on
+  // `scenario.attackDirection` finds nothing for a spell trace and falls back
+  // to the family's first member — the spell-32 candidate, which this trace
+  // cannot even be ingested against, so no report would be written at all.
+  const reports = await jsonFileNames(root, "test", "fixtures", "ss2-1v1-divergences");
+  assert.equal(reports.length, 1, `expected exactly one divergence report, got ${reports.join(", ")}`);
+  assert.match(reports[0], /^candidate-spell-armour-depleted-full-damage--obs-sp2-[0-9a-f]{8}\.json$/);
+  const report = await readJson(path.join(root, "test", "fixtures", "ss2-1v1-divergences", reports[0]));
+  assert.equal(report.fixtureId, "candidate-spell-armour-depleted-full-damage");
+  assert.equal(report.observationId, "obs-sp2");
+  // Nothing was filed as evidence.
+  assert.deepEqual(await jsonFileNames(root, "test", "observations", "ss2-1v1"), []);
+});
+
+test("a diverging physical run is still reported against the candidate for its own direction", async () => {
+  // The same rule from the other ingress, as a regression guard: the family's
+  // first member is dir5, and the report must go to dir6 regardless.
+  const dir5Candidate = candidateById.get(`candidate-${FAMILY}-dir5`);
+  const edited = cloneJson(dir6Candidate);
+  edited.expected.state.hero.staminaleft += 1;
+
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [dir5Candidate, edited]
+  });
+  await stageSession(root, dir6Candidate, { sessionId: "session-ph1", observationId: "obs-ph1" });
+
+  const { value, lines } = await withCapturedLog(() => sandbox.commandIngestRound({
+    family: FAMILY,
+    session: "session-ph1",
+    observation: "obs-ph1"
+  }));
+
+  assert.equal(value, 1);
+  assert.ok(lines.some((line) => line.startsWith("DIVERGE obs-ph1")), lines.join("\n"));
+  const reports = await jsonFileNames(root, "test", "fixtures", "ss2-1v1-divergences");
+  assert.equal(reports.length, 1);
+  const report = await readJson(path.join(root, "test", "fixtures", "ss2-1v1-divergences", reports[0]));
+  assert.equal(report.fixtureId, `candidate-${FAMILY}-dir6`);
+  assert.equal(report.observationId, "obs-ph1");
+});
+
+test("ingest-round refuses to overwrite an observation record that already exists", async () => {
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [spellLethal, spellDepleted]
+  });
+  await stageSession(root, spellLethal, { sessionId: "session-sp3", observationId: "obs-sp3" });
+  const run = () => sandbox.commandIngestRound({
+    family: "spell",
+    session: "session-sp3",
+    observation: "obs-sp3"
+  });
+
+  assert.equal((await withCapturedLog(run)).value, 0);
+  await assert.rejects(
+    () => withCapturedLog(run),
+    /already exists; refusing to overwrite committed evidence/
+  );
+});
+
+// ---------------------------------------------------------------------------
+// campaign.mjs — --manifest-prefix
+// ---------------------------------------------------------------------------
+
+test("--manifest-prefix is still parsed but no longer names anything", async () => {
+  // It named the old `<prefix>-dir<n>.json` manifest path. Manifests are now
+  // named after the candidate they attest, because attack direction is not
+  // unique across a family. The flag is kept so a script that passes it does
+  // not fail on an unknown option, and settle says out loud that it is ignored
+  // rather than silently dropping an operator's flag.
+  assert.deepEqual(parseArgs(["--family", "spell", "--manifest-prefix", "sp"]), {
+    family: "spell",
+    manifestPrefix: "sp"
+  });
+  assert.throws(() => parseArgs(["--manifest-prefix"]), /--manifest-prefix needs a value/);
+
+  const { root, campaign: sandbox } = await createCampaignSandbox({
+    candidates: [dir6Candidate],
+    observations: recordsFor(["obs-diag", "obs-gold3"])
+  });
+  const { value, lines } = await withCapturedLog(() => sandbox.commandSettle({
+    family: FAMILY,
+    manifestPrefix: "ignored-prefix"
+  }));
+
+  assert.equal(value, 0);
+  assert.ok(
+    lines.some((line) => line.includes("--manifest-prefix ignored-prefix is ignored")),
+    `settle must say the flag is ignored, got:\n${lines.join("\n")}`
+  );
+  // And the manifest really is named after the candidate, not after the prefix
+  // and not after the direction.
+  assert.deepEqual(await jsonFileNames(root, "test", "manifests"), [`${FAMILY}-dir6.json`]);
+  assert.deepEqual(await jsonFileNames(root, "test", "fixtures", "ss2-1v1-golden"), [
+    `golden-${FAMILY}-dir6.json`
+  ]);
+});
+
+test("settle without --manifest-prefix says nothing about it", async () => {
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [dir6Candidate],
+    observations: recordsFor(["obs-diag"])
+  });
+  const { value, lines } = await withCapturedLog(() => sandbox.commandSettle({ family: FAMILY }));
+
+  assert.equal(value, 0);
+  assert.equal(lines.some((line) => line.includes("manifest-prefix")), false);
+  assert.ok(lines.some((line) => line.includes("Nothing to promote.")), lines.join("\n"));
 });
