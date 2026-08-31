@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-probe-armour-removal-gate-below",
+  "observationId": "obs-pr-armour-removal-gate-below-1",
+  "observationDigest": "2b47d8c959b7de9ce0b1023ef3fca0eebf4a875b9ee904f0439d0c73c97450f0",
+  "sessionId": "session-pr-armour-removal-gate-below-1",
+  "recordedAt": "2026-08-30T22:58:40.000Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 5,
+      "actual": 6
+    }
+  ]
+}
