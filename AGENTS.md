@@ -57,6 +57,42 @@ and Plan agents), so these rules bind you as well:
 - **Never relay a number, table or quotation you have not re-derived yourself.**
   Hand over the source (file, offsets, command), not the conclusion.
 
+## Multi-agent runs
+
+Standing rules to paste into every agent prompt are in
+`docs/overnight-agent-plan.md`; the runnable form is in `.claude/workflows/`.
+
+- **Fan out on QUESTIONS, not replicas.** Measured here 2026-08-31: two
+  independent implementations agreed on every number and were both incomplete in
+  the same way, because they shared one brief that carried one wrong fact. The
+  agent that overturned the result was the one aimed at a different question.
+  Agreement between agents given the same brief is weak evidence — the brief is
+  the correlated failure mode. Ask "what were they all told?"
+- **Verifiers write nothing and get ONE named claim each.**
+- **Assert `started == briefs`.** A wave that silently spawns nothing returns
+  fast, which otherwise reads as success.
+- **A wave with dead verifiers is UNVERIFIED, not complete.** Never report
+  confident unverified findings; check per-agent state, not the run's status.
+
+## Code review (Codex)
+
+- **Codex adversarial review is FLAG-ONLY and on demand**
+  (`/codex:adversarial-review`), for high-stakes diffs: auth, data loss,
+  concurrency, save/persistence, protocol changes. Its findings are CLAIMS TO
+  VERIFY — never auto-apply them.
+- **The stop-time review gate stays DISABLED by design.** `reviewGateEnabled:
+  false` is CORRECT — do not "fix" it. Arming it creates Claude/Codex loops that
+  drain both subscriptions, and the only controlled study of Codex reviewing
+  Claude found harm precisely when reviewer output was auto-adopted (audit
+  2026-08-31).
+- Codex is worth having here because it is INDEPENDENT: it deliberately does not
+  share Claude's `code-review` skill, so the two do not correlate as reviewers.
+
+## Skills
+
+Installed skills are invoked on judgment; there is no forced-invocation rule.
+Provenance for the shared rules and workflows is the `claude-harness` repo.
+
 ## Running the tests
 
 `npm` is NOT on PATH. From the repo root:
