@@ -22,9 +22,24 @@ import { validateSs2OneVsOneFixture } from "./run-1v1-fixture.js";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-/** Wrapper hook attribution a perfect wrapper would report per static reason. */
+/**
+ * Wrapper hook attribution a perfect wrapper would report per static reason.
+ *
+ * The convention is the *ingress* function that owns the assignment, not the
+ * innermost helper: `stat-clamp` is `check_stats`' work but is attributed to
+ * the ingress that called it. This is the physical (`damagecharacter`) table;
+ * see SPELL_HOOK_FOR_STATIC_REASON for the spell ingress.
+ */
 export const HOOK_FOR_STATIC_REASON = Object.freeze({
   "physical-damage": "damagecharacter",
+  // The spell ingress's own two writes. `magic-damage` is its armour/hitpoint
+  // subtraction (battle map steps 2-3, lines 351-360) and `psyche-up` is the
+  // unconditional `game_defender.psyche_up = 1` join (map line 361, step 4).
+  // Both are inside `magic_damage_character` (map lines 336-339), whose AS2
+  // name is rendered here in the hyphenated hook vocabulary because the hook
+  // token pattern admits no underscores.
+  "magic-damage": "magic-damage-character",
+  "psyche-up": "magic-damage-character",
   "breastplate-stamina": "damagecharacter",
   "stat-clamp": "damagecharacter",
   "weapon-enchantment": "damagecharacter",
@@ -32,6 +47,22 @@ export const HOOK_FOR_STATIC_REASON = Object.freeze({
   "remove-armour-clamp": "remove-armour",
   "death-status-clear": "death",
   "death-taunt-clear": "death"
+});
+
+/**
+ * The same table as seen from the spell ingress.
+ *
+ * Two reasons are shared with the physical path but belong to a different
+ * function there: the breastplate stamina join is step 5 and `check_stats` is
+ * step 6 of `magic_damage_character` itself (map lines 362-364), so a wrapper
+ * attributing by call frame reports `magic-damage-character` for both during a
+ * spell action. `death-*` stays `death`, which really is the shared function
+ * (map lines 320-321, 453-462).
+ */
+export const SPELL_HOOK_FOR_STATIC_REASON = Object.freeze({
+  ...HOOK_FOR_STATIC_REASON,
+  "breastplate-stamina": "magic-damage-character",
+  "stat-clamp": "magic-damage-character"
 });
 
 export class SimulationError extends Error {
@@ -105,7 +136,16 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
     lines.push({ t: "state", side, fields: stagedDump(fixture, side) });
   }
   lines.push({ t: "var", name: "fight_mode", value: fixture.scenario.fightMode ?? "tournament" });
-  lines.push({ t: "var", name: "attack_direction", value: fixture.scenario.attackDirection });
+  // One action identity per trace, mirroring the fixture schema: a physical
+  // action records the `attack_direction` global the dispatcher read, a spell
+  // action records the caller's inventory id instead (map line 317 — the spell
+  // ingress reads no direction).
+  const spellIngress = fixture.scenario.spellId !== undefined;
+  if (spellIngress) {
+    lines.push({ t: "var", name: "spell_id", value: fixture.scenario.spellId });
+  } else {
+    lines.push({ t: "var", name: "attack_direction", value: fixture.scenario.attackDirection });
+  }
   if (fixture.scenario.transient !== undefined) {
     lines.push({ t: "var", name: "criticalhit", value: fixture.scenario.transient.criticalhit });
   }
@@ -121,8 +161,10 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
       injected: sample.source === "randomBetween"
     });
   }
-  // The hit/miss dispatch event precedes every recorded mutation.
+  // The damage-dispatch event precedes every recorded mutation: hit/miss for
+  // the physical path, the ingress itself for a spell.
   lines.push({ t: "event", ...events[0] });
+  const hookForReason = spellIngress ? SPELL_HOOK_FOR_STATIC_REASON : HOOK_FOR_STATIC_REASON;
   for (const entry of fixture.expected.mutationTrace) {
     if (entry.path === "/result") {
       // A wrapper cannot watch /result (a pipeline convention, not a game
@@ -137,13 +179,37 @@ export function simulateSs2CaptureTrace(fixture, identity = {}) {
       path: entry.path,
       before: entry.before,
       after: entry.after,
-      hook: HOOK_FOR_STATIC_REASON[entry.reason] ?? "unattributed"
+      hook: hookForReason[entry.reason] ?? "unattributed"
     });
   }
   for (const side of ["hero", "villain"]) {
     lines.push({ t: "final", side, fields: { ...fixture.expected.state[side] } });
   }
-  lines.push({ t: "end", installHashVerifiedAfter: true });
+  // The mandatory-overdraw rule at ingest is scoped to `injected-tape-runtime`,
+  // so it does not reach a `synthetic-simulator` trace and this line is not
+  // required to carry `overdraw`. It carries it anyway, for two reasons. The
+  // claim is true: the simulator serves exactly the fixture's tape and there is
+  // no live RNG behind it to fall through to, so the count really is zero. And
+  // these traces are the wrapper's executable specification — the wrapper emits
+  // `overdraw` on its end line, so a reference trace that omitted it would
+  // under-specify the grammar the wrapper must reproduce.
+  //
+  // `launchNonce` is deliberately NOT emitted. It exists to carry one identity
+  // the operator did not choose, minted inside a real player launch; a
+  // simulator-invented value would be a fabricated independence token, and the
+  // promotion gate's uniqueness check would then read two synthetic records as
+  // two launches. Absent is the honest value, and simulated records are never
+  // promotable in any case.
+  //
+  // `staged` is not emitted either, and for a reason that is easy to get
+  // backwards. Every value in the `state` lines above came from the fixture, so
+  // it is tempting to read the whole reference trace as one long staging. It is
+  // not: `staged` declares what the WRAPPER wrote into a running game, and this
+  // generator runs no game. There is no construction here for a write to
+  // survive, and so nothing whose stuck value could be reported. Emitting a
+  // declaration would invent the one fact the field exists to establish. A
+  // wrapper that stages must emit its own, from its own read-back.
+  lines.push({ t: "end", installHashVerifiedAfter: true, overdraw: 0 });
   const trace = `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`;
 
   // Fail fast: a reference trace that its own pipeline cannot ingest and

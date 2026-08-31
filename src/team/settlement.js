@@ -11,6 +11,13 @@
  * acknowledgement is answered with `false` and never re-enters the callback.
  * The latch is a private field with no public setter and no reset, so the only
  * way to settle twice is to build a second `CampaignSettlement`.
+ *
+ * The token those two gates are matched on names **one battle**, not one
+ * result. It used to name only the result, which was safe for exactly as long
+ * as the project stayed single-process and one battle at a time: in a campaign
+ * of consecutive bouts between the same two teams every bout produced the same
+ * token, so bout 1's acknowledgement satisfied bout 2's gate 2 and settled it
+ * with bout 1's winner. See `completionTokenFor`.
  */
 
 export const BATTLE_RESULT_PENDING_TYPE = "battle-result-pending";
@@ -27,20 +34,101 @@ export class SettlementError extends Error {
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
 /**
- * Deterministic completion token. It is a pure function of the outcome, so a
- * replayed battle produces the same token and a host and client can compare
- * acknowledgements without extra state.
+ * The shape of a battle discriminator: eight lowercase hex digits, which is
+ * exactly what `combatStateHash(battle)` produces. Pinned as a shape so a
+ * counter, a timestamp or a random string cannot be smuggled in as one.
  */
-export function completionTokenFor({ winnerTeamId, loserTeamIds, reason }) {
+export const BATTLE_DISCRIMINATOR_PATTERN = /^[0-9a-f]{8}$/;
+
+/**
+ * The OUTCOME half of a completion token: who won, who lost, and why.
+ *
+ * This is what the token used to be in its entirety, and on its own it is not
+ * an identity. Two independent bouts between the same two teams ending the
+ * same way produce the same prefix — which is the point of keeping it: a
+ * record whose result was edited no longer agrees with this half of its own
+ * token, and `src/campaign/record.js` checks exactly that.
+ */
+export function outcomeTokenPrefix({ winnerTeamId, loserTeamIds, reason }) {
   const losers = [...loserTeamIds].sort();
   return `team-arena:${winnerTeamId ?? "none"}:${losers.join("+") || "none"}:${reason}`;
+}
+
+/**
+ * The BATTLE half must be present and must be a state hash.
+ *
+ * It is required rather than defaulted on purpose. A default would silently
+ * restore the defect for any caller that forgot it, and the caller that
+ * forgets is exactly the one settling the wrong bout.
+ */
+export function assertBattleDiscriminator(battleDiscriminator) {
+  if (typeof battleDiscriminator !== "string" || !BATTLE_DISCRIMINATOR_PATTERN.test(battleDiscriminator)) {
+    throw new SettlementError(
+      "A settlement outcome needs a battleDiscriminator: the eight lowercase hex digits of " +
+      "combatStateHash(battle), taken at the moment the settlement is armed. Without it two bouts between " +
+      "the same teams with the same result share a completion token, and the first bout's acknowledgement " +
+      "settles the second."
+    );
+  }
+  return battleDiscriminator;
+}
+
+/**
+ * Deterministic completion token: `<outcome prefix>:<battle discriminator>`.
+ *
+ * It is a pure function of the outcome **of one particular battle**. The
+ * outcome half says what happened; the battle half says which battle it
+ * happened in, and is the controller-independent hash of that battle's own
+ * terminal state — seed, RNG cursor, rosters, healths, statuses, initiative,
+ * turn number and the whole ordered event log.
+ *
+ * Both halves are derived, never counted and never drawn, so a replayed battle
+ * still produces the same token and a host and a client can still compare
+ * acknowledgements without extra state. What changed is that they can no
+ * longer compare *the wrong bout's* acknowledgement and find it acceptable: a
+ * campaign of consecutive bouts between the same two teams used to hand every
+ * bout the same token, so bout 1's acknowledgement settled bout 2 with bout
+ * 1's winner.
+ */
+export function completionTokenFor({ winnerTeamId, loserTeamIds, reason, battleDiscriminator }) {
+  assertBattleDiscriminator(battleDiscriminator);
+  return `${outcomeTokenPrefix({ winnerTeamId, loserTeamIds, reason })}:${battleDiscriminator}`;
+}
+
+/**
+ * The battle half of a token, or `null` if it does not carry a well-shaped one.
+ *
+ * Read from the end rather than by splitting: a team id may itself contain a
+ * colon, but a discriminator never can, so the last segment is unambiguous.
+ */
+export function battleDiscriminatorOf(completionToken) {
+  if (typeof completionToken !== "string") return null;
+  const discriminator = completionToken.slice(completionToken.lastIndexOf(":") + 1);
+  return BATTLE_DISCRIMINATOR_PATTERN.test(discriminator) ? discriminator : null;
+}
+
+/**
+ * Does this token belong to this outcome?
+ *
+ * True when the token is the outcome's prefix followed by some well-shaped
+ * battle discriminator. It deliberately does **not** say *which* battle: a
+ * reader holding only a finished record cannot recompute an arm-time state
+ * hash, and inventing one it could recompute would put the identity back where
+ * it started. What it does say is the thing worth saying at rest — an edited
+ * result no longer agrees with its own token.
+ */
+export function completionTokenMatchesOutcome(completionToken, { winnerTeamId, loserTeamIds, reason } = {}) {
+  if (typeof completionToken !== "string" || !Array.isArray(loserTeamIds)) return false;
+  const prefix = `${outcomeTokenPrefix({ winnerTeamId, loserTeamIds, reason })}:`;
+  if (!completionToken.startsWith(prefix)) return false;
+  return BATTLE_DISCRIMINATOR_PATTERN.test(completionToken.slice(prefix.length));
 }
 
 function normaliseOutcome(outcome) {
   if (!outcome || typeof outcome !== "object") {
     throw new SettlementError("A settlement outcome must be an object.");
   }
-  const { winnerTeamId = null, loserTeamIds, reason } = outcome;
+  const { winnerTeamId = null, loserTeamIds, reason, battleDiscriminator } = outcome;
   if (!Array.isArray(loserTeamIds) || loserTeamIds.some((id) => typeof id !== "string" || id.length === 0)) {
     throw new SettlementError("A settlement outcome needs loserTeamIds as non-empty strings.");
   }
@@ -50,11 +138,17 @@ function normaliseOutcome(outcome) {
   if (winnerTeamId !== null && (typeof winnerTeamId !== "string" || winnerTeamId.length === 0)) {
     throw new SettlementError("A settlement winnerTeamId must be null or a non-empty string.");
   }
+  assertBattleDiscriminator(battleDiscriminator);
+  // The discriminator is folded into the token and kept nowhere else. The
+  // settlement record's public shape is unchanged, so every consumer of it —
+  // `src/campaign/from-battle.js`, the adapter bridge, the pending event —
+  // sees the same five fields it always saw, carrying a token that is now
+  // specific to this battle.
   const record = {
     winnerTeamId,
     loserTeamIds: [...loserTeamIds].sort(),
     reason,
-    completionToken: completionTokenFor({ winnerTeamId, loserTeamIds, reason })
+    completionToken: completionTokenFor({ winnerTeamId, loserTeamIds, reason, battleDiscriminator })
   };
   return Object.freeze(record);
 }
@@ -72,7 +166,13 @@ export class CampaignSettlement {
     this.#onSettle = onSettle;
   }
 
-  /** Gate 1. Called by the resolver the moment a whole team is eliminated. */
+  /**
+   * Gate 1. Called by the resolver the moment a whole team is eliminated.
+   *
+   * `outcome` is `{ winnerTeamId, loserTeamIds, reason, battleDiscriminator }`.
+   * The discriminator is what makes the resulting token this battle's rather
+   * than merely this *result's*; see `completionTokenFor`.
+   */
   arm(outcome) {
     const record = normaliseOutcome(outcome);
     if (this.#latched) {

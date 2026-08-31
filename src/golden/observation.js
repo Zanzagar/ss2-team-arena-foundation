@@ -71,6 +71,44 @@ const CAPTURE_KEYS = Object.freeze([
   "observedAt",
   "sessionId"
 ]);
+/**
+ * The three capture attestations the wrapper mints on the trace's `end` line
+ * and `capture-ingest.js` carries into the record.
+ *
+ * They are OPTIONAL, and deliberately so. Every observation committed before
+ * the fields existed was ingested by a version that validated and then
+ * discarded them, and an observation's digest covers its own record — adding a
+ * required field would invalidate the digest of every one of those records and
+ * with it the provenance of every golden that cites them. So a legacy record
+ * that carries none of them still validates, still matches, and still promotes;
+ * it simply carries no assurance on those points. What forces new evidence to
+ * carry them is the mandatory check at ingest (see capture-ingest.js), not this
+ * schema.
+ *
+ * - `overdraw`: draws the armed recording window made AFTER the injected tape
+ *   ran out. Those draws are invisible in the trace itself, so without this
+ *   count a run that drew more randomness than the candidate models is
+ *   indistinguishable from one that matched it. Ingest refuses any trace
+ *   reporting a non-zero count, so the only value a valid record can carry is
+ *   0 — the field is an attestation that the guard ran, not a measurement.
+ * - `launchNonce`: minted inside the player from values the launcher does not
+ *   supply. `sessionId` and `observationId` are both operator strings; the
+ *   nonce is the one identity field on a record that the operator did not
+ *   choose, which is why the promotion gate refuses two observations that
+ *   share one.
+ * - `staged`: every combatant field the WRAPPER wrote before the observed
+ *   action, and the value that stuck once the game's own construction had
+ *   finished. Its absence means the scenario is one the game produced unaided,
+ *   which is what all 22 promoted goldens rest on. Its presence does not make
+ *   an observation weaker evidence — the game still resolved the action, and
+ *   the formulas under measurement operate on whatever inputs they are given —
+ *   but it does mean nobody has shown the game's own progression can *reach*
+ *   this scenario. A reviewer has to be able to tell the two apart, so the
+ *   field is carried into the record and surfaced by the promotion gate.
+ */
+const CAPTURE_OPTIONAL_KEYS = Object.freeze(["launchNonce", "overdraw", "staged"]);
+
+export const SS2_CAPTURE_ATTESTATION_KEYS = CAPTURE_OPTIONAL_KEYS;
 const SAMPLE_KEYS = Object.freeze(["callSite", "injected", "label", "max", "min", "source", "value"]);
 const PROJECTED_BOOLEAN_KEYS = new Set([
   "burning",
@@ -85,6 +123,42 @@ const TOKEN_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const CALL_SITE_PATTERN = /^(?:overlay|root|sprite):/;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const COSMETIC_DEBRIS_PATTERN = /^armour-debris-\d+-(?:x|y|rotation)$/;
+/**
+ * The spell ingress's `damage_method` argument. Byte-verified (battle map lines
+ * 338-350) as register r5, passed straight to
+ * `defenderClip.gotoAndPlay(damage_method)` — "for this ingress the
+ * `damage_method` argument is the defender's animation label". Unlike
+ * `defender_hurt`, whose four methods are a closed byte-verified dispatch
+ * (map lines 242-244), the animation labels of export 1241 are only partially
+ * enumerated by the map (line 514 summarises "condition effects (1911-2004)"
+ * without naming them), and the direct-damage spell table records a label for
+ * fireball ("burning", map line 388) and lightning bolt ("lightning", map line
+ * 391) only. Closing the set here would be a guess, so the shape is checked and
+ * the value is not: a spell whose label the map does not record carries `null`
+ * in its candidate and diverges loudly against a live capture.
+ */
+const SPELL_ANIMATION_LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
+
+/**
+ * One entry of the staging declaration: `side.field=value`.
+ *
+ * `field` is deliberately the same token shape the trace's `set` paths use
+ * (`SET_PATH_PATTERN` in capture-ingest.js), not the closed
+ * `SS2_PROJECTED_COMBATANT_KEYS` set: the armoured captures stage per-piece
+ * `*_defence` ratings that the wrapper's default watch list omits, and a
+ * declaration that could not name them would be a declaration that lies by
+ * omission.
+ *
+ * `value` admits a decimal number or a boolean and nothing else. Every watched
+ * combatant field is numeric or boolean (see PROJECTED_BOOLEAN_KEYS and the
+ * `Number.isFinite` arm of assertFinalStateShape), and admitting free strings
+ * would let a comma or an `=` into a value and make the list ambiguous to
+ * split.
+ */
+const STAGED_ENTRY_PATTERN =
+  /^(hero|villain)\.([a-z][a-z0-9_]{0,63})=(-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?|true|false)$/;
+/** Roughly 30 entries. A staging list longer than this is a defect, not a scenario. */
+export const SS2_STAGED_MAX_LENGTH = 512;
 
 export class ObservationError extends Error {
   constructor(message, options = {}) {
@@ -94,6 +168,53 @@ export class ObservationError extends Error {
 }
 
 export class ObservationValidationError extends ObservationError {}
+
+/**
+ * Parse a staging declaration into its ordered entries, or throw naming the
+ * exact reason.
+ *
+ * This is the single definition of the grammar. `capture-ingest.js` calls it to
+ * validate the trace's `end.staged` (re-reporting any failure against the line
+ * that carried it) and `assertCaptureBlock` calls it to validate the record's
+ * `capture.staged`, so a record can never carry a shape the trace could not.
+ *
+ * Absence is the encoding for "the wrapper staged nothing". The empty string is
+ * therefore rejected rather than accepted as a synonym: two spellings of one
+ * fact would mean two records that claim the same thing digest differently, and
+ * a reader could not tell "staged nothing" from "forgot to say".
+ */
+export function parseSs2StagedDeclaration(text, path = "capture.staged") {
+  const reject = (why) => {
+    throw new ObservationValidationError(
+      `${path} must be a non-empty comma-separated "side.field=value" list in application order, ` +
+      `for example "hero.strength=40,villain.helmet=6" — ${why}. A capture that staged nothing ` +
+      "omits the field entirely; the empty string is not a second spelling of that."
+    );
+  };
+  if (typeof text !== "string") reject(`got ${JSON.stringify(text)}`);
+  if (text.length === 0) reject("it is empty");
+  if (text.length > SS2_STAGED_MAX_LENGTH) {
+    reject(`it is ${text.length} characters, past the ${SS2_STAGED_MAX_LENGTH} cap`);
+  }
+  const entries = [];
+  const seen = new Set();
+  for (const part of text.split(",")) {
+    const match = STAGED_ENTRY_PATTERN.exec(part);
+    if (!match) reject(`the entry ${JSON.stringify(part)} is not side.field=value`);
+    const [, side, field, literal] = match;
+    const key = `${side}.${field}`;
+    if (seen.has(key)) {
+      reject(`${key} is listed twice — each staged field appears once, carrying the value that stuck`);
+    }
+    seen.add(key);
+    entries.push({
+      side,
+      field,
+      value: literal === "true" ? true : literal === "false" ? false : Number(literal)
+    });
+  }
+  return entries;
+}
 
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
@@ -106,6 +227,21 @@ function assertExactKeys(value, expectedKeys, path) {
   const expected = [...expectedKeys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
     throw new ObservationValidationError(`${path} has unexpected or missing fields.`);
+  }
+}
+
+/**
+ * Every required key present, and no key outside required ∪ optional. Used
+ * only where a block has genuinely optional members; everywhere else the
+ * exact-keys check stays, because an unexpected field is a defect.
+ */
+function assertKeysWithOptional(value, requiredKeys, optionalKeys, path) {
+  const allowed = new Set([...requiredKeys, ...optionalKeys]);
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) throw new ObservationValidationError(`${path} has an unexpected field ${key}.`);
+  }
+  for (const key of requiredKeys) {
+    if (!Object.hasOwn(value, key)) throw new ObservationValidationError(`${path} is missing the field ${key}.`);
   }
 }
 
@@ -161,7 +297,7 @@ function assertBuildBlock(build, path) {
 
 function assertCaptureBlock(capture) {
   if (!isPlainObject(capture)) throw new ObservationValidationError("capture must be an object.");
-  assertExactKeys(capture, CAPTURE_KEYS, "capture");
+  assertKeysWithOptional(capture, CAPTURE_KEYS, CAPTURE_OPTIONAL_KEYS, "capture");
   if (typeof capture.sessionId !== "string" || !TOKEN_PATTERN.test(capture.sessionId)) {
     throw new ObservationValidationError("capture.sessionId must be a valid token.");
   }
@@ -190,6 +326,26 @@ function assertCaptureBlock(capture) {
       "capture.mutationGranularity must be property-watch; coarser capture cannot match ordered mutation traces."
     );
   }
+  // Zero is the only value a valid record can carry: ingest refuses any trace
+  // whose armed window drew past the injected tape, so a record claiming a
+  // non-zero count is a record of a divergence that should never have become
+  // one. Checked as `!== 0` rather than as a range so a string "0", a null, or
+  // a float are all refused with the same message.
+  if (Object.hasOwn(capture, "overdraw") && capture.overdraw !== 0) {
+    throw new ObservationValidationError(
+      "capture.overdraw must be 0 when present: it attests that the armed recording window made no " +
+      "draw after the injected tape ran out, and ingest refuses every trace that reports otherwise."
+    );
+  }
+  if (
+    Object.hasOwn(capture, "launchNonce") &&
+    (typeof capture.launchNonce !== "string" || !TOKEN_PATTERN.test(capture.launchNonce))
+  ) {
+    throw new ObservationValidationError("capture.launchNonce must be a valid token when present.");
+  }
+  // Shape only. Whether the declared values actually stuck is checked at ingest
+  // against the staged state dump, which a record no longer carries.
+  if (Object.hasOwn(capture, "staged")) parseSs2StagedDeclaration(capture.staged, "capture.staged");
 }
 
 function assertSampleShape(sample, index) {
@@ -210,6 +366,41 @@ function assertSampleShape(sample, index) {
       `samples[${index}] cannot be injected: only randomBetween rolls are injectable; ` +
       "AVM1 RandomNumber opcode rolls can only be recorded."
     );
+  }
+}
+
+/**
+ * A live capture cannot carry an opcode sample at all, so a record claiming one
+ * is refused rather than quietly excluded.
+ *
+ * The exclusion this closes was a real hole, demonstrated. `armour-debris-*`
+ * opcode rolls are dropped from BOTH sides before comparison, by label regex —
+ * so an observation carrying the fixture's 7 samples plus 120 extra rolls
+ * labelled `armour-debris-N-x` validated, matched a 7-sample fixture, and
+ * promoted. Two observations differing by 120 draws matched each other. That
+ * directly contradicts the runtime-capture doc's own list, which puts "the
+ * NUMBER of draws in the armed window" under *genuinely observed*: an arbitrary
+ * number was invisible, and `overdraw` does not cover them because they are
+ * recorded rather than past-the-tape.
+ *
+ * Closing the channel rather than widening the comparison is the right shape,
+ * because nothing real produces one: the opcode stream cannot be observed by
+ * any instrumentation the wrapper has (that is why the exclusion exists), 0 of
+ * the 67 committed records carry such a sample, the reference simulator emits
+ * none, and the wrapper's tape excludes them. The simulator is exempt because
+ * its traces are a specification of shapes, not a capture.
+ */
+function assertNoUncapturableSamples(samples, method) {
+  if (method === ObservationCaptureMethod.SIMULATED) return;
+  for (let index = 0; index < samples.length; index += 1) {
+    if (samples[index].source === RollSource.RANDOM_NUMBER) {
+      throw new ObservationValidationError(
+        `samples[${index}] is a ${RollSource.RANDOM_NUMBER} sample, which no live capture can ` +
+        "record: the AVM1 opcode stream is not observable by the wrapper, which is precisely why " +
+        "cosmetic opcode rolls are excluded from matching. Admitting one would open an unbounded " +
+        "channel of draws that comparison cannot see."
+      );
+    }
   }
 }
 
@@ -246,6 +437,25 @@ function assertEventShape(event, index) {
       return;
     case "defender-blocked":
       assertExactKeys(event, ["type"], `events[${index}]`);
+      return;
+    /**
+     * The spell ingress. `magic_damage_character`'s complete byte-verified call
+     * inventory (map lines 366-371) contains neither `defender_hurt` nor
+     * `defender_blocked` — it is "the parallel spell/effect ingress" (map line
+     * 381) that the wrapper must observe in its own right. `method` is its
+     * `damage_method` argument, the defender animation label (map lines
+     * 346-350), and is `null` when the map records no label for that spell.
+     */
+    case "magic-damage":
+      assertExactKeys(event, ["method", "type"], `events[${index}]`);
+      if (
+        event.method !== null &&
+        (typeof event.method !== "string" || !SPELL_ANIMATION_LABEL_PATTERN.test(event.method))
+      ) {
+        throw new ObservationValidationError(
+          `events[${index}].method must be null or a defender animation label.`
+        );
+      }
       return;
     case "death":
       assertExactKeys(event, ["side", "type"], `events[${index}]`);
@@ -352,6 +562,7 @@ export function validateSs2Observation(record) {
     throw new ObservationValidationError("samples must be a non-empty array of at most 200 rolls.");
   }
   record.samples.forEach((sample, index) => assertSampleShape(sample, index));
+  assertNoUncapturableSamples(record.samples, record.capture.method);
   try {
     createOrderedRollTape(tapeProjection(record.samples));
   } catch (error) {
@@ -407,10 +618,19 @@ function comparableSamples(samples) {
 
 /**
  * The projection two independent observations must agree on. Identity and
- * capture metadata are excluded (they must differ); cosmetic debris rolls are
+ * capture metadata are excluded (they must differ — `capture.launchNonce`
+ * emphatically so: two records that agree on it are the same launch, which is
+ * why the promotion gate refuses them); cosmetic debris rolls are
  * excluded (unobservable and combat-irrelevant); mutation reasons are wrapper
  * hook attributions and are kept because independent runs of the same tooling
  * must attribute alike.
+ *
+ * `capture.staged` is excluded here too, and that exclusion is exactly why the
+ * promotion gate has to compare it itself. Two observations can agree on every
+ * channel in this projection — same scenario values, same tape, same mutations,
+ * same final state — while one of them had those values written in by the
+ * wrapper and the other got them from the game. The values are what this
+ * projection sees; how they came to be is not a value.
  */
 export function projectSs2ObservationForComparison(record) {
   return cloneJson({
@@ -491,12 +711,34 @@ export function ss2ObservationsMatch(left, right) {
   return { match: differences.length === 0, differences };
 }
 
-/** Semantic events a fixture's expected outcome implies at runtime. */
+/**
+ * Semantic events a fixture's expected outcome implies at runtime.
+ *
+ * Which ingress ran is a property of the staged action, so it is read from the
+ * scenario, not from the derived calculation: `scenario.spellId` selects the
+ * spell ingress and `scenario.attackDirection` the physical one (the fixture
+ * schema requires exactly one of them).
+ *
+ * The physical branch below is unchanged and is pinned by a regression test:
+ * a miss dispatches `defender_blocked()` alone (map line 250), a hit dispatches
+ * `defender_hurt(<method>)` (map lines 242-244), and a defeat adds the `death`
+ * call and the overlay transition it drives (map lines 457-466).
+ */
 export function deriveExpectedEventsFromSs2Fixture(fixture) {
-  if (fixture?.expected?.calculation?.hit !== true) {
+  const events = [];
+  if (fixture?.scenario?.spellId !== undefined) {
+    // `magic_damage_character` calls neither `defender_hurt` nor
+    // `defender_blocked` (its complete call inventory is byte-verified at map
+    // lines 366-371), and it has no hit roll at all — the caller already rolled
+    // the damage. So there is no hit/miss branch here: the ingress running IS
+    // the event, and its `damage_method` argument is the animation label it
+    // plays on the defender (map lines 346-350).
+    events.push({ type: "magic-damage", method: fixture.expected?.calculation?.damageMethod ?? null });
+  } else if (fixture?.expected?.calculation?.hit !== true) {
     return [{ type: "defender-blocked" }];
+  } else {
+    events.push({ type: "defender-hurt", method: fixture.expected.calculation.dispatchedMethod });
   }
-  const events = [{ type: "defender-hurt", method: fixture.expected.calculation.dispatchedMethod }];
   if (fixture.expected.resultEvent) {
     events.push({ type: "death", side: fixture.expected.resultEvent.loserSide });
     events.push({ type: "overlay-label", label: fixture.expected.resultEvent.overlayLabel });

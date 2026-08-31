@@ -52,6 +52,21 @@ export {
   legalActions
 };
 
+// The resolved-action trace. `applyAction` still returns the battle; these are
+// additive, so nothing that already called it has to change.
+export { applyActionWithOutcome, lastResolvedAction } from "./team/resolver.js";
+
+// The canonical resource bag: the per-combatant numbers a rule set reads that
+// the resolver does not itself define. See `src/team/resources.js`.
+export {
+  normaliseResourceBag,
+  RESERVED_RESOURCE_NAMES,
+  resourceBounds,
+  resourceNames,
+  resourceValue
+} from "./team/resources.js";
+export { EffectKind } from "./team/rule-set.js";
+
 // The seam itself, re-exported so integrators have one entry point.
 export {
   acknowledgeResultAnimation,
@@ -107,6 +122,12 @@ export function createBattle({ teams, seed = 1, rules = classicStyleRules, ...op
  * This is the historical projection and keeps the historical `controller`
  * string per combatant. The controller-independent projection the seam
  * introduces is `toTeamWireState` / `combatStateHash`.
+ *
+ * **It is frozen at its historical field list on purpose**, which now means it
+ * omits the canonical resource bag. Anything a rule set reads must be hashed
+ * or the hash is not a desync check — so a battle whose rule set uses
+ * resources must be compared with `combatStateHash`, not `stateHash`. See the
+ * note on `stateHash` below.
  */
 export function toWireState(battle) {
   return {
@@ -128,7 +149,15 @@ export function toWireState(battle) {
   };
 }
 
-/** Fast consistency check: useful after every host-authoritative online action. */
+/**
+ * Fast consistency check over the *historical* projection.
+ *
+ * It covers exactly what `toWireState` covers, which does not include the
+ * canonical resource bag. For a rule set that declares no resources the two
+ * hashes are equally sound; for one that does, only `combatStateHash` can see
+ * the difference between two peers who disagree about armour, stamina or
+ * ammunition. New integrations should use `combatStateHash`.
+ */
 export function stateHash(battle) {
   return fnv1a(JSON.stringify(toWireState(battle)));
 }

@@ -51,6 +51,10 @@ function parseArgs(argv) {
     switch (flag) {
       case "--observation": options.observations.push(next()); break;
       case "--out": options.out = next(); break;
+      // Regenerating a committed manifest has to reproduce its digest.
+      // Stamping a fresh createdAt would invalidate the
+      // captureManifestSha256 a promoted golden already cites, silently.
+      case "--created-at": options.createdAt = next(); break;
       case "--print": options.print = true; break;
       default: throw new Error(`Unknown option: ${flag}`);
     }
@@ -77,9 +81,12 @@ export function buildSs2CaptureManifest(observationRecords, { createdAt } = {}) 
     );
   }
 
-  // Group by session, preserving first-seen order so a manifest reads in the
-  // order the sessions were captured.
   const sessions = new Map();
+  // Duplicate detection has to be global, not per session: the same
+  // observation id under two different session ids is exactly the shape a
+  // faked independence claim would take, and a per-session check cannot see
+  // it.
+  const seenObservationIds = new Set();
   for (const observation of observations) {
     const { sessionId, method, observedAt, installHashVerifiedBefore, installHashVerifiedAfter } =
       observation.capture;
@@ -108,12 +115,26 @@ export function buildSs2CaptureManifest(observationRecords, { createdAt } = {}) 
         `(${session.method} vs ${method}).`
       );
     }
-    if (session.observationIds.includes(observation.observationId)) {
+    if (seenObservationIds.has(observation.observationId)) {
       throw new Error(`Observation ${observation.observationId} was supplied more than once.`);
     }
+    seenObservationIds.add(observation.observationId);
     if (Date.parse(observedAt) < Date.parse(session.observedAt)) session.observedAt = observedAt;
     session.observationIds.push(observation.observationId);
   }
+
+  // Sessions are ordered by when they were captured, NOT by the order the
+  // caller happened to read the records off disk. `sessions` is an array, so
+  // canonicalization preserves its order and the order is therefore part of
+  // the manifest digest — the digest a promoted golden cites in
+  // `provenance.captureManifestSha256`. The campaign driver supplies records
+  // in readdir order, so without this a different filesystem would mint a
+  // different, equally "correct" digest for the same evidence. Ties break on
+  // sessionId so the ordering is total.
+  const orderedSessions = [...sessions.values()].sort((left, right) =>
+    Date.parse(left.observedAt) - Date.parse(right.observedAt) ||
+    left.sessionId.localeCompare(right.sessionId)
+  );
 
   const manifest = {
     schemaVersion: SS2_CAPTURE_MANIFEST_SCHEMA_VERSION,
@@ -125,7 +146,7 @@ export function buildSs2CaptureManifest(observationRecords, { createdAt } = {}) 
     },
     captureToolVersion: [...toolVersions][0],
     createdAt: createdAt ?? new Date().toISOString(),
-    sessions: [...sessions.values()]
+    sessions: orderedSessions
   };
 
   // Fail here rather than at promotion time, and return the digest the
@@ -147,7 +168,7 @@ async function main() {
   const records = [];
   for (const observationPath of options.observations) records.push(await readJson(observationPath));
 
-  const { manifest, digest } = buildSs2CaptureManifest(records);
+  const { manifest, digest } = buildSs2CaptureManifest(records, { createdAt: options.createdAt });
   const text = `${JSON.stringify(manifest, null, 2)}\n`;
 
   if (options.out) {

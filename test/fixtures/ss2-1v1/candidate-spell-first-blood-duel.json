@@ -13,7 +13,6 @@
     "runtimeVerified": false,
     "candidateFlags": [
       "spell-ingress",
-      "spell-id-in-attack-direction",
       "first-blood-duel-gate",
       "unconditional-psyche-up"
     ],
@@ -24,7 +23,7 @@
   },
   "scenario": {
     "attackerSide": "hero",
-    "attackDirection": 30,
+    "spellId": 30,
     "fightMode": "duel",
     "result": null,
     "hero": {

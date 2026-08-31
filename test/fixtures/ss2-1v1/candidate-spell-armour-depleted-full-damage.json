@@ -13,7 +13,6 @@
     "runtimeVerified": false,
     "candidateFlags": [
       "spell-ingress",
-      "spell-id-in-attack-direction",
       "unconditional-breastplate-stamina",
       "unconditional-psyche-up"
     ],
@@ -24,7 +23,7 @@
   },
   "scenario": {
     "attackerSide": "hero",
-    "attackDirection": 34,
+    "spellId": 34,
     "result": null,
     "hero": {
       "magicka": 11,

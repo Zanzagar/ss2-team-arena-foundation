@@ -25,10 +25,29 @@ export const RuleSetVerification = Object.freeze({
   RUNTIME_VERIFIED: "runtime-verified"
 });
 
+/**
+ * The declarative vocabulary a rule set writes state with. Every kind is
+ * applied and clamped by the resolver, in the order the rule set declared it.
+ *
+ * `DAMAGE` and `HEAL` are *relative* and carry a non-negative `amount`; they
+ * are the only way to move `health`, which is the one number the resolver
+ * interprets (`alive = health > 0`).
+ *
+ * `RESOURCE` is *absolute* — `{ kind: "resource", targetId, resource, to }` —
+ * and moves one declared entry in the combatant's canonical resource bag. It
+ * is deliberately generic rather than a bespoke `armour` kind: the resolver
+ * must not learn a game's nouns, and a bespoke kind would need a sibling for
+ * stamina, ammunition, and every resource a future rule set invents. See
+ * `resources.js` for what qualifies as a resource and why.
+ *
+ * An armour-first damage split is therefore two ordered effects and no new
+ * concept: write the armour pool down, then apply the overflow as damage.
+ */
 export const EffectKind = Object.freeze({
   DAMAGE: "damage",
   HEAL: "heal",
-  STATUS: "status"
+  STATUS: "status",
+  RESOURCE: "resource"
 });
 
 const REQUIRED_FUNCTIONS = Object.freeze([
@@ -178,6 +197,17 @@ export function assertActionOutcome(outcome, ruleSetId) {
     if (effect.kind === EffectKind.STATUS) {
       if (typeof effect.status !== "string" || effect.status.length === 0) {
         throw new TeamRuleSetError(`Rule set ${ruleSetId} produced a status effect without a status name.`);
+      }
+    } else if (effect.kind === EffectKind.RESOURCE) {
+      if (typeof effect.resource !== "string" || effect.resource.length === 0) {
+        throw new TeamRuleSetError(`Rule set ${ruleSetId} produced a resource effect without a resource name.`);
+      }
+      // Absolute, never relative. A replayed effect must land on the same
+      // value whatever the peer thought the pool held a moment earlier.
+      if (!Number.isFinite(effect.to)) {
+        throw new TeamRuleSetError(
+          `Rule set ${ruleSetId} produced a resource effect without a finite absolute \`to\` value.`
+        );
       }
     } else if (!Number.isFinite(effect.amount) || effect.amount < 0) {
       throw new TeamRuleSetError(

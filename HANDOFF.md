@@ -1,137 +1,200 @@
 # Transfer handoff — SS2 Team Arena Foundation
 
-## Capture campaign state (2026-08-30, latest)
+## State at the end of the 2026-08-30 session
 
-**The first runtime-verified golden is promoted, and capture runs are fully
-unattended.** Read this section first.
+22 promoted goldens. 584 tests, all passing. 36 commits this session, across a
+day of parallel work and one overnight run of twelve agents.
 
-- **`golden-prisoner-normal-kill-dir6`** is the project's first formula
-  confirmed against the running licensed game, backed by two matching
-  observations from two independent unattended sessions plus a capture
-  manifest digest. `test/ss2-golden-fixtures.test.js` keeps every golden
-  tied to evidence that still validates, hash-matches and comes from
-  distinct sessions. 86 tests passing.
-- **One command runs a whole capture, start to finish, with no cursor, no
-  focus and no human input:**
-  ```
-  powershell -File tools\runtime-capture\run-capture.ps1 `
-    -FixturePath test\fixtures\ss2-1v1\candidate-prisoner-normal-kill.json `
-    -SessionId <unique> -ObservationId <unique>
-  ```
-  It launches the session, the wrapper navigates the menus with the game's
-  own calls, the autopilot fights, the trace closes itself, the window is
-  closed and the delog/ingest/verify pipeline runs. It prints the verdict.
-- **Capturing more evidence is now a loop**: run it, read the divergence
-  (it will differ only in `attackDirection`), then
-  `capture-session.mjs ingest`/`verify` the raw jsonl against the matching
-  `candidate-prisoner-normal-kill-dir{5,6,7,8}` fixture, and once a
-  direction has two observations from two sessions, build a manifest and
-  `promote`. All four normal-band directions already have candidates and at
-  least one observation each.
-- **Never shortcut the game's own frames.** An earlier navigator jumped
-  straight to `arena_intro`, skipping the prologue frames that skin the hero
-  and build the villain; the game showed its own character-corruption /
-  tampering screen. The save was never modified (verified byte-identical to
-  its snapshot by hash), but such a run is not vanilla behaviour and its
-  evidence would be worthless. The navigator now hands control back to
-  `daybreak` and lets the game run itself.
-- **Save safety**: `tools\runtime-capture\save-state.ps1 snapshot|restore|list`
-  (short non-OneDrive root, hash-verified, refuses to run while Ruffle is
-  open). Known-good snapshots: `verified-good-1701`, `post-k-character`.
+Read this section, then [`docs/overnight-agent-plan.md`](docs/overnight-agent-plan.md)
+for how the parallel work is organised.
 
-### Older context (still accurate)
+### What changed at the level of what this project can do
 
-- **Committed evidence**: `test/observations/ss2-1v1/obs-20260830-e1.json`
-  formally MATCHES `candidate-duel-firstblood-normal-kill` (observation 1 of
-  the 2 the promotion gate needs). Eighteen candidate fixtures exist; the
-  full pipeline (`simulate`/`tape`/`delog`/`ingest`/`verify`/`promote`) is
-  tested (78 tests) and gate-verified end to end
-  (`tools/runtime-capture/validate-vehicle.ps1` must PASS after any wrapper
-  edit).
-- **The deterministic target**: the operator's gladiator **John Ringler**
-  (attack 1, defence 1, strength 10, charisma 1, magicka 1, min 21 / max
-  23, 30 hp, 110 stamina, no armour) versus the **tutorial prisoner**
-  (all-zero stats, 10 hp, `fight_mode "misc"` — constant every time). The
-  operator discovered the fight **re-offers if the window is closed before
-  clicking the post-kill checkmark** — the replay loop for observation
-  pairs. One melee hit (21–23 damage vs 10 hp) is always lethal.
-- **Session flow**: regenerate the tape-carrier with
-  `node tools/runtime-capture/gen-provisional-prisoner.mjs`, launch with
-  `powershell -File tools\runtime-capture\launch-capture.ps1 -FixturePath
-  captures\provisional-prisoner-kill.json -SessionId <s> -ObservationId
-  <o>`; operator walks to the prisoner and normal-attacks; the kill
-  auto-closes the trace. Author the real candidate from the capture,
-  re-ingest the same raw jsonl against it (observation A), replay via the
-  checkmark trick (observation B), then `promote`. Saves are snapshotted
-  with `tools/runtime-capture/save-state.ps1` (short non-OneDrive root,
-  hash-verified; snapshot `post-k-character` holds the character).
-- **Capture kit v3 mechanics** (all forced by live evidence, see the git
-  log from `b54aa45` to HEAD): frame 52 re-defines the combat functions and
-  calls them in the same script (slot wraps cannot interpose), each Ruffle
-  level has its own `Math`, and watching function slots VOIDS the game's
-  scope-style definitions. Hence: a tapped `Math` clone is planted as a
-  timeline variable on the game root and overlay (serves/records the tape
-  for every path); recording arms at `attack_chances` **only when
-  `attack_direction` is a number** (the function also renders the UI button
-  percentages with direction null); lethal captures close one tick after
-  the surviving native `gotoAndPlay`; `nextphase` closes non-lethal armed
-  windows; per-frame sweeps re-wrap functions and re-watch swapped stat
-  objects; `dbg` milestone lines in the raw log (stripped by delog) show
-  exactly where a failed session stopped.
-- **Not yet verified live** (the very next session answers both): the
-  direction-gated arming and the Math-shadow interception against the real
-  game (`math-shadowed:*` and `mrand-first` dbg lines, and injected roll
-  lines in the trace, are the confirmation signals).
-- **Known out-of-scope actions**: range taunts (and opcode-rolled paths)
-  make zero `randomBetween` calls — uncapturable by design, documented in
-  the runtime-capture doc. Melee attacks are the capture family.
+1. **Parallel capture works.** `-SaveDirectory` was never broken. Three
+   concurrent sessions complete in 22s against ~45s serial, all matching
+   promoted goldens, master save byte-identical.
+2. **The leveled-gladiator arena route runs end to end.** A gladiator was taken
+   1 → 4 and fought the tournament ladder to rank 2 in five of six attempts.
+3. **The wrapper can stage a scenario and buy equipment**, both owner-approved,
+   both declared in the evidence.
+4. **The champion was decoded from the map before it was ever seen.** Reading
+   `unleash_hell`'s hard-coded DNA through `initcharacter` and `battlevalues`
+   PREDICTED `hitpointsmax` 110 and `armourclass` 86; twelve independent live
+   draws recorded exactly those. Five `candidate-champion-*` fixtures exist.
 
+### The single most important correction
 
+**Five separate adversarial passes each found the same defect class — a test
+whose assertion cannot fail — and each one had been hiding a real bug.** That is
+now the project's most reliable signal, and the reason to keep running
+write-nothing auditors against named claims.
 
-## On the PC with Swords & Sandals II installed
+Two forgeries against the promotion gate worked *by the documented pipeline*
+and are now closed:
 
-1. Preferred: copy `ss2-team-arena-foundation.bundle` to the new PC and run
-   `git clone ss2-team-arena-foundation.bundle ss2-team-arena-foundation`.
-   This preserves the complete commit history.
-2. Alternative: extract the transfer ZIP into a new local Codex project folder.
-3. Open that folder as the project, then continue this Codex task and say that
-   the licensed game is installed.
-4. Give Codex permission to read the game's installation directory when asked.
-   Do not copy, upload, or redistribute the original SWF or assets.
-5. Run `npm test` from this folder to confirm the transferred foundation.
+- **The launch-nonce gate was opt-out.** Copy a raw trace, change the ids,
+  delete the nonce key: both ingest, both promote, and you get a golden claiming
+  two independent sessions from one capture. Now mandatory for
+  `injected-tape-runtime` on the same terms as `overdraw`.
+- **An observation could carry unlimited invisible draws.** Cosmetic opcode
+  rolls are excluded from matching by label regex on *both* sides, so a record
+  with 120 fabricated debris rolls matched a 7-sample fixture. Records now
+  refuse opcode samples outright — the doc's own reasoning (no instrumentation
+  can observe the opcode stream) is exactly why no record should hold one.
 
-## What Codex should inspect first
+**The 22 goldens are sound.** Independent re-derivation reproduced every one
+byte-for-byte; manifests, digests and cited observations all resolve.
 
-Locate the licensed Swords & Sandals Classic Collection installation and identify
-the S&S II SWF and any S&S II mod folders. The adapter work starts by mapping
-the vanilla battle entry point, player/opponent state objects, random-number
-generation, combat formulas, result callback, and battle movie clips.
+---
 
-## Scope already completed
+## What is running, and how to run it
 
-`src/engine.js` is an asset-free deterministic combat core for one-to-three
-gladiators per team. It provides targeting, AI turns, local/hot-seat controller
-identities, replays, wire snapshots, and state hashes. Its formulas are
-intentional placeholders until they can be validated against the licensed game.
+| Script | Purpose | Guards |
+| --- | --- | --- |
+| `run-campaign.ps1 -Concurrency N` | capture families in parallel | refuses `N>1` for any navigator but `prisoner` |
+| `run-arena.ps1` | the save-mutating arena route | refuses to start without a fresh snapshot, takes it itself, hashes before/after |
+| `launch-capture.ps1` | one session; the ONLY script with both `-WatchFields` and `-Stage*` | **no snapshot guard** — see Open items |
+| `validate-vehicle.ps1` | wrapper gate after any edit | prints the source hash it compiled, and what it does not prove |
+| `save-state.ps1` | snapshot/restore | refuses an empty tree, and refuses to restore a WIPED save |
 
-The fingerprinted Steam build now has a read-only battle map and an isolated
-asset-free 1v1 candidate harness with fifteen strict ordered-RNG fixtures.
-Static candidates are not runtime goldens and do not replace the placeholder
-engine rules. The Stage 3 runtime-capture pipeline is in place: observation
-records with digests, raw-trace ingestion, a two-independent-observation
-promotion gate, preserved divergence reports, a reference-trace simulator
-(never promotable), an unvalidated AS2 wrapper draft, and the
-`tools/capture-session.mjs` CLI, all documented in
-`docs/integration/ss2-runtime-capture.md`. The battle map's damage ingresses
-were re-verified opcode-by-opcode on 2026-08-30 (see the defeat-gate and
-`magic_damage_character` sections), which corrected the breastplate-stamina
-rule in the isolated candidate. The next technical gate is running the first
-controlled licensed 1v1 captures — the capture vehicle (portable Ruffle
-0.5.0 plus the FFDec-compiled wrapper) is installed and validated end to end
-by `tools/runtime-capture/validate-vehicle.ps1`, and
-`tools/runtime-capture/launch-capture.ps1` drives real sessions — followed
-by the SS2 state/UI adapter. The delivery target remains 2v2 and 3v3
-cooperative campaign support; see `docs/roadmap.md`.
+Snapshots: **`level4-vitality-tournament-gate`** (vitality 13, 5723 gold,
+`current_tournament` 1 — `hitpointsmax` reads 220 in the level-up log because
+`battlevalues` last ran pre-spend; the formula gives 300) and
+**`level4-armed-weapon39`** (the same gladiator after a shop trip: weapon 39,
+843,130 gold, strength and speed 60). `verified-good-1701` and `pre-arena-path`
+are the original level-1 gladiator.
+
+**`zainger-repaired` is a WIPED save under a reassuring name.** `save-state.ps1`
+now refuses to restore it without `-Force`.
+
+---
+
+## Non-negotiable rules (each learned the hard way)
+
+- Licensed SWFs are read-only and hash-verified before and after every capture.
+  Never copy, export or commit game assets or extracted scripts.
+- **Never shortcut the game's own frames.** Jumping past the prologue tripped
+  the game's own validation screen.
+- A candidate becomes golden ONLY via >=2 matching observations from >=2
+  sessions. Never hand-write a golden, observation or manifest.
+- **Derive candidates from the battle map, never from a capture.**
+- `validate-vehicle.ps1` must PASS after ANY wrapper edit — but see below for
+  what that does and does not mean.
+- Snapshot before every save-mutating run. `run-arena.ps1` does it for you.
+- Use `git commit -F <file>` for any message containing quotes.
+
+### AVM1 has ONE comparison opcode
+
+`>` is `<` with operands swapped; `>=` and `<=` are `<` negated. Every
+comparison with NaN is false, so **both negated forms return TRUE for NaN**, and
+every field the wrapper reads is undefined until the frame that initialises it.
+This caused **three separate live defects in one day**, including one that
+rewrote the gladiator's gold. The only safe shape is un-negated `<`, twice:
+`(n < 1) || (0 < n)`. Use `isNum()`.
+
+### `validate-vehicle.ps1` proves less than its name suggests
+
+Audited: it catches **0 of the 6 defects found live on this route**, `isNum` has
+**zero reachable call sites** in a stub run, and a one-line revert of `isNum`'s
+body leaves the gate green while restoring the demonstrated save-corruption bug
+verbatim. Save corruption is outside its observable universe by construction —
+it compares a trace to a fixture, never a save. It now says so in its own PASS
+output and names the wrapper source hash it compiled.
+
+---
+
+## Next steps, in order
+
+1. **Capture the champion bout.** Everything is in place except one thing:
+   **it cannot go through `run-arena.ps1`.** All five champion fixtures need
+   eleven extra `-WatchFields`, and only `launch-capture.ps1` exposes both that
+   and `-Stage*` — and it has no snapshot guard. Snapshot by hand first, or add
+   the guard. Winning is not required: the wrapper arms on the first
+   `checkattackroll` and the trace closes on that call's return.
+2. **Capture `candidate-armoured-*` (5) and `candidate-tournament-*` (3).**
+   Both reachable with the tooling as it stands. `campaign.mjs watch-fields
+   --family <f>` prints what each needs. Staged armour IS honoured
+   (`damagecharacter` reads the live reference at roll time); staged `hitpoints`
+   is NOT (`check_stats` clamps it every phase transition).
+3. **The spell family (8) is still blocked** — the hook fix was necessary but
+   not sufficient. See below.
+
+`campaign.mjs plan --family <f>` names blocking reasons derived from the
+repository, and [`ss2-staging-runbook.md`](docs/integration/ss2-staging-runbook.md)
+has per-fixture commands.
+
+---
+
+## Open items
+
+**Evidence chain**
+- Two-session independence still rests on operator strings for every promoted
+  golden: 9 of 67 records carry a nonce and **none of the 9 is cited by a
+  golden**.
+- **Hook attribution is never verified anywhere.** `reason` is stripped from
+  both sides before comparison, so hook labels, `callSite` and `injected` are
+  unfalsifiable in all 22 committed observations.
+
+**Fifteen fixtures assert a hero the build cannot produce.** Groups C–F stage
+`strength 5` with `min_damage 12 / max_damage 20`, which under the verified
+`round(strength*2) + weapon_min_damage` implies a weapon row `[3]=2 [4]=10`. All
+90 rows were dumped; no such row exists. The closest is `weapon41` (4/12), which
+works at strength **4** or **8** — one point off each fixture. **Deliberately not
+fixed**: candidates are derived from the map, never edited to fit, so these
+should be re-derived properly rather than patched.
+
+**The spell ingress cannot arm.** The hook label and `magic-damage` event are
+fixed, but all 13 `checkattackroll` sites were enumerated and none falls inside a
+spell arm; `attack_chances` is not reachable on a hero cast turn. And **`spell_id`
+does not exist anywhere in the build** — both branches of that code are dead. The
+byte-backed candidate for an arming point is `cast_spell_icon`, which carries the
+inventory id as a literal argument; wiring it changes the capture window's
+boundary (a cast's impact lands many frames later) and needs the gate re-run.
+
+**GATE A freezes a game mechanic, deliberately.** The route writes
+`time_of_day = 24` on every town-square entry; no button does that. It suppresses
+the day counter, the lighting and the 200-point special event, and frame 150
+persists the frozen value. Kept — the event it prevents permanently mutates
+charisma, magicka or gold and saves *that* — but it is an alteration,
+owner-approved, and must not be described as a button replication.
+
+**Save-safety items not yet closed**
+- `run-arena.ps1` still kills every Ruffle process rather than its own pid,
+  which sabotages any concurrent isolated session.
+- `validate-vehicle.ps1` launches Ruffle at the REAL save with no
+  `--save-directory` and no process guard, while this file mandates running it
+  after every wrapper edit.
+- Two unguarded arithmetic writes to DNA fields: `experience = experienceneeded
+  + 1` and `vitality++`. Neither operand was shown to be undefined, so this is
+  argued rather than demonstrated — but it breaks the file's own isNum rule.
+- `-StageGold` re-stages on every `-Attempts` retry, discarding gold the
+  previous attempt earned.
+
+**Adapter**
+- No per-action animation acknowledgement, so nothing sequences action N+1's
+  rebind against action N's running timeline. Documented as a gap, not designed.
+- `roster.js` now supports per-slot AI fill; `battle-host.js` can drop its
+  `aiFillWithResources` workaround and retire `diagnostics.aiFillResourceGaps`.
+
+**Docs known stale** (flagged by agents, not yet reconciled): the staging
+runbook's `parseStageList` mechanism (it guards with `isNum`; it does not write
+NaN) and its "weapon table unmapped" premise (it is decoded);
+`ss2-arena-route.md` §12 on `armourclass` being re-derived mid-battle (it is
+not — that is the whole basis of the armoured family); `ss2-champion-dna.md` §7
+on `fightMode` (the fixtures carry it now).
+
+---
+
+## Working agreement for parallel agents
+
+Exclusive file ownership stated in every prompt; no agent runs a state-mutating
+git command; no agent launches Ruffle or touches the installation, the save or
+the snapshots; adversarial verifiers write nothing at all.
+
+**The limit is the file graph, not the budget.** Writers are capped at ten to
+twelve coherent slices. Auditors have no cap, because they write nothing and
+cannot conflict — and several independent auditors on the same target is a
+quality technique, not duplication. Give each one ONE named claim to break.
 
 ## Keep the project lawful and reversible
 

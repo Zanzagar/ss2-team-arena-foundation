@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-divergence",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "fixtureId": "candidate-probe-power-rollneeded-miss",
+  "observationId": "obs-pr-power-rollneeded-miss-2",
+  "observationDigest": "882d20e41334ec36e5a62a8d0b77bf13fa211ac4772f47d827648cbea4232835",
+  "sessionId": "session-pr-power-rollneeded-miss-2",
+  "recordedAt": "2026-08-30T22:55:18.000Z",
+  "differences": [
+    {
+      "path": "/scenario/attackDirection",
+      "expected": 9,
+      "actual": 10
+    }
+  ]
+}

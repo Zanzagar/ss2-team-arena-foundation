@@ -13,7 +13,6 @@
     "runtimeVerified": false,
     "candidateFlags": [
       "spell-ingress",
-      "spell-id-in-attack-direction",
       "possible-vanilla-armour-equality-bug",
       "armour-left-negative-until-clamp"
     ],
@@ -24,7 +23,7 @@
   },
   "scenario": {
     "attackerSide": "hero",
-    "attackDirection": 30,
+    "spellId": 30,
     "result": null,
     "hero": {
       "magicka": 14,

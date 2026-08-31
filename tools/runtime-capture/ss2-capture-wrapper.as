@@ -38,6 +38,16 @@
  *                  randomBetween samples ONLY, consumed exclusively inside
  *                  the armed action
  *   watchFields    comma list of game-object fields to watch (defaults below)
+ *   navigate       "prisoner" — the staged tutorial fight (stepNavigator), or
+ *                  "arena" — the leveled-gladiator route (stepArenaNavigator)
+ *   arenaTarget    "level:<n>" drive duels until herolevel reaches n, or
+ *                  "tournament" enter the ladder and fight it to rank 1
+ *   arenaPolicy    "aggressive" — the arena route's fight policy; the prisoner
+ *                  route keeps its explicit autopilot step list instead
+ *   arenaCapture   "never" (default) | "champion" | "always" — which bout of a
+ *                  multi-bout arena run may be recorded
+ *   timeOfDayCeiling, sessionLimitSec
+ *                  arena-route abort bounds; see GATE A
  *
  * FlashVars land as _root properties and timeline vars ARE _root properties,
  * so every FlashVar is read before any same-named variable is declared.
@@ -99,6 +109,31 @@ var rawTape = _root.tape;
 var rawWatchFields = _root.watchFields;
 var rawAutopilot = _root.autopilot;
 var rawNavigate = _root.navigate;
+// Arena-route configuration. Read here with every other FlashVar, because
+// timeline variables ARE _root properties and a same-named declaration later
+// in this file would shadow the launcher's value.
+//   arenaTarget       "level:<n>"  drive duels until herolevel reaches n
+//                     "tournament" enter the ladder and fight it to rank 1
+//   arenaPolicy       "aggressive" (default) — close and attack every turn
+//   arenaCapture      "never" (default for a levelling run) | "champion" |
+//                     "always"
+//   timeOfDayCeiling  abort if _global.time_of_day reaches this (default 150;
+//                     the game's special event fires at 200)
+//   sessionLimitSec   abort after this much wall clock (default 900)
+var rawArenaTarget = _root.arenaTarget;
+var rawArenaPolicy = _root.arenaPolicy;
+var rawArenaCapture = _root.arenaCapture;
+var rawArenaStagedLevel = _root.arenaStagedLevel;
+// Combatant state to write before the first action, as `field:value` comma
+// lists. See stepStaging.
+var rawStageHero = _root.stageHero;
+var rawStageVillain = _root.stageVillain;
+// Shop staging: gold to grant, and which shop bands to spend it in.
+var rawStageGold = _root.stageGold;
+var rawShopWeapon = _root.shopWeapon;
+var rawShopArmour = _root.shopArmour;
+var rawTimeOfDayCeiling = _root.timeOfDayCeiling;
+var rawSessionLimitSec = _root.sessionLimitSec;
 var config = {
     gameUrl: _root.gameUrl,
     observationId: _root.observationId,
@@ -142,9 +177,39 @@ function normalizeFieldValue(name, value) {
     if (value === undefined && STATUS_DEFAULT_FALSE[name]) return false;
     return value;
 }
-var watchFields = rawWatchFields != undefined && rawWatchFields != ""
-    ? rawWatchFields.split(",")
-    : DEFAULT_WATCH_FIELDS;
+// watchFields EXTENDS the default list; it does not replace it.
+//
+// Replacing was the original behaviour and it made the flag unusable for what
+// it is needed for. The armoured candidates stage the per-piece <piece>_defence
+// fields, which the default list omits, and ingest refuses a trace whose staged
+// dump lacks a field the fixture stages - so those fixtures could not be
+// captured at all. Replacing the list to add eight names would have dropped the
+// twenty-eight the projection depends on.
+//
+// Extending also keeps the default a fixed point: a session that passes nothing
+// watches exactly what every promoted golden was captured with, so the twenty-two
+// already in the repository stay reproducible. Widening the DEFAULT itself would
+// not have been safe - the watch fires per assignment, so a newly watched field
+// the game happens to write during an armed action would add mutation lines and
+// diverge every existing golden.
+var watchFields = DEFAULT_WATCH_FIELDS;
+if (rawWatchFields != undefined && rawWatchFields != "") {
+    var extraFields = rawWatchFields.split(",");
+    var seenField = {};
+    for (var wf = 0; wf < DEFAULT_WATCH_FIELDS.length; wf++) {
+        seenField[DEFAULT_WATCH_FIELDS[wf]] = true;
+    }
+    watchFields = DEFAULT_WATCH_FIELDS.concat([]);
+    for (var xf = 0; xf < extraFields.length; xf++) {
+        var extraName = extraFields[xf];
+        if (extraName != "" && seenField[extraName] != true) {
+            seenField[extraName] = true;
+            watchFields.push(extraName);
+        }
+    }
+    trace("{\"t\":\"dbg\",\"at\":\"watch-extended\",\"added\":" +
+        (watchFields.length - DEFAULT_WATCH_FIELDS.length) + "}");
+}
 
 // ---------------------------------------------------------------------------
 // Autopilot: performs the session's actions by calling the SAME entry point
@@ -196,9 +261,16 @@ var AUTOPILOT_WAIT_LIMIT = 900;
 // heroactions 52, combatwon 62, combatlost 74.
 // ---------------------------------------------------------------------------
 var CONTROLLERS = [
-    { name: "initialise", from: 1, to: 4, actions: {
-        rest: true, runleft: true, runright: true, frozen: true,
-        burning: true, poisoned: true, life_stolen: true, swap_weapons: true } },
+    // Byte-verified: frames 1-4 contain no Stop, so the controller never
+    // RESTS on the initialise span - it passes straight through to the
+    // selector at frame 4. The autopilot fires only on a settled menu frame,
+    // so nothing here is reachable by it, and the entry exists to make that
+    // diagnosis explicit rather than to offer these as steps. The labels are
+    // the forced phases frame 1 issues to itself (empty-ammo swap, forced
+    // rest, taunted run, and the four damage-over-time flags), not buttons.
+    // swap_weapons is deliberately absent: no controller frame wires it, and
+    // its only manual route is the swap_inventory button on frame 1.
+    { name: "initialise", from: 1, to: 4, actions: {} },
     { name: "longrange_warrior", from: 5, to: 12, actions: {
         taunt: true, rest: true, jumpleft: true, jumpright: true,
         walkleft: true, walkright: true, chargeleft: true, chargeright: true,
@@ -212,10 +284,52 @@ var CONTROLLERS = [
         sniperight: true, taunt: true, rest: true, jumpleft: true,
         jumpright: true, walkleft: true, walkright: true,
         psyche_up: true, wincrowd: true } },
+    // Two different frame numbers are true of this controller and must not be
+    // conflated. Its label OWNS frames 28-51 (the next label, heroactions, is
+    // at 52), but it RESTS on 37, where its Stop is; frame 51 carries a second
+    // Stop no mapped path reaches. This lookup maps a frame to its controller,
+    // so it wants the span it owns - the playhead can legitimately be anywhere
+    // inside it while the controller builds its buttons, and calling frames
+    // 38-51 "no controller" would accrue wait ticks against a step that is
+    // about to become available. Confirmed with the project's own tool:
+    // node tools/inspect-swf.mjs <swf> --labels --timeline 'sprite:862'
+    // `walkleft` was MISSING from this row, and it was not harmless. Every
+    // controller frame carries two mutually exclusive layouts selected by
+    // `gladiator_dir`, and this row models their union - so omitting one
+    // direction told arenaPolicyStep the hero could not walk left. Against a
+    // villain to the left it fell through to `walkright` and walked the hero
+    // AWAY, forever: because the policy always returned something,
+    // autopilotWaitTicks never accumulated and AUTOPILOT_WAIT_LIMIT never
+    // tripped, so the run burned to GATE A's ceiling with no
+    // `autopilot-unavailable` line. That is exactly the "looks like a stall
+    // rather than an error" case this file warns about, produced by this table.
     { name: "closerange_archer", from: 28, to: 51, actions: {
         bash_attack: true, shove: true, taunt: true, jumpleft: true,
-        jumpright: true, walkright: true, psyche_up: true, wincrowd: true } }
+        jumpright: true, walkleft: true, walkright: true,
+        psyche_up: true, wincrowd: true } }
 ];
+
+// The frame gate is necessary but not sufficient: several labels carry their
+// own byte-verified availability conditions on top of the controller.
+// wincrowd needs herolevel >= 3 everywhere; psyche_up needs HEROLEVEL >= 7 on
+// the warrior frames and >= 3 on the archer frames (an earlier revision of
+// this comment misattributed those two constants to a stamina percentage -
+// they are level gates); taunt and rest share one slot, and THAT is the
+// stamina-driven choice, selected by whether stamina is at least half.
+//
+// So a step can sit on the right controller and still not be wired. The table
+// above models the controller, not these conditions, so such a step is issued
+// and getphase sets a decision nothing dispatches. That failure looks like a
+// stall rather than a wait, because the controller IS the expected one -
+// check the trace for an autopilot line with no following action-armed.
+//
+// Open question worth settling before trusting the gate too far: the map's
+// byte-verified reading is that the phase machine never consults the
+// controller frame, which would mean getphase accepts a label whatever is on
+// screen, and the controller only decides which BUTTONS exist. If so this
+// gate is stricter than the build. Being stricter is the safe direction - it
+// fails loudly instead of silently - but it has not been tested by issuing a
+// label to a controller that does not offer it.
 
 function controllerForFrame(frame) {
     for (var ci = 0; ci < CONTROLLERS.length; ci++) {
@@ -273,6 +387,19 @@ function dbgRootFrame() {
 //   step 5  frame == 220      -> gotoAndPlay("arena")                [button 2128]
 //   step 6  battle_started    -> hand over to the autopilot
 // ---------------------------------------------------------------------------
+// KNOWN, DELIBERATE INFIDELITIES IN THIS ROUTE, left in place rather than
+// fixed. A byte-diff of every replication found that navSteps 0, 1, 3 and 5
+// omit the `_root.clicksound2.start()` their buttons (1502, 1535, 1669, 2128)
+// each perform, and that navStep 3 reorders 1669's statements - the button
+// plays the sound fourth, this plays it not at all.
+//
+// They are NOT corrected here, and that is the whole point: this is the route
+// that produced all twenty-two promoted goldens, and "the prisoner route is
+// untouched so the goldens stay reproducible" is worth more than a cosmetic
+// call. None of the omissions can reach an observed channel - a sound start
+// writes no watched field, draws no roll and dispatches no event - so the
+// evidence is unaffected either way. The arena route, which has no committed
+// evidence behind it, does replicate them.
 var navStep = 0;
 var navCooldown = 0;
 var navDiagCount = 0;
@@ -386,9 +513,1100 @@ function stepNavigator() {
     }
 }
 
+// ===========================================================================
+// Arena navigator (navigate=arena): the LEVELED-gladiator route.
+//
+// stepNavigator above is a one-shot linear walk to a single staged fight.
+// This route LOOPS - town square -> foyer -> fight -> reward -> (level up) ->
+// town square - so it is written as a state machine over the screen the game
+// is actually resting on, and re-entering a screen is ordinary rather than a
+// special case. Mapped in docs/integration/ss2-arena-route.md; every action
+// below names the DefineButton2 whose body it replicates statement for
+// statement, so the two can be diffed.
+//
+// This is the first thing this project runs that can permanently change the
+// licensed save: root frame 150 calls save_character() and flushes the
+// SharedObject on EVERY town-square entry (route map section 8). Four hazards
+// an adversarial audit found are therefore enforced here as hard gates,
+// marked GATE A..D. None of them may be relaxed without new evidence.
+//
+//   GATE A  time_of_day advances on a 1.5s WALL-CLOCK setInterval during
+//           everything except the battle. At >= 200 the game enters a special
+//           event that permanently mutates charisma, magicka or gold and then
+//           SAVES it through town square. Re-assert 24 at each town-square
+//           rest (the write buttons 1669 and 2283 both make), log it, and
+//           abort well below 200.
+//   GATE B  root frames 160-169 are that special event. Reaching them at all
+//           is a failed run: abort, never advance through them.
+//   GATE C  button 2283 gates on the DISPLAY MIRROR _root.statpoints, kept by
+//           an enterFrame clip action - not game.hero.statpoints. Pressing in
+//           the same execution slot as the four decrements takes the refusal
+//           arm and parks forever, so the press waits for the mirror to read
+//           zero on a LATER frame.
+//   GATE D  the daybreak wait must abort and log, never re-issue
+//           gotoAndPlay("daybreak"). Re-entering the span mid-way retains the
+//           existing day_night clip and can flip its parity to a permanent
+//           hang.
+// ===========================================================================
+var ARENA_DEFAULT_TIME_OF_DAY_CEILING = 150;
+var ARENA_DEFAULT_SESSION_LIMIT_SEC = 900;
+var ARENA_DAYBREAK_LIMIT_TICKS = 4000;
+var ARENA_MIRROR_LIMIT_TICKS = 1800;
+
+var arenaMode = (rawNavigate == "arena");
+var arenaTargetLevel = 0;
+var arenaWantTournament = false;
+if (rawArenaTarget != undefined && rawArenaTarget != "") {
+    if (rawArenaTarget == "tournament") {
+        arenaWantTournament = true;
+    } else {
+        var arenaTargetParts = rawArenaTarget.split(":");
+        if (arenaTargetParts[0] == "level") arenaTargetLevel = Number(arenaTargetParts[1]);
+    }
+}
+// Capture is OFF by default on this route. A levelling run is not evidence -
+// it is staging - and a trace emitted from one would be an observation of a
+// fight nobody chose. "champion" arms only for the tournament rank-1 bout,
+// which is the one reproducible armoured opponent in the build.
+var arenaCaptureMode = (rawArenaCapture == undefined || rawArenaCapture == "") ? "never" : rawArenaCapture;
+// The herolevel a champion capture is staged for. 0 means "do not check", which
+// is weaker evidence, so a tournament capture run should always set it.
+var arenaStagedLevel = Number(rawArenaStagedLevel);
+if (!(arenaStagedLevel > 0)) arenaStagedLevel = 0;
+// The policy is arena-route-only, and forced off elsewhere rather than merely
+// left unset: a stray arenaPolicy on a prisoner run would replace that route's
+// explicit step list with a greedy fight, and every one of the twenty-two
+// promoted goldens depends on the step list being exactly what was asked for.
+var arenaPolicy = (rawArenaPolicy == undefined || rawArenaPolicy == "") ? "" : rawArenaPolicy;
+if (!arenaMode) arenaPolicy = "";
+if (arenaMode && arenaPolicy == "" && autopilotSteps.length == 0) arenaPolicy = "aggressive";
+var arenaTimeCeiling = Number(rawTimeOfDayCeiling);
+// Clamped BELOW the special event, not merely defaulted. A fat-fingered
+// -TimeOfDayCeiling 1500 would otherwise remove the only protection against
+// the 200-point event that permanently mutates charisma, magicka or gold and
+// saves it. Un-negated `<` so NaN falls to the default.
+if (!(arenaTimeCeiling < 190)) arenaTimeCeiling = ARENA_DEFAULT_TIME_OF_DAY_CEILING;
+var arenaSessionLimitMs = Number(rawSessionLimitSec) * 1000;
+if (!(arenaSessionLimitMs > 0)) arenaSessionLimitMs = ARENA_DEFAULT_SESSION_LIMIT_SEC * 1000;
+
+var arenaPhase = "boot";
+var arenaCooldown = 0;
+var arenaStopped = false;
+var arenaStartMs = getTimer();
+var arenaDaybreakTicks = 0;
+var arenaMirrorWaitTicks = 0;
+var arenaMirrorZeroTicks = 0;
+var arenaPointsSpent = 0;
+var arenaBoutsFought = 0;
+
+// AVM1 NaN handling, and why every numeric test on this route goes through
+// these two helpers.
+//
+// AS2 compiles `a >= b` to `!(a < b)`, and EVERY comparison involving NaN is
+// false - so `NaN >= 150` evaluates to TRUE. `NaN != NaN` is not reliable here
+// either. That is not a hypothetical: the first live arena run aborted on
+// GATE A at 430 ms with `time_of_day` still undefined, because the ceiling test
+// was written `tod >= ceiling` behind a `tod == tod` guard and both misfired.
+//
+// Every value this navigator reads out of the game is undefined until the frame
+// that initialises it, so the safe test is a POSITIVE one that NaN cannot pass:
+// `n > 0 || n <= 0` is true for every real number and false only for NaN.
+// ONLY `<` IS PRIMITIVE. AVM1 has one comparison opcode; `>` is it with the
+// operands swapped, and `>=` and `<=` are it negated. Every comparison with NaN
+// is false, so the negated forms - `>=` and `<=` - both return TRUE for NaN.
+//
+// This bit twice in one run. First `tod >= ceiling` aborted the route at 430 ms
+// with time_of_day still undefined. Then the guard written to prevent that,
+// `n > 0 || n <= 0`, did it again: `NaN <= 0` is `!(0 < NaN)` = `!false` = true,
+// so the guard passed the exact value it existed to reject.
+//
+// The only safe shape is un-negated `<`, twice. Every real number satisfies at
+// least one; NaN satisfies neither.
+function isNum(value) {
+    var n = Number(value);
+    return (n < 1) || (0 < n);
+}
+
+// String(Number(undefined)) is "NaN", which is not JSON. Diagnostic lines are
+// stripped by delog, but a malformed one is unreadable by any tool, so every
+// numeric field goes through here.
+function jnum(value) {
+    if (!isNum(value)) return "null";
+    return String(Number(value));
+}
+
+function arenaLog(step, extra) {
+    var root = gameRoot();
+    var hero = (root == undefined) ? undefined : root.game.hero;
+    trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"" + step + "\"" +
+        ",\"root\":" + (root == undefined ? "null" : jnum(root._currentframe)) +
+        ",\"level\":" + (hero == undefined ? "null" : jnum(hero.herolevel)) +
+        ",\"tod\":" + jnum(_global.time_of_day) +
+        ",\"ms\":" + jnum(getTimer()) +
+        (extra == undefined ? "" : "," + extra) + "}");
+}
+
+function arenaAbort(reason, extra) {
+    if (arenaStopped) return;
+    arenaStopped = true;
+    arenaPhase = "aborted";
+    autopilotAborted = true;
+    arenaLog("ABORT:" + reason, extra);
+}
+
+function arenaFinish(root, why) {
+    if (arenaStopped) return;
+    arenaStopped = true;
+    arenaPhase = "done";
+    autopilotAborted = true;
+    arenaLog("TARGET-REACHED:" + why,
+        "\"vitality\":" + jnum(root.game.hero.vitality) +
+        ",\"hitpointsmax\":" + jnum(root.game.hero.hitpointsmax) +
+        ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+        ",\"experience\":" + jnum(root.game.hero.experience) +
+        ",\"bouts\":" + arenaBoutsFought);
+}
+
+/**
+ * The tournament field is pre-generated once, at foyer frame 22, and is
+ * inspectable only in the window before the first bout. Ranks 2..N come from
+ * randomise_gladiator and are regenerated on every fresh launch, so they can
+ * never clear the two-session gate; rank 1 comes from unleash_hell() and its
+ * hard-coded DNA. Dumping the whole field is what makes that claim checkable
+ * from a run's own log instead of from the map alone.
+ */
+function arenaLogLadder(root) {
+    var count = Number(root.foyer.tournament_max_gladiators);
+    if (!(count > 0)) return;
+    for (var rank = 1; rank <= count; rank++) {
+        var villain = root.game["villain" + rank];
+        if (villain == undefined) continue;
+        trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"ladder\",\"rank\":" + rank +
+            ",\"hitpointsmax\":" + jnum(villain.hitpointsmax) +
+            ",\"armourclass\":" + jnum(villain.armourclass) +
+            ",\"attack\":" + jnum(villain.attack) +
+            ",\"defence\":" + jnum(villain.defence) +
+            ",\"minDamage\":" + jnum(villain.min_damage) +
+            ",\"maxDamage\":" + jnum(villain.max_damage) +
+            ",\"helmet\":" + jnum(villain.helmet) +
+            ",\"greaves\":" + jnum(villain.greaves) + "}");
+    }
+}
+
+/** Every-tick hazard checks. False means the run is over. */
+function arenaGuards(root) {
+    var frame = root._currentframe;
+    // GATE B - the special event screens.
+    //
+    // Two things the precondition that produced this gate got wrong, both
+    // byte-verified since. special_button1/special_button2 are not buttons at
+    // all - they are variable names for the option label text. The actual
+    // mutators are buttons 1819 and 1820, which apply
+    // special_event_good_effect_N / bad_effect_N. And entering frame 160
+    // mutates no hero stat by itself, so aborting here is genuinely safe.
+    //
+    // What the precondition MISSED is the dominant trigger, and it cannot be
+    // prevented from outside the game. Root frame 150 draws
+    // `special_event_chance = 1 + RandomNumber(100)` and jumps here when it is
+    // <= 2 - a flat 2% chance on EVERY town-square entry, wholly independent of
+    // time_of_day, through the RandomNumber opcode no instrumentation can
+    // intercept. A level 1 -> 4 run makes three to six town-square entries, so
+    // roughly 6-12% of otherwise healthy runs end here. That is a budgeted
+    // failure rate, not a defect: re-run from the snapshot.
+    //
+    // The jump happens AFTER save_character at frame 150 +0x0585, so the flush
+    // has already occurred when this aborts - which is exactly why aborting is
+    // safe rather than merely early.
+    if (frame >= 160 && frame <= 169) {
+        arenaAbort("special-event-screen", "\"frame\":" + jnum(frame) +
+            ",\"note\":\"2pct-per-townsquare-entry-or-time-of-day\"");
+        return false;
+    }
+    // Terminal screens: gameover (235), bugs (242), gameover_demo (252),
+    // enter_highscore (263). Nothing on this route is above 234.
+    if (frame >= 235) {
+        arenaAbort("terminal-screen", "\"frame\":" + jnum(frame));
+        return false;
+    }
+    // GATE A - both halves. The clock ceiling is the game's own state; the
+    // wall clock catches a stall that never advances it.
+    // Only tested once the game has actually initialised the clock: before
+    // that it is undefined, and `undefined >= ceiling` is TRUE in AVM1.
+    if (isNum(_global.time_of_day)) {
+        var tod = Number(_global.time_of_day);
+        if (!(tod < arenaTimeCeiling)) {
+            arenaAbort("time-of-day-ceiling",
+                "\"tod\":" + jnum(tod) + ",\"ceiling\":" + jnum(arenaTimeCeiling));
+            return false;
+        }
+    }
+    if (getTimer() - arenaStartMs > arenaSessionLimitMs) {
+        arenaAbort("session-wall-clock", "\"limitMs\":" + jnum(arenaSessionLimitMs));
+        return false;
+    }
+    return true;
+}
+
+function arenaReachedTarget(root) {
+    if (arenaWantTournament) return false;
+    if (!(arenaTargetLevel > 0)) return false;
+    // An undefined herolevel must NOT read as "target reached" - which is what
+    // a bare >= would do here.
+    if (!isNum(root.game.hero.herolevel)) return false;
+    return !(Number(root.game.hero.herolevel) < arenaTargetLevel);
+}
+
+/** A fresh bout re-arms the fight policy; the prisoner route never loops. */
+function arenaResetAutopilot() {
+    // Staging is PER BOUT, not per process. It was global, so on a tournament
+    // run bout 1 consumed the whole 20-tick budget and the champion bout - the
+    // only one that is ever evidence - was never staged at all.
+    stageTicks = 0;
+    stageReported = false;
+    autopilotIndex = 0;
+    autopilotIdleTicks = 0;
+    autopilotCooldown = 0;
+    autopilotWaitTicks = 0;
+    autopilotAborted = false;
+}
+
+// ===========================================================================
+// Shopping: equipping the gladiator through the game's own purchase path.
+//
+// This is the RIGHT way to make a gladiator stronger, and it is worth saying
+// why, because the wrong way was tried first and looked like it worked.
+//
+// battlevalues DERIVES the damage fields:
+//     min_damage = round(strength * 2) + weapon_min_damage      (+0x3356)
+//     max_damage = round(strength * 2) + weapon_max_damage      (+0x3386)
+// where weapon_min/max_damage come from _root.weapon<n>[3] and [4] - eighty
+// root variables, six-element arrays, not a `weapons` collection. (An earlier
+// revision of this comment dropped the factor of two and invented the
+// collection; the conclusion was right, the formula was not.)
+// (root frame 35, battlevalues +0x3356 and +0x3386). So staging `min_damage`
+// writes the OUTPUT of a formula the game recomputes from its inputs. Eleven
+// staged fields were read back correctly at battle construction and changed
+// nothing about the fight, because the number that matters is regenerated from
+// `strength` and `hero.weapon`.
+//
+// Buying changes an INPUT. `hero.weapon` is persistent, survives every
+// battlevalues call, every save and every relaunch - and the only thing this
+// wrapper has to write is GOLD, which is not a combat input at all: no site in
+// attack_chances, the damage roll, the deflection threshold or the controller
+// selector reads goldpieces. It is the least invasive intervention available.
+//
+// The item handlers are genuinely callable. weaponbuttons() assigns onRelease
+// as a script-defined function (sprite 1961 frame 1, DefineFunction2 at
+// +0x08cb, calling buyweapon at +0x0941), exactly like the slot handler the
+// prisoner navigator already invokes at navStep 2. Only the `getitem` confirm
+// is a DefineButton2 and has to be replicated.
+//
+// Item selection is by TRIAL, high id to low, rather than by modelling the
+// gate. buyweapon refuses an item the hero does not qualify for by playing the
+// `angry` page instead of `getitem`, so the wrapper offers an id and reads
+// which page the shop went to. That is the game answering the question, which
+// is both more robust than a reimplemented gate and less to get wrong.
+// ===========================================================================
+var stageGold = Number(rawStageGold);
+if (!(stageGold > 0)) stageGold = 0;
+var shopWeaponTop = Number(rawShopWeapon);
+if (!(shopWeaponTop > 0)) shopWeaponTop = 0;
+// ARMOUR BUYING IS NOT IMPLEMENTED, and is refused rather than half-done.
+//
+// Two independent defects, both byte-verified. shopConfirm's assignment block
+// is guarded `if (which == "weapon")`, so for armour it would subtract gold and
+// call constructDNA WITHOUT EQUIPPING ANYTHING - a pure gold sink. And the real
+// confirm (character 1907) dispatches on `armourpiece` (+0x017b: 1 boot,
+// 2 shinguard, 3 greaves, 4 breastplate, 5 gauntlet, 6 shoulderguard, ...),
+// which getarmourinfo sets on rollover - a mapping this wrapper does not
+// implement. The page list was wrong too: armourbuttons() is called from
+// sprite 1909 frames 48..177, never from `browse`, so the handlers could never
+// have been found.
+//
+// A half-implemented purchase that spends a licensed gladiator's gold and
+// equips nothing is worse than no purchase, so this refuses loudly.
+var shopArmourTop = Number(rawShopArmour);
+if (!(shopArmourTop > 0)) shopArmourTop = 0;
+if (shopArmourTop > 0) {
+    trace("{\"t\":\"dbg\",\"at\":\"arena\",\"step\":\"shop-armour-unimplemented\"" +
+        ",\"requested\":" + jnum(shopArmourTop) + "}");
+    shopArmourTop = 0;
+}
+
+var goldStaged = false;
+var heroStagedInTown = false;
+var shopDone = (shopWeaponTop <= 0 && shopArmourTop <= 0);
+var shopKind = "weapon";      // "weapon" -> "armour" -> done
+var shopItem = 0;             // the id currently being offered
+var shopTries = 0;
+var shopScanTicks = 0;
+var shopBought = false;
+var shopSettleFrame = -1;
+var shopSettleTicks = 0;
+// Category pages, highest tier first. Weapon shop labels are byte-verified in
+// the route map: bashing1..3 at 48/56/64, hacking1..3 at 72/80/88,
+// slashing1..3 at 96/106/116, ranged1..3 at 124/131/139, getitem at 147. The
+// armoury uses per-piece pages between 48 and 177 with getitem at 184.
+var WEAPON_PAGES = ["hacking3", "bashing3", "slashing3", "hacking2", "bashing2",
+                    "slashing2", "hacking1", "bashing1", "slashing1"];
+var ARMOUR_PAGES = ["browse"];
+var shopPages = WEAPON_PAGES;
+var shopPageIndex = 0;
+var SHOP_MAX_TRIES = 90;
+
+function shopClip(which) {
+    return which == "weapon" ? gameRoot().weaponsmith : gameRoot().armoursmith;
+}
+
+/** The getitem confirm body: character 1952 (weapons) / 1907 (armour). */
+function shopConfirm(which) {
+    var root = gameRoot();
+    var clip = shopClip(which);
+    var hero = root.game.hero;
+    // REFUSE ON UNREADABLE OPERANDS. This is not defensive padding - it is a
+    // repair. The first version read `clip.itemcost` and `clip.itemnumber`
+    // straight off the shop clip on the strength of a doc summary; live, both
+    // came back undefined, `goldpieces -= undefined` produced NaN, and
+    // check_for_nan then "repaired" the gladiator's gold to herolevel * 1000.
+    // A staged 5,000,000 became exactly 4,000.
+    //
+    // The plain guard `goldpieces < itemcost` did not stop it, for the third
+    // time in this file: EVERY comparison with NaN is false in AVM1, so a
+    // less-than test passes an unreadable operand straight through. Numbers
+    // read out of the game go through isNum first, always.
+    if (!isNum(clip.itemcost) || !isNum(clip.itemnumber) || !isNum(hero.goldpieces)) {
+        arenaLog("shop-operands-unreadable",
+            "\"kind\":\"" + which + "\"" +
+            ",\"itemcost\":\"" + String(clip.itemcost) + "\"" +
+            ",\"itemnumber\":\"" + String(clip.itemnumber) + "\"" +
+            ",\"goldpieces\":\"" + String(hero.goldpieces) + "\"" +
+            ",\"shopFrame\":" + jnum(clip._currentframe));
+        return false;
+    }
+    if (Number(hero.goldpieces) < Number(clip.itemcost)) return false;
+    if (Number(clip.itemcost) != 0) root.coins.start();
+    if (which == "weapon") {
+        if (String(clip.itemtype) != "ranged") {
+            hero.weapon = clip.itemnumber;
+            hero.weapon_enchantment_potency = 1;
+            hero.weapon_enchantment_type = 1;
+        } else {
+            hero.secondary_weapon = clip.itemnumber;
+            hero.secondary_weapon_enchantment_potency = 1;
+            hero.secondary_weapon_enchantment_type = 1;
+        }
+    }
+    hero.goldpieces -= Number(clip.itemcost);
+    root.constructDNA();
+    clip.itempurchased = "yes";
+    clip.gotoAndPlay("browse");
+    return true;
+}
+
+function stepArenaNavigator() {
+    if (!arenaMode) return;
+    if (arenaStopped) return;
+    var root = gameRoot();
+    if (root == undefined) return;
+    if (!arenaGuards(root)) return;
+    if (arenaCooldown > 0) { arenaCooldown--; return; }
+    var frame = root._currentframe;
+
+    if (arenaPhase == "boot") {
+        // Frame 10 performs the SharedObject read; so_local proves it ran.
+        if (root.so_local == undefined) return;
+        arenaLog("title");
+        root.clicksound2.start();                         // button 1502
+        root.gotoAndPlay("new_or_continue");
+        arenaPhase = "slots"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "slots") {
+        if (frame < 52) return;
+        arenaLog("new_or_continue");
+        root.clicksound2.start();                         // button 1535
+        root.gotoAndPlay("load_saved_gladiators");
+        arenaPhase = "load"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "load") {
+        if (typeof root.get_char1.onRelease != "function") return;
+        if (root.so_local.max_gladiators == undefined) return;
+        if (root.so_local.max_gladiators < 1) return;
+        arenaLog("slot-list");
+        root.get_char1.onRelease();
+        arenaPhase = "confirm"; arenaCooldown = 15; return;
+    }
+    if (arenaPhase == "confirm") {
+        // initcharacter populates the combat object field by field; counting
+        // properties is naming-agnostic, exactly as in stepNavigator.
+        var heroProps = 0;
+        for (var heroKey in root.game.hero) heroProps++;
+        if (heroProps < 6) return;
+        // Frame 113 routes on herolevel and NEITHER arm fires for 0,
+        // undefined or a non-number - the playhead would then run on into the
+        // dungeon span and play the prologue regardless. Refuse to jump until
+        // the value is a number.
+        // `loadedLevel != loadedLevel` is NOT a working NaN test in AVM1, and
+        // `loadedLevel < 1` is false for NaN - so the original pair of checks
+        // let exactly the value they exist to catch straight through.
+        if (!isNum(root.game.hero.herolevel)) {
+            arenaAbort("herolevel-not-a-number",
+                "\"raw\":\"" + String(root.game.hero.herolevel) + "\"");
+            return;
+        }
+        var loadedLevel = Number(root.game.hero.herolevel);
+        if (loadedLevel < 1) {
+            arenaAbort("herolevel-below-one", "\"level\":" + jnum(loadedLevel));
+            return;
+        }
+        arenaLog("hero-loaded", "\"props\":" + heroProps +
+            ",\"currentTournament\":" + jnum(root.game.hero.current_tournament) +
+            ",\"vitality\":" + jnum(root.game.hero.vitality) +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces));
+        if (arenaReachedTarget(root)) { arenaFinish(root, "already-at-level"); return; }
+        // button 1669, verbatim - including the clicksound2.start() an earlier
+        // revision of this step dropped. save_character writes
+        // so_local["character" + _global.current_character], so the assignment
+        // below is what keeps a flush from minting a "characterundefined" slot.
+        _global.current_character = root.char_to_load;
+        root.delete_tooltips();
+        _global.gamephase = 1;
+        root.hero.removeMovieClip();
+        _global.time_of_day = 24;
+        root.game.hero.score = 0;
+        root.clicksound2.start();
+        root.gotoAndPlay("daybreak");
+        arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 10; return;
+    }
+    if (arenaPhase == "daybreak") {
+        // Frame 113 routes: herolevel > 1 -> townsquare (150), == 1 -> dungeon
+        // (114). Both arms additionally require day_night._currentframe == 80
+        // EXACTLY, and day_night stops at 107 and never returns, so a phase
+        // slip hangs the screen forever.
+        if (frame >= 150 && frame <= 159) {
+            arenaLog("routed-townsquare"); arenaPhase = "town"; return;
+        }
+        if (frame >= 114 && frame <= 149) {
+            arenaLog("routed-dungeon-prologue");
+            arenaPhase = "prologue"; return;
+        }
+        arenaDaybreakTicks++;
+        if (arenaDaybreakTicks > ARENA_DAYBREAK_LIMIT_TICKS) {
+            // GATE D. Abort and log; do NOT re-issue gotoAndPlay("daybreak").
+            arenaAbort("daybreak-timeout",
+                "\"frame\":" + jnum(frame) +
+                ",\"dayNight\":" + jnum(root.day_night._currentframe) +
+                ",\"ticks\":" + arenaDaybreakTicks);
+        }
+        return;
+    }
+    if (arenaPhase == "prologue") {
+        // The level-1 arm. The prologue skins the hero, builds the prisoner
+        // via unleash_hell(0) and sets fight_mode itself before jumping to
+        // arena_intro. It self-advances; nothing here may hurry it.
+        if (frame >= 214 && frame <= 220) { arenaPhase = "intro"; }
+        return;
+    }
+    if (arenaPhase == "town") {
+        if (frame < 150 || frame > 159) return;
+        // GATE A. THIS IS NOT A BUTTON REPLICATION, and an earlier version of
+        // this comment implied it was by citing buttons 1669 and 2283.
+        //
+        // Those two write 24 on their own one-shot transitions. NOTHING in the
+        // build writes it on every town-square entry, which is what this does -
+        // so the route SUPPRESSES A GAME MECHANIC: `time_of_day` advances on a
+        // 1.5s wall-clock interval and drives the day counter, the lighting and
+        // the >= 200 special event, and root frame 150's save_character
+        // persists the frozen value into the licensed save. The logs show it
+        // plainly, entry after entry: todBefore 26 -> todAfter 24.
+        //
+        // It stays, because the event it prevents permanently mutates charisma,
+        // magicka or gold and saves that too - a worse alteration than freezing
+        // a clock. But it is an alteration, it is owner-approved as a safety
+        // gate, and it must not be described as something a button does.
+        var todBefore = _global.time_of_day;
+        _global.time_of_day = 24;
+        arenaLog("townsquare",
+            "\"todBefore\":" + jnum(todBefore) + ",\"todAfter\":24" +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+            ",\"bouts\":" + arenaBoutsFought);
+        if (arenaReachedTarget(root)) { arenaFinish(root, "level"); return; }
+        // Gold is staged HERE and nowhere else: the town square is where the
+        // shops are reachable from, and where save_character persists it. It is
+        // the only field this route writes outside a staged battle, chosen
+        // because no combat site reads it.
+        if (stageGold > 0 && !goldStaged) {
+            goldStaged = true;
+            root.game.hero.goldpieces = stageGold;
+            root.constructDNA();
+            arenaLog("staged-gold", "\"goldpieces\":" + jnum(root.game.hero.goldpieces));
+        }
+        // Hero staging is applied HERE as well as at battle start, because the
+        // shop gate reads the hero's attributes and the shop runs before any
+        // battle. Byte-verified: the item onRelease at weaponbuttons +0x0929
+        // branches on `item.itemlevel > item.attribute_required` to a refusal
+        // reading "you need at least <itemlevel>", and `attribute_required` is
+        // the HERO's governing attribute for that band, assigned per item by
+        // weaponbuttons(). A vitality-only gladiator has base strength and
+        // speed, so every worthwhile weapon is refused - observed live, twenty
+        // five successive refusals from item 40 down to 14.
+        //
+        // Unlike the damage fields, an ATTRIBUTE is a genuine battlevalues
+        // input rather than one of its outputs, so staging it is not writing
+        // over a formula the game will recompute.
+        // ONLY the attributes the shop gate reads, and only when shopping.
+        //
+        // An earlier revision applied the WHOLE -StageHero list here, and root
+        // frame 150's save_character then persisted every one of them - so a
+        // battle-scoped staging string permanently rewrote the saved
+        // gladiator's stats. Observed live: `staged-hero-town
+        // hero.strength=80,hero.speed=80` followed by a flush, leaving the
+        // licensed save 691 bytes against the snapshot's 687.
+        //
+        // Battle-scoped fields (hitpoints, min_damage, the armour pieces) belong
+        // to stepStaging, which runs past the last save site and is reverted
+        // with the snapshot. Only strength, speed and charisma are gate
+        // operands, and only those are written here.
+        if (!heroStagedInTown && shopWeaponTop > 0 && stageHeroFields.length > 0) {
+            heroStagedInTown = true;
+            var wrote = "";
+            for (var sf = 0; sf < stageHeroFields.length; sf++) {
+                var name = stageHeroFields[sf].field;
+                if (name != "strength" && name != "speed" && name != "charisma") continue;
+                root.game.hero[name] = stageHeroFields[sf].value;
+                wrote += name + "=" + String(root.game.hero[name]) + " ";
+            }
+            if (wrote != "") {
+                root.constructDNA();
+                arenaLog("staged-hero-town",
+                    "\"applied\":\"" + wrote + "\",\"note\":\"shop-gate-operands-only\"");
+            }
+        }
+        if (!shopDone) {
+            if (shopKind == "weapon" && shopWeaponTop > 0) {
+                shopItem = shopWeaponTop; shopTries = 0; shopScanTicks = 0;
+                shopPages = WEAPON_PAGES; shopPageIndex = 0;
+                arenaLog("shop-enter", "\"kind\":\"weapon\",\"topItem\":" + jnum(shopItem) +
+                    ",\"gold\":" + jnum(root.game.hero.goldpieces));
+                root.gotoAndPlay("weaponshop");           // button 1796
+                arenaPhase = "shop-open"; arenaCooldown = 25; return;
+            }
+            if (shopKind == "weapon") shopKind = "armour";
+            if (shopKind == "armour" && shopArmourTop > 0) {
+                shopItem = shopArmourTop; shopTries = 0; shopScanTicks = 0;
+                shopPages = ARMOUR_PAGES; shopPageIndex = 0;
+                arenaLog("shop-enter", "\"kind\":\"armour\",\"topItem\":" + jnum(shopItem) +
+                    ",\"gold\":" + jnum(root.game.hero.goldpieces));
+                root.gotoAndPlay("armoury");              // button 1792
+                arenaPhase = "shop-open"; arenaCooldown = 25; return;
+            }
+            shopDone = true;
+        }
+        // Button 1800's ENTIRE body is this one call - 42 bytes, no sound. An
+        // earlier revision of this step added clicksound2.start() here, which
+        // this file has no licence to do while claiming to replicate a button
+        // body statement for statement.
+        root.gotoAndPlay("foyer");                        // button 1800
+        arenaPhase = "foyer"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "shop-open") {
+        var shop = shopClip(shopKind);
+        if (shop == undefined) return;
+        if (shopTries >= SHOP_MAX_TRIES || shopItem < 1) {
+            arenaLog("shop-exhausted", "\"kind\":\"" + shopKind + "\",\"tries\":" + shopTries);
+            arenaPhase = "shop-leave"; return;
+        }
+        // SCAN downward for the highest id the shop has actually wired, rather
+        // than waiting on one specific id. A live run entered the weapon shop,
+        // reached its Stop frame at root 186, and then sat until GATE A's
+        // ceiling because item 60 had no onRelease - the handlers are not
+        // necessarily wired for every id in the band at the browse page.
+        // Asking the clip what it offers is both more robust and more honest
+        // than modelling which ids exist.
+        var offered = 0;
+        for (var probe = shopItem; probe >= 1; probe--) {
+            var candidate = shop["item" + probe];
+            if (candidate != undefined && typeof candidate.onRelease == "function") {
+                offered = probe; break;
+            }
+        }
+        if (offered == 0) {
+            // The item handlers do not exist on the shop's entry or browse
+            // pages. Probed live: at shop frames 38 and 47 the clip carried
+            // `weaponbuttons`, `buyweapon`, `getweaponinfo` and a set of
+            // `instanceNNN` slots, and NO `item<n>` property at all. The
+            // per-item onRelease bindings are wired by the CATEGORY page, so
+            // the shop has to be sent to one first.
+            //
+            // Pages are tried highest tier first, because the highest tier the
+            // gate allows is the one worth buying. Each is given a moment to
+            // wire its items before the next is tried.
+            shopScanTicks++;
+            if ((shopScanTicks % 60) == 1 && shopPageIndex < shopPages.length) {
+                var page = shopPages[shopPageIndex];
+                shopPageIndex++;
+                arenaLog("shop-page", "\"kind\":\"" + shopKind + "\",\"page\":\"" + page +
+                    "\",\"shopFrame\":" + jnum(shop._currentframe));
+                shop.gotoAndPlay(page);
+                return;
+            }
+            if (shopScanTicks == 1 || shopScanTicks == 200) {
+                // Name what the clip DOES carry, so one run settles the shape
+                // instead of another blind guess.
+                var names = "";
+                var seen = 0;
+                for (var key in shop) {
+                    if (seen >= 24) break;
+                    names += key + " "; seen++;
+                }
+                arenaLog("shop-no-handlers",
+                    "\"kind\":\"" + shopKind + "\",\"topItem\":" + jnum(shopItem) +
+                    ",\"shopFrame\":" + jnum(shop._currentframe) +
+                    ",\"ticks\":" + shopScanTicks +
+                    ",\"props\":\"" + names + "\"");
+            }
+            if (shopScanTicks > 900) {
+                arenaLog("shop-unreachable", "\"kind\":\"" + shopKind + "\"");
+                arenaPhase = "shop-leave";
+            }
+            return;
+        }
+        shopItem = offered;
+        shopTries++;
+        var chosen = shop["item" + shopItem];
+        // THE ROLLOVER IS NOT OPTIONAL. `itemnumber`, `itemcost` and `itemtype`
+        // are set by getweaponinfo, which weaponbuttons binds as onRollOver
+        // (+0x08a0) - NOT by onRelease (+0x08cb) and NOT by buyweapon, whose
+        // body begins at +0x0c17 with `goldpieces = hero.goldpieces` and a jump
+        // to getitem. getweaponinfo derives the id from the clip's own name
+        // (`item39` -> 39, +0x09ac) and computes the whole quote at +0x0a42.
+        //
+        // Calling onRelease alone therefore buys whatever `itemnumber` happens
+        // to hold - and weaponbuttons leaves it at 20, because it assigns
+        // `itemnumber = weap_i` at +0x07f6 on the common path of its 1..80 loop.
+        // That is exactly what happened live: item 39 was asked for, hero.weapon
+        // became 20, and itemcost was undefined.
+        // BOTH are guarded, symmetrically. An earlier version guarded only the
+        // rollover, which left the exact failure the guard exists to prevent
+        // one missing binding away: without the rollover, `itemnumber` is stale
+        // at 20 and `itemcost` undefined, so pressing buy alone purchases item
+        // 20 at an unreadable cost - which is what happened live.
+        if (typeof chosen.onRollOver != "function" || typeof chosen.onRelease != "function") {
+            arenaLog("shop-item-unbound", "\"item\":" + jnum(shopItem) +
+                ",\"hasRollOver\":" + (typeof chosen.onRollOver == "function" ? "true" : "false") +
+                ",\"hasRelease\":" + (typeof chosen.onRelease == "function" ? "true" : "false"));
+            shopItem--;
+            arenaCooldown = 4; return;
+        }
+        chosen.onRollOver();
+        chosen.onRelease();
+        arenaPhase = "shop-answer"; arenaCooldown = 8; return;
+    }
+    if (arenaPhase == "shop-answer") {
+        // The game answers by which page it played: `getitem` means the hero
+        // qualifies, `angry` means it does not. Reading the answer beats
+        // reimplementing the gate.
+        var answering = shopClip(shopKind);
+        if (answering == undefined) return;
+        var shopFrame = Number(answering._currentframe);
+        var getitemFrame = (shopKind == "weapon") ? 147 : 184;
+        if (shopFrame >= getitemFrame) {
+            // Let the getitem page SETTLE before reading its operands. The
+            // confirm button reads `itemcost` as a bare GetVariable resolving on
+            // the shop clip's own timeline, and buyweapon populates it on the
+            // way in - so confirming on the first frame that crosses the label
+            // reads it before it exists, which is how a purchase once ran with
+            // an undefined cost.
+            if (shopSettleFrame != shopFrame) { shopSettleFrame = shopFrame; return; }
+            shopSettleTicks++;
+            if (shopSettleTicks < 3) return;
+            shopSettleTicks = 0;
+            if (shopConfirm(shopKind)) {
+                shopBought = true;
+                arenaLog("shop-bought",
+                    "\"kind\":\"" + shopKind + "\",\"item\":" + jnum(shopItem) +
+                    ",\"cost\":" + jnum(answering.itemcost) +
+                    ",\"weapon\":" + jnum(root.game.hero.weapon) +
+                    ",\"goldLeft\":" + jnum(root.game.hero.goldpieces));
+                arenaPhase = "shop-leave"; arenaCooldown = 10; return;
+            }
+            // Refused on cost: try a cheaper item.
+            shopItem--;
+            arenaPhase = "shop-open"; arenaCooldown = 8; return;
+        }
+        if (shopFrame >= 27 && shopFrame < getitemFrame) {
+            shopItem--;                                    // refused; step down
+            arenaPhase = "shop-open"; arenaCooldown = 8; return;
+        }
+        return;
+    }
+    if (arenaPhase == "shop-leave") {
+        // NO BUTTON PERFORMS THIS TRANSITION when nothing was bought, and that
+        // is worth stating rather than hiding. The weaponsmith's exit is button
+        // 1929: `clicksound2.start(); if (itempurchased == null) {
+        // gotoAndPlay("angry"); play(); } else if (itempurchased == "yes") {
+        // _root.gotoAndPlay("townsquare"); }`. You cannot leave for the town
+        // square without having bought something - you get the angry page, and
+        // only ITS button exits.
+        //
+        // So on the bought path this is faithful, and on the shop-exhausted,
+        // shop-unreachable and operands-unreadable paths it is a transition no
+        // single press can make from that state. It is kept because the
+        // alternative is parking the run inside a shop until GATE A's ceiling,
+        // and because those three paths produce no evidence by construction -
+        // but a capture must never be taken from a run that took one of them.
+        if (shopKind != "weapon" || shopDone) {
+            arenaLog("shop-leave", "\"kind\":\"" + shopKind + "\"" +
+                ",\"boughtPath\":" + (shopBought ? "true" : "false"));
+        }
+        if (shopKind == "weapon") shopKind = "armour";
+        else shopDone = true;
+        root.clicksound2.start();                         // button 1929's first
+        root.gotoAndPlay("townsquare");                   // statement
+        arenaPhase = "town"; arenaCooldown = 25; return;
+    }
+    if (arenaPhase == "foyer") {
+        if (frame != 208) return;
+        var foyer = root.foyer;
+        if (foyer == undefined) return;
+        // A tournament ALREADY IN PROGRESS never shows the browse screen.
+        // Foyer frame 1 branches on tournament_in_progress and jumps straight
+        // to "tournament" (frame 22, resting at 36); "browse" (11, resting at
+        // 21) is the other arm. Waiting for frame 21 here parked every
+        // between-bout return for the full session limit - observed live: bout
+        // one was won, the reward arm sent the root to foyer, and the run then
+        // sat until GATE A's ceiling 180 seconds later.
+        if (_global.tournament_in_progress == true) {
+            arenaPhase = "ladder"; return;
+        }
+        if (foyer._currentframe != 21) return;            // browse has settled
+        var required = Number(foyer.tournament_level_required);
+        var heroLevel = Number(root.game.hero.herolevel);
+        arenaLog("foyer-browse",
+            "\"required\":" + jnum(required) +
+            ",\"duelVisible\":" + (foyer.duel_button._visible == true ? "true" : "false") +
+            ",\"tournamentNumber\":" + jnum(foyer.tournament_number) +
+            ",\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"inProgress\":" + (_global.tournament_in_progress == true ? "true" : "false"));
+        if (arenaWantTournament) {
+            // The tournament button refuses with a bubble message below the
+            // gate, so the check is the game's own and must pass first.
+            // Both sides must be real numbers before the comparison means
+            // anything: an undefined required level would otherwise read as
+            // "gate met" and enter a tournament the hero does not qualify for.
+            if (!isNum(root.game.hero.herolevel) || !isNum(foyer.tournament_level_required) ||
+                heroLevel < required) {
+                arenaAbort("tournament-gate-not-met",
+                    "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
+                return;
+            }
+            root.clicksound2.start();                     // button 2069 opens
+            _global.fight_mode = "tournament";            // with the sound
+            foyer.gotoAndPlay("tournament");
+            foyer.play();
+            arenaPhase = "ladder"; arenaCooldown = 20; return;
+        }
+        // The duel and tournament options are mutually exclusive: the duel
+        // button is hidden exactly when herolevel >= tournament_level_required.
+        if (foyer.duel_button._visible != true) {
+            arenaAbort("duel-button-hidden",
+                "\"level\":" + jnum(heroLevel) + ",\"required\":" + jnum(required));
+            return;
+        }
+        _global.fight_mode = "duel";                      // button 2066, verbatim
+        var maxArena;
+        if      (heroLevel < 15) maxArena = 2;
+        else if (heroLevel < 27) maxArena = 3;
+        else if (heroLevel < 36) maxArena = 4;
+        else if (heroLevel < 48) maxArena = 5;
+        else                     maxArena = 6;
+        // The body draws a real RandomNumber here; AS2 random(n) compiles to
+        // the same opcode. Substituting a constant would make the venue a
+        // wrapper decision rather than the game's.
+        _global.current_arena = 1 + random(maxArena);
+        root.clicksound2.start();
+        root.gotoAndPlay("arena_intro");
+        arenaPhase = "intro"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "ladder") {
+        var ladderFoyer = root.foyer;
+        if (ladderFoyer == undefined || ladderFoyer._currentframe != 36) return;
+        if (root.game.villain == undefined) return;
+        arenaLogLadder(root);
+        arenaLog("ladder-ready",
+            "\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"maxGladiators\":" + jnum(ladderFoyer.tournament_max_gladiators) +
+            ",\"arena\":" + jnum(_global.current_arena));
+        root.gotoAndPlay("arena_intro");                  // button 2071
+        arenaPhase = "intro"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "intro") {
+        if (frame != 220) return;                         // arena_intro's Stop
+        arenaLog("versus",
+            "\"fightMode\":\"" + String(_global.fight_mode) + "\"" +
+            ",\"arena\":" + jnum(_global.current_arena) +
+            ",\"ranking\":" + jnum(root.game.hero.tournament_ranking) +
+            ",\"villainName\":\"" + String(root.game.villain.character_name) + "\"" +
+            ",\"villainHitpointsmax\":" + jnum(root.game.villain.hitpointsmax) +
+            ",\"villainArmourclass\":" + jnum(root.game.villain.armourclass));
+        root.clicksound2.start();                         // button 2128
+        _global.fightselected = false;
+        root.gotoAndPlay("arena");
+        arenaPhase = "fight"; arenaCooldown = 30; return;
+    }
+    if (arenaPhase == "fight") {
+        if (_global.battle_started != true) return;
+        arenaBoutsFought++;
+        arenaResetAutopilot();
+        arenaLog("battle-ready", "\"bout\":" + arenaBoutsFought +
+            ",\"policy\":\"" + arenaPolicy + "\"" +
+            ",\"captureMode\":\"" + arenaCaptureMode + "\"");
+        arenaPhase = "in-battle"; return;
+    }
+    if (arenaPhase == "in-battle") {
+        var arenaClip = root.arena;
+        if (arenaClip == undefined) return;
+        var arenaFrame = Number(arenaClip._currentframe);
+        // Arena clip labels: combat_exp 222 (Stop 249), combat_lost 250
+        // (Stop 334). The loss span is terminal for this run - button 2244's
+        // body is not mapped, and guessing at it is exactly the class of
+        // shortcut this project does not take.
+        if (arenaFrame >= 250) {
+            arenaAbort("battle-lost", "\"arenaFrame\":" + jnum(arenaFrame) +
+                ",\"bout\":" + arenaBoutsFought);
+            return;
+        }
+        if (arenaClip.fight_win_stuff == undefined) return;
+        if (arenaClip.fight_win_stuff.button_yes._visible != true) return;
+        arenaPhase = "reward"; return;
+    }
+    if (arenaPhase == "reward") {
+        var rewardArena = root.arena;
+        if (rewardArena == undefined) return;
+        var winPanel = rewardArena.fight_win_stuff;
+        if (winPanel == undefined) return;
+        // The reward button only EXISTS after the two-second exp-bar tween
+        // finishes, and nextleveltext is written inside that tween's callback -
+        // so this visibility check is what stops the branch selection racing
+        // the string it reads.
+        if (winPanel.button_yes._visible != true) return;
+        var nextLevelText = String(winPanel.nextleveltext);
+        var rewardLevel = Number(root.game.hero.herolevel);
+        var currentTournament = Number(root.game.hero.current_tournament);
+        var ranking = Number(root.game.hero.tournament_ranking);
+        var gameMode = String(_global.game_mode != undefined ? _global.game_mode : root.game_mode);
+        arenaLog("reward",
+            "\"nextleveltext\":\"" + nextLevelText + "\"" +
+            ",\"gameMode\":\"" + gameMode + "\"" +
+            ",\"experience\":" + jnum(root.game.hero.experience) +
+            ",\"experienceneeded\":" + jnum(root.game.hero.experienceneeded) +
+            ",\"gold\":" + jnum(root.game.hero.goldpieces) +
+            ",\"ranking\":" + jnum(ranking) +
+            ",\"currentTournament\":" + jnum(currentTournament));
+        // button 775. Exactly one arm, chosen the way the button chooses it.
+        root.clicksound2.start();
+        if (currentTournament >= 19 && ranking <= 2) {
+            arenaAbort("final-victory-arm",
+                "\"currentTournament\":" + jnum(currentTournament));
+            return;
+        }
+        if (nextLevelText == "YOU HAVE LEVELLED UP!" &&
+            ((gameMode == "demo" && rewardLevel < 12) ||
+             (gameMode == "full" && rewardLevel < 50))) {
+            root.game.hero.experience = root.game.hero.experienceneeded + 1;
+            root.game.hero.herolevel++;
+            root.battlevalues(root.game.hero);
+            root.constructDNA();
+            arenaPointsSpent = 0;
+            arenaMirrorWaitTicks = 0;
+            arenaMirrorZeroTicks = 0;
+            root.gotoAndPlay("levelup");
+            arenaPhase = "levelup"; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_in_progress == true) {
+            root.gotoAndPlay("foyer");
+            arenaPhase = "foyer"; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_complete == true) {
+            _global.tournament_complete = null;
+            _global.time_of_day = 1 + random(23);
+            _global.day++;
+            var chanceOfRain = 1 + random(100);
+            _global.rain_chance = chanceOfRain > 80;
+            _global.special_for_day = false;
+            root.game.hero.days_in_arena = _global.day;
+            _global.cloudframe = 1 + random(16);
+            _global.special_event = 0;
+            _global.special_event_happening = false;
+            root.gotoAndPlay("daybreak");
+            arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 20; return;
+        }
+        root.gotoAndPlay("townsquare");
+        arenaPhase = "town"; arenaCooldown = 20; return;
+    }
+    if (arenaPhase == "levelup") {
+        if (frame != 234) return;                         // the levelup span's Stop
+        var levelHero = root.game.hero;
+        // Root frame 227 sets statpoints = 4 on entry. Spend them ONE PER
+        // TICK: the stat button's body is two statements with no call, which
+        // makes this the least faithful step on the whole route, and four
+        // presses in one execution slot is further from four button presses
+        // than four presses in four slots.
+        // BUTTON 2253, verbatim - not "button 1596's body with vitality
+        // substituted for strength", which is what this said and was wrong.
+        // 2253 IS the level-up panel's vitality `+`, placed on sprite 2265 at
+        // root frame 227, and its body is exactly these four statements. No
+        // substitution was ever needed, and the route map's button list omits
+        // 2253, which is where the misattribution came from.
+        //
+        // The claim that this is "the least faithful step on the route" because
+        // "the body is two statements with no call" was also false: the body is
+        // a guard, a CALL to clicksound.start(), and two assignments - all of
+        // which are replicated here. It is a verbatim replication.
+        if (Number(levelHero.statpoints) > 0) {
+            root.clicksound.start();
+            levelHero.vitality++;
+            levelHero.statpoints--;
+            arenaPointsSpent++;
+            arenaMirrorWaitTicks = 0;
+            arenaMirrorZeroTicks = 0;
+            arenaLog("levelup-point",
+                "\"spent\":" + arenaPointsSpent +
+                ",\"vitality\":" + jnum(levelHero.vitality) +
+                ",\"statpointsHero\":" + jnum(levelHero.statpoints) +
+                ",\"statpointsRoot\":" + jnum(root.statpoints));
+            arenaCooldown = 2;
+            return;
+        }
+        // GATE C. Button 2283 reads _root.statpoints - byte-verified as a bare
+        // GetVariable resolving on _root, NOT a member access on
+        // _root.game.hero, which is what the eight stat buttons use. The mirror
+        // is maintained by an enterFrame clip action on character 2265, placed
+        // at root frame 227 and removed at 235, so it refreshes every frame
+        // across the whole level-up span and one frame is genuinely enough.
+        //
+        // Correction to the audit that produced this gate: taking the refusal
+        // arm does NOT park the run. That arm sets inspirato_text and jumps to
+        // the end - it is idempotent and retryable. The gate is still right,
+        // because pressing into it wastes frames and muddies the log, but the
+        // consequence is a retry, not a hang.
+        arenaMirrorWaitTicks++;
+        // isNum first: AVM1's == is loose enough that an undefined mirror
+        // comparing equal to 0 is not a risk worth taking on the one press that
+        // decides whether four spent points are committed.
+        if (isNum(root.statpoints) && Number(root.statpoints) == 0) arenaMirrorZeroTicks++;
+        else arenaMirrorZeroTicks = 0;
+        if (arenaMirrorZeroTicks < 2) {
+            if (arenaMirrorWaitTicks == 1 || arenaMirrorWaitTicks == 600) {
+                arenaLog("levelup-mirror-wait",
+                    "\"statpointsRoot\":" + jnum(root.statpoints) +
+                    ",\"statpointsRootRaw\":\"" + String(root.statpoints) + "\"" +
+                    ",\"ticks\":" + arenaMirrorWaitTicks);
+            }
+            if (arenaMirrorWaitTicks > ARENA_MIRROR_LIMIT_TICKS) {
+                // Either the mirror lives somewhere else than the audit found,
+                // or it never clears. Both are findings, not things to press
+                // through: the raw value is logged so one dry run settles it.
+                arenaAbort("levelup-mirror-never-cleared",
+                    "\"statpointsRootRaw\":\"" + String(root.statpoints) + "\"" +
+                    ",\"statpointsHero\":" + jnum(levelHero.statpoints));
+            }
+            return;
+        }
+        // button 2283, the non-refusal arm.
+        root.specials_gained_mov.removeMovieClip();
+        root.backup_char(levelHero);
+        root.clicksound2.start();
+        root.hero.removeMovieClip();
+        root.restore_char(levelHero);
+        var newLevel = Number(levelHero.herolevel);
+        arenaLog("levelup-confirm",
+            "\"level\":" + jnum(newLevel) +
+            ",\"vitality\":" + jnum(levelHero.vitality) +
+            ",\"hitpointsmax\":" + jnum(levelHero.hitpointsmax) +
+            ",\"mirrorWaitTicks\":" + arenaMirrorWaitTicks);
+        if (arenaReachedTarget(root)) {
+            // Still take the button's own arm: leaving the playhead parked on
+            // the level-up screen would leave statpoints spent but the level
+            // unbacked-up.
+            if (newLevel == 2) {
+                _global.day = 1;
+                _global.time_of_day = 24;
+                root.gotoAndPlay("daybreak");
+            } else if (_global.tournament_in_progress == true) {
+                // Replicated because button 2283's body contains it, but note that
+            // `backup_character` DOES NOT EXIST in this build - a whole-build
+            // function-name search finds only `backup_char`. This call is a
+            // no-op, and nothing may depend on it. What actually preserves the
+            // four spent points is backup_char above, which calls constructDNA
+            // and serialises them into charDNA before save_character rebuilds
+            // the hero from it.
+            root.backup_character(levelHero);
+                root.gotoAndPlay("foyer");
+            } else {
+                root.gotoAndPlay("townsquare");
+            }
+            arenaFinish(root, "level");
+            return;
+        }
+        if (newLevel == 2) {
+            _global.day = 1;
+            _global.time_of_day = 24;
+            root.gotoAndPlay("daybreak");
+            arenaPhase = "daybreak"; arenaDaybreakTicks = 0; arenaCooldown = 20; return;
+        }
+        if (_global.tournament_in_progress == true) {
+            // Replicated because button 2283's body contains it, but note that
+            // `backup_character` DOES NOT EXIST in this build - a whole-build
+            // function-name search finds only `backup_char`. This call is a
+            // no-op, and nothing may depend on it. What actually preserves the
+            // four spent points is backup_char above, which calls constructDNA
+            // and serialises them into charDNA before save_character rebuilds
+            // the hero from it.
+            root.backup_character(levelHero);
+            root.gotoAndPlay("foyer");
+            arenaPhase = "foyer"; arenaCooldown = 20; return;
+        }
+        root.gotoAndPlay("townsquare");
+        arenaPhase = "town"; arenaCooldown = 20; return;
+    }
+}
+
+/**
+ * Fight policy for the arena route. The prisoner route's fixed step list
+ * cannot serve a duel: the opponent is generated at the hero's own level,
+ * fights back, and the bout runs many turns. This is deliberately the
+ * smallest policy that can win one - close the distance, then attack - and it
+ * issues nothing the controller in scope does not offer, so it can only ever
+ * press buttons the player could press.
+ *
+ * rest and taunt share one controller slot, chosen by whether stamina is at
+ * least half, and the wrapper cannot see which is wired. Issuing the wrong one
+ * sets a decision nothing dispatches, so neither is ever issued: overlay frame
+ * 1 issues its own forced-rest phase when stamina runs out, and letting the
+ * game handle that is both safer and more faithful.
+ */
+function arenaPolicyStep(controller) {
+    if (controller == undefined) return undefined;
+    if (controller.actions.normal_attack == true) return "normal_attack";
+    var gladiators = gameRoot().arena.gladiators;
+    if (gladiators != undefined) {
+        var heroX = Number(gladiators.hero._x);
+        var villainX = Number(gladiators.villain._x);
+        // isNum, not `x == x`: this file states at the isNum definition that a
+        // self-inequality NaN test does not work in AVM1, and then used one here.
+        if (isNum(gladiators.hero._x) && isNum(gladiators.villain._x)) {
+            var toward = (heroX < villainX) ? "walkright" : "walkleft";
+            if (controller.actions[toward] == true) return toward;
+        }
+    }
+    if (controller.actions.walkright == true) return "walkright";
+    if (controller.actions.walkleft == true) return "walkleft";
+    return undefined;
+}
+
 function stepAutopilot() {
     if (autopilotAborted) return;
-    if (autopilotIndex >= autopilotSteps.length) return;
+    if (arenaPolicy == "" && autopilotIndex >= autopilotSteps.length) return;
     if (_global.battle_started != true) return;
     var ov = overlayClip();
     if (ov == undefined || typeof ov.getphase != "function") return;
@@ -401,8 +1619,42 @@ function stepAutopilot() {
     autopilotIdleTicks++;
     if (autopilotIdleTicks < 8) return;
 
-    var step = autopilotSteps[autopilotIndex];
     var controller = controllerForFrame(frame);
+    if (arenaPolicy != "") {
+        // Policy mode: no step list to walk, so there is nothing to fall off
+        // the end of. The policy only ever returns an action the controller in
+        // scope offers, which makes the availability check below redundant for
+        // this path - an undefined step means "this controller offers nothing
+        // I know how to use", which is a wait, not a failure, until the limit.
+        var policyStep = arenaPolicyStep(controller);
+        if (policyStep == undefined) {
+            autopilotWaitTicks++;
+            if (autopilotWaitTicks == 1 || autopilotWaitTicks == AUTOPILOT_WAIT_LIMIT / 2) {
+                trace("{\"t\":\"dbg\",\"at\":\"autopilot-wait\",\"step\":\"(policy)\"" +
+                    ",\"frame\":" + frame + ",\"controller\":\"" +
+                    (controller == undefined ? "none" : controller.name) +
+                    "\",\"ticks\":" + autopilotWaitTicks + "}");
+            }
+            if (autopilotWaitTicks >= AUTOPILOT_WAIT_LIMIT) {
+                trace("{\"t\":\"dbg\",\"at\":\"autopilot-unavailable\",\"step\":\"(policy)\"" +
+                    ",\"frame\":" + frame + ",\"controller\":\"" +
+                    (controller == undefined ? "none" : controller.name) + "\"}");
+                autopilotAborted = true;
+            }
+            return;
+        }
+        autopilotIndex++;
+        autopilotIdleTicks = 0;
+        autopilotWaitTicks = 0;
+        autopilotCooldown = 30;
+        trace("{\"t\":\"dbg\",\"at\":\"autopilot\",\"step\":\"" + policyStep +
+            "\",\"n\":" + autopilotIndex + ",\"frame\":" + frame +
+            ",\"controller\":\"" + controller.name + "\",\"policy\":\"" + arenaPolicy + "\"}");
+        ov.getphase(policyStep);
+        return;
+    }
+
+    var step = autopilotSteps[autopilotIndex];
 
     // The step is only issued to a controller that offers it. Firing
     // regardless is what an unattended run cannot afford: getphase would set
@@ -466,6 +1718,18 @@ emit({
 // Load the installed game in place on its own level.
 // ---------------------------------------------------------------------------
 loadMovieNum(config.gameUrl, 1);
+
+// Draws the armed window made after the tape ran out; reported on the end
+// line. See finishTrace.
+var overdrawCount = 0;
+// Minted inside the player, from values the launcher does not supply, so an
+// observation carries at least one field the operator did not choose. This is
+// not a security boundary - nothing here is - but sessionId and observationId
+// are both operator strings, and independence should not rest entirely on
+// them.
+// Evaluated here, well before the Math tap is installed, so this is the
+// player's own RNG and consumes nothing from the tape.
+var launchNonce = String(getTimer()) + "-" + String(Math.floor(Math.random() * 2147483647));
 
 var currentHook = "unattributed";   // set/cleared by function wraps
 var battleHooked = false;
@@ -577,6 +1841,31 @@ function makeHookMaker(hookLabel, onEnter, onExit) {
     };
 }
 
+/**
+ * The `magic-damage` event's `method` field, normalised to the two shapes the
+ * observation schema admits: null, or an animation label matching
+ * SPELL_ANIMATION_LABEL_PATTERN (/^[A-Za-z][A-Za-z0-9_]{0,31}$/) in
+ * src/golden/observation.js.
+ *
+ * Exactly ONE transformation is applied - undefined/null becomes null - and it
+ * is not cosmetic. AS2's String(undefined) is the eight-character string
+ * "undefined", which PASSES that pattern, so echoing the raw argument would
+ * record a plausible-looking animation label the game never passed. `null` is
+ * the schema's spelling of "no label", and it is what the candidate fixtures
+ * carry when the map recorded none.
+ *
+ * Everything else is emitted exactly as the game passed it, INCLUDING values
+ * the schema will refuse. A label ingest rejects is a loud divergence a
+ * reviewer can read off the trace line that carried it; coercing it to null
+ * would be the wrapper inventing "the game passed no label", which is the one
+ * fact this field exists to establish.
+ */
+function spellDamageMethod(raw) {
+    // AS2 loose equality: true for null AND undefined, false for 0 and "".
+    if (raw == undefined) return null;
+    return String(raw);
+}
+
 function makeRandomBetweenMaker(siteId) {
     // Diagnostic passthrough only: the tape is served and recorded at the
     // Math.random tap below, which the frame-52 atomic re-definitions
@@ -612,7 +1901,11 @@ function tappedRandom() {
     }
     // Tape exhausted or passive: record the raw uniform draw in the
     // diagnostics log; the integer roll it produced is reconstructed
-    // during analysis from the surrounding evidence.
+    // during analysis from the surrounding evidence. Counted as well as
+    // logged - delog strips dbg lines, so without the count an armed window
+    // that drew more times than the candidate models would leave no trace of
+    // having done so.
+    if (armed) overdrawCount++;
     var raw = originalMathRandom();
     trace("{\"t\":\"dbg\",\"at\":\"mrand\",\"r\":" + raw + ",\"cursor\":" + tapeCursor + "}");
     tapeCursor++;
@@ -654,8 +1947,244 @@ function shadowMathScopes() {
     }
 }
 
+/**
+ * Whether this action may be recorded at all.
+ *
+ * Every route other than `navigate=arena` is unchanged: it returns true, so
+ * the twenty-two promoted goldens stay reproducible byte for byte.
+ *
+ * The arena route is different because it fights MANY bouts per process and
+ * only one of them is ever evidence. A levelling run is staging, not
+ * observation, and a trace emitted from a duel would be an observation of an
+ * opponent nobody chose and nobody can reproduce (randomise_gladiator draws
+ * through the RandomNumber opcode, which no instrumentation can intercept).
+ * "champion" arms only for the tournament rank-1 bout - the hero reaches
+ * tournament_ranking <= 2 exactly when foyer frame 22 has bound
+ * _root.game.villain to the champion built by unleash_hell() from hard-coded
+ * DNA, which is the one reproducible armoured opponent in the build.
+ */
+function captureAllowedNow() {
+    // A run that has already aborted must not then produce a trace. arenaAbort
+    // stops the navigator, but the hooks keep running, so without this an
+    // aborted run could arm afterwards and be reported as a successful capture.
+    if (arenaStopped) return false;
+    // THE SIDE MUST BE OBSERVED, NOT ASSERTED. attack_chances is called for
+    // BOTH combatants, and on the arena route the villain fights back - so the
+    // first call with a numeric attack_direction is not guaranteed to be the
+    // hero's. `attackerSide` is a launcher FlashVar the game never sees, so
+    // arming on the villain's swing would file a trace labelled "hero" that
+    // ingest has no way to contradict: a false observation, which is worse than
+    // no observation.
+    var attacker = gameRoot().game_attacker;
+    if (attacker != undefined) {
+        var isHero = (attacker == gameRoot().game.hero);
+        var claimed = (config.attackerSide == "hero");
+        if (isHero != claimed) {
+            dbg("capture-refused-wrong-side");
+            return false;
+        }
+    }
+    if (!arenaMode) return true;
+    if (arenaCaptureMode == "always") return true;
+    if (arenaCaptureMode == "champion") {
+        var hero = gameRoot().game.hero;
+        if (hero == undefined) return false;
+        if (!isNum(hero.tournament_ranking)) return false;
+        var ranking = Number(hero.tournament_ranking);
+        if (!(ranking <= 2 && _global.tournament_in_progress == true)) return false;
+
+        // The rank-1 OPPONENT is reproducible; the rank-1 BOUT is not, and the
+        // difference is the whole reason this check exists.
+        //
+        // unleash_hell builds the champion from hard-coded DNA with no RNG at
+        // all, so the villain side is fixed. But reaching rank 1 means first
+        // beating ranks 3 and 2, who ARE randomise_gladiator opponents drawn
+        // through the un-interceptable RandomNumber opcode. Two hero-side
+        // fields carry out of those bouts into this one:
+        //
+        //   staminaleft - battlevalues resets it ONLY when it is already <= 0
+        //     (`if (!(staminaleft > 0)) staminaleft = staminamax`), arena
+        //     initbattle resets the VILLAIN's only, restore_char does not carry
+        //     it, and root frame 214 resets hitpoints alone. Different
+        //     opponents mean different turn counts mean different residual
+        //     stamina.
+        //   herolevel - experience per bout is the generated opponent's
+        //     character_xp, so whether a level-up lands mid-ladder is itself
+        //     RNG-decided, and herolevel moves hitpointsmax.
+        //
+        // Both are projected fields, so two sessions that differ in either
+        // cannot match and can never clear the two-session promotion gate. The
+        // wrapper injects only the RNG tape - it stages no combatant state - so
+        // there is nothing to force here, only something to refuse.
+        //
+        // Refusing turns a silent non-match into a visible low success rate,
+        // which is the right trade: a session that cannot be evidence should
+        // produce no trace rather than a trace nobody can reproduce.
+        var stamina = Number(hero.staminaleft);
+        var staminaMax = Number(hero.staminamax);
+        var level = Number(hero.herolevel);
+        // Unreadable is unstaged: a field the wrapper cannot read is a field it
+        // cannot certify, and this gate exists to refuse rather than to guess.
+        var readable = isNum(hero.staminaleft) && isNum(hero.staminamax) && isNum(hero.herolevel);
+        var staminaStaged = readable && (stamina == staminaMax);
+        var levelStaged = readable && (!(arenaStagedLevel > 0) || (level == arenaStagedLevel));
+        if (!staminaStaged || !levelStaged) {
+            arenaLog("capture-refused-unstaged",
+                "\"staminaleft\":" + jnum(stamina) +
+                ",\"staminamax\":" + jnum(staminaMax) +
+                ",\"herolevel\":" + jnum(level) +
+                ",\"stagedLevel\":" + jnum(arenaStagedLevel));
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Scenario staging: writing combatant state before the first action.
+//
+// THIS IS THE FIRST THING THE WRAPPER DOES THAT AUTHORS GAME STATE, and it is a
+// deliberate, owner-approved departure from how all twenty-two promoted goldens
+// were captured. Until now the wrapper injected only the RNG tape and observed
+// whatever the game produced. Read this before using it.
+//
+// Why it exists. Two remaining capture targets are unreachable without it:
+//   - candidate-armoured-* stages exact per-piece values (helmet 6, greaves 2)
+//     that randomise_gladiator will never hand us by chance;
+//   - the tournament rank-1 opponent IS reproducible (verified live: "John the
+//     Butcher", 110 hitpointsmax, 86 armourclass, identical across five
+//     independent draws) but the HERO's state entering that bout is not -
+//     staminaleft carries across bouts, and a mid-ladder level-up is decided by
+//     a generated opponent's experience award. Both were observed varying.
+//
+// What it is and is not. A staged field is a scenario INPUT. The game still
+// resolves the entire action: every roll, every dispatch, every mutation. The
+// pipeline was already built expecting staged scenarios - ingest projects the
+// observed scenario onto the fixture's staged fields and reports a mis-staged
+// one as an explicit mismatch. So staging does not weaken a formula
+// measurement. What it does weaken is any claim that the SCENARIO is one the
+// game's own progression could reach, and that is why every staged field is
+// reported on the end line rather than left for a reader to infer.
+//
+// Timing. Writes are applied only once `battle_started` is true - past root
+// frame 214's full heal, past root frame 221's forced `equipped_weapon = 1`,
+// and past initbattle - and repeated for a few frames, because the game
+// re-derives values during battle construction and a single early write would
+// be silently overwritten. They stop before the action arms, so no staged write
+// can ever appear in the mutation trace: the watch callbacks emit only while
+// armed, and beginAction's state dump is what records the staged values.
+// ---------------------------------------------------------------------------
+var STAGE_APPLY_TICKS = 20;
+function parseStageList(raw) {
+    var out = [];
+    if (raw == undefined || raw == "") return out;
+    var parts = raw.split(",");
+    for (var i = 0; i < parts.length; i++) {
+        var pair = parts[i].split(":");
+        if (pair.length < 2 || pair[0] == "") continue;
+        // A VALUE THAT IS NOT A NUMBER IS REFUSED, not written. constructDNA is
+        // not a serialiser - it calls check_for_nan, which jumps the ROOT
+        // TIMELINE to "bugs" when herolevel is NaN or outside 0..60, silently
+        // repairs NaN gold to herolevel * 1000, and resets a bad statpoints to
+        // 4. So a typo in a staging string is not a no-op: it is a jump to an
+        // error screen or a silent rewrite of the saved gladiator.
+        if (!isNum(pair[1])) {
+            trace("{\"t\":\"dbg\",\"at\":\"stage-refused\",\"field\":\"" + pair[0] +
+                "\",\"raw\":\"" + String(pair[1]) + "\",\"why\":\"not-a-number\"}");
+            continue;
+        }
+        var value = Number(pair[1]);
+        // check_for_nan's own bounds, enforced before the write rather than
+        // after the jump.
+        if (pair[0] == "herolevel" && (value < 1 || !(value < 61))) {
+            trace("{\"t\":\"dbg\",\"at\":\"stage-refused\",\"field\":\"herolevel\"" +
+                ",\"raw\":\"" + String(pair[1]) + "\",\"why\":\"outside-1-60\"}");
+            continue;
+        }
+        out.push({ field: pair[0], value: value });
+    }
+    return out;
+}
+var stageHeroFields = parseStageList(rawStageHero);
+var stageVillainFields = parseStageList(rawStageVillain);
+var stageTicks = 0;
+var stageReported = false;
+// Read back at ARMING time, not at write time. See stagedSummary.
+var stagedAtArming = "";
+
+function applyStageSide(side, fields) {
+    if (fields.length == 0) return;
+    var target = gameObject(side);
+    if (target == undefined) return;
+    for (var i = 0; i < fields.length; i++) target[fields[i].field] = fields[i].value;
+}
+
+/**
+ * The staged fields as the game holds them AT THE MOMENT OF THE CALL.
+ *
+ * Read this before trusting it. When called on the same tick as the write it is
+ * a TAUTOLOGY - it reads back what was just assigned, and can never report an
+ * overwrite. An earlier revision called it exactly that way and its output was
+ * recorded in the handoff as "eleven fields all stuck", which the same run's
+ * own later lines contradict: `staged … hero.herolevel=5` was followed seconds
+ * later by `battle-ready level 4` and by `capture-refused-unstaged
+ * staminaleft:106 staminamax:110 herolevel:4`.
+ *
+ * That is this project's named worst failure mode - evidence fitted to the
+ * design rather than a prediction that could falsify it - committed by the
+ * instrument meant to detect it. The end-line declaration now calls this at
+ * ARMING time, one whole action after the writes, so an overwrite is visible.
+ */
+function stagedSummary() {
+    var parts = [];
+    for (var h = 0; h < stageHeroFields.length; h++) {
+        parts.push("hero." + stageHeroFields[h].field + "=" +
+            String(gameObject("hero")[stageHeroFields[h].field]));
+    }
+    for (var v = 0; v < stageVillainFields.length; v++) {
+        parts.push("villain." + stageVillainFields[v].field + "=" +
+            String(gameObject("villain")[stageVillainFields[v].field]));
+    }
+    return parts.join(",");
+}
+
+/** True once this bout's staging window has closed. Arming waits for it. */
+function stagingComplete() {
+    if (stageHeroFields.length == 0 && stageVillainFields.length == 0) return true;
+    if (_global.battle_started != true) return false;
+    return stageTicks >= STAGE_APPLY_TICKS;
+}
+
+function stepStaging() {
+    if (stageHeroFields.length == 0 && stageVillainFields.length == 0) return;
+    if (_global.battle_started != true) return;
+    if (actionCaptured) return;                  // never write into an armed window
+    if (stageTicks >= STAGE_APPLY_TICKS) return;
+    stageTicks++;
+    applyStageSide("hero", stageHeroFields);
+    applyStageSide("villain", stageVillainFields);
+    if (stageTicks == STAGE_APPLY_TICKS && !stageReported) {
+        stageReported = true;
+        // NOT a verification - see stagedSummary. This line says what was
+        // written; whether it SURVIVED is answered at arming time.
+        trace("{\"t\":\"dbg\",\"at\":\"staged\",\"applied\":\"" + stagedSummary() + "\"}");
+    }
+}
+
 function beginAction() {
     if (actionCaptured) return;
+    // Checked before the latch, deliberately: a bout that is not the capture
+    // target must leave the wrapper able to arm on a LATER bout.
+    if (!captureAllowedNow()) return;
+    // A partially staged scenario is not the scenario anyone asked for. The
+    // autopilot can issue its first action at battle tick 8 while staging runs
+    // to tick 20, so without this the window could close mid-write and emit no
+    // `staged` line at all.
+    if (!stagingComplete()) { dbg("capture-deferred-staging-incomplete"); return; }
+    // Captured HERE - one whole action after the writes - so the declaration
+    // reports what survived rather than what was requested.
+    stagedAtArming = stagedSummary();
     actionCaptured = true;
     armed = true;
     dbg("action-armed");
@@ -667,6 +2196,31 @@ function beginAction() {
     if (ov.criticalhit != undefined) {
         emit({ t: "var", name: "criticalhit", value: ov.criticalhit });
     }
+    // The spell ingress has no direction chain, so a cast is identified by
+    // the inventory id the caller used. Without a spell_id line ingest cannot
+    // project scenario.spellId and no spell trace can ever be evidence.
+    //
+    // WITHDRAWN CLAIM, byte-verified 2026-08-30: these two reads can never
+    // fire. `spell_id` DOES NOT EXIST anywhere in the build. A whole-file
+    // reference scan for /spell_id|spell_number/ returns exactly one hit - the
+    // `spell_number` PARAMETER of cast_spell_icon(which_avatar, spell_number),
+    // overlay frame 52 DoAction@0x240c7f +0x2251 - and no read or write of a
+    // `spell_id` name on any object or on _global. So both branches below are
+    // permanently undefined and no spell trace can carry an action identity.
+    //
+    // The id does exist at runtime, but only as cast_spell_icon's second
+    // argument, pushed as a literal one instruction before the call and two
+    // before the caller's damage roll: 30 at +0x8ffa (then
+    // randomBetween(80,160) at +0x9012), 31 at +0x904a (150..450), 32 at
+    // +0x909a (300..600), 34 at +0x847a (100..200), 35 at +0x84ca (200..400),
+    // 49 at +0x868d (boulder count 10..20). Reading it there means wrapping
+    // cast_spell_icon, which is a change to the ARMING path and is deliberately
+    // not made here - see the report accompanying this edit.
+    if (ov.spell_id != undefined) {
+        emit({ t: "var", name: "spell_id", value: ov.spell_id });
+    } else if (_global.spell_id != undefined) {
+        emit({ t: "var", name: "spell_id", value: _global.spell_id });
+    }
 }
 
 function finishTrace() {
@@ -676,7 +2230,28 @@ function finishTrace() {
     dumpSide("final", "villain");
     // The post-session hash check has not run yet; ingest re-runs it live
     // and refuses the trace when it fails.
-    emit({ t: "end", installHashVerifiedAfter: null });
+    //
+    // overdraw is the count of draws the armed window made AFTER the tape ran
+    // out. It has to be reported, because those draws are otherwise invisible:
+    // they fall through to the live RNG and are logged only as dbg lines,
+    // which delog strips. A run that drew more times than the candidate models
+    // would then be indistinguishable from one that matched it. launchNonce is
+    // minted here rather than supplied, so a record carries one field the
+    // operator did not choose.
+    var endLine = {
+        t: "end",
+        installHashVerifiedAfter: null,
+        overdraw: overdrawCount,
+        launchNonce: launchNonce
+    };
+    // Emitted ONLY when something was actually staged, so every unstaged trace
+    // stays byte-comparable with the archive and the field's presence is itself
+    // the signal. The values are read back from the game, not echoed from the
+    // request, so a field the game overwrote reports what it really holds.
+    if (stageHeroFields.length > 0 || stageVillainFields.length > 0) {
+        endLine.staged = stagedAtArming;
+    }
+    emit(endLine);
     finalsDumped = true;
     traceClosed = true;
 }
@@ -776,7 +2351,68 @@ function hookBattle() {
         };
     });
     registerSlot(function () { return overlayClip(); }, "damagecharacter", makeHookMaker("damagecharacter"));
-    registerSlot(function () { return overlayClip(); }, "magic_damage_character", makeHookMaker("damagecharacter"));
+    // The spell/effect damage ingress. It is NOT damagecharacter, and the two
+    // are separate DefineFunction2 bodies in the same block (byte-verified,
+    // overlay frame 52 DoAction@0x240c7f):
+    //
+    //   magic_damage_character def@+0x129c body +0x1313..+0x157c
+    //     (defender, attacker, game_defender, game_attacker,
+    //      damage_method, bonus_frame, damage)      -- SEVEN parameters
+    //   damagecharacter        def@+0x157d body +0x15ea..+0x1dd2
+    //     (defender, attacker, game_defender, game_attacker,
+    //      damage_method, attack_direction)         -- SIX parameters
+    //
+    // The spell ingress receives the damage already rolled by its caller, makes
+    // no randomBetween call and no RandomNumber draw, calls remove_armour zero
+    // times (the physical path calls it at +0x176a and +0x1791 behind a
+    // randomBetween(1,100) gate at +0x1744), writes psyche_up only on
+    // game_defender (+0x148e) where the physical path writes both sides
+    // (+0x16b5 defender, +0x16c2 attacker), plays no knockback, and dispatches
+    // death with no attack_direction chain at all - slain (+0x1558) or, in a
+    // duel, yield (+0x156d) - against the physical path's four-way dispatch
+    // (+0x19c6/+0x19ec/+0x1a27/+0x1a4d). Its own write order is
+    // armourclass_temp (+0x1403), armourclass -= damage (+0x1410),
+    // armourclass_temp = 0 on strict overflow (+0x144e), hitpoints -= damage
+    // (+0x147b), psyche_up = 1 (+0x148e), staminaleft += stamina_bonus
+    // (+0x14cc), then check_stats (+0x14e0) and the shared defeat gate.
+    //
+    // Attributing all of that to `damagecharacter` reported the spell ingress's
+    // armour and hitpoint subtraction, its psyche_up join, its breastplate
+    // stamina join and its check_stats clamps as physical-damage work. The hook
+    // token is the AS2 name rendered in the hyphenated hook vocabulary, because
+    // HOOK_PATTERN in src/golden/capture-ingest.js admits no underscores; it is
+    // the token the reference generator already specifies, in
+    // SPELL_HOOK_FOR_STATIC_REASON (src/golden/simulate-capture-trace.js),
+    // which maps magic-damage, psyche-up, breastplate-stamina and stat-clamp
+    // onto it for a spell action.
+    //
+    // The `magic-damage` event is this ingress's DISPATCH evidence. The
+    // physical path proves hit or miss by calling defender_hurt or
+    // defender_blocked; magic_damage_character calls neither (its complete call
+    // inventory is the UI attach/goto calls, Math.ceil, check_flipping,
+    // get_percentage, add_percentage, check_stats and the two death sites), so
+    // without this line a spell trace records no dispatch at all.
+    // deriveExpectedEventsFromSs2Fixture emits one for every spellId scenario,
+    // and capture-ingest.js keys the "slain" death dispatch on
+    // `events.some(e => e.type === "magic-damage")` - so no spell trace could
+    // match any fixture, and a lethal one could not even synthesize its result.
+    // Emitted on ENTRY, ahead of the ingress's own writes, which is exactly
+    // where the reference trace puts it (events[0], before every `set` line).
+    //
+    // `method` carries the damage_method argument - arguments[4], the fifth
+    // parameter of the header above - which for THIS ingress is the animation
+    // label played on the defender clip (`defenderClip.gotoAndPlay(
+    // damage_method)` at +0x13d8, pushing register:5). Literals observed at the
+    // call sites: "burning" (fireball group +0x91c1, death-from-above boulders
+    // +0x88e5), "lightning" (bolt group +0x85af), and the status phases'
+    // "frozen" (+0x5354), "lifesteal" (+0x5488), "poisoned" (+0x55bc) and
+    // "burning" (+0x56f0).
+    registerSlot(function () { return overlayClip(); }, "magic_damage_character",
+        makeHookMaker("magic-damage-character", function (args) {
+            if (armed) {
+                emit({ t: "event", type: "magic-damage", method: spellDamageMethod(args[4]) });
+            }
+        }));
     registerSlot(function () { return overlayClip(); }, "remove_armour", makeHookMaker("remove-armour"));
     registerSlot(function () { return overlayClip(); }, "destroy_armour", makeHookMaker("remove-armour"));
     // The phase boundary: an armed action that never reached checkattackroll
@@ -826,6 +2462,7 @@ Key.addListener(keyListener);
 this.onEnterFrame = function () {
     dbgRootFrame();
     stepNavigator();
+    stepArenaNavigator();
     if (!battleHooked) { hookBattle(); return; }
     // Lethal close for actions the atomic frame-52 path resolved without
     // our checkattackroll wrap: one tick after the result label.
@@ -833,5 +2470,8 @@ this.onEnterFrame = function () {
     sweepFieldWatches();
     sweepWraps();
     shadowMathScopes();
+    // Before the autopilot: a staged scenario has to be complete before any
+    // action can be issued against it.
+    stepStaging();
     stepAutopilot();
 };

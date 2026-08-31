@@ -1,7 +1,8 @@
 # SS2 first integration checkpoint
 
-Status: read-only static map, recorded 2026-08-29. This is interoperability
-research for the locally licensed Steam build identified in
+Status: read-only static map, first recorded 2026-08-29, last revised
+2026-08-30. This is interoperability research for the locally licensed Steam
+build identified in
 [`ss2-build-fingerprint.json`](ss2-build-fingerprint.json). It contains no game
 code, artwork, audio, exported scripts, or game binaries.
 
@@ -89,6 +90,280 @@ Verified controller labels on sprite 862 are `initialise` frame 1,
 `longrange_warrior` 5, `closerange_warrior` 13, `longrange_archer` 20,
 `closerange_archer` 28, `heroactions` 52, `combatwon` 62, and `combatlost` 74.
 
+## Controller frames and the hero action vocabulary
+
+Byte-verified 2026-08-30 on sprite 862. The four hero controllers are not
+interchangeable: which labels a gladiator can reach depends entirely on which
+controller frame is in scope, and that choice is made once per turn.
+
+### Selection and spans
+
+`initialise` never rests. Its frame-4 action `DoAction@0x238bbf` is the
+controller selector and is the only site that gotoAndPlays a controller label:
+
+```text
+if (_root.game.hero.using_bow != true) {              // +0x00b9..+0x00c7
+  fightdistance < hero.weapon_range                   // +0x00f6
+    ? this.gotoAndPlay("closerange_warrior")          // +0x00fd
+    : this.gotoAndPlay("longrange_warrior");          // +0x0116
+} else {
+  fightdistance < 100 + hero.physical_size            // +0x015f
+    ? this.gotoAndPlay("closerange_archer")           // +0x0166
+    : this.gotoAndPlay("longrange_archer");           // +0x017f
+}
+```
+
+`_root.arena.fightdistance` and `_root.game.hero.using_bow` are therefore the
+only two inputs that gate the archer controllers. Because `physical_size =
+80 + round(strength / 1.5)`, the archer close-range threshold resolves to
+`180 + round(strength / 1.5)`, while the warrior threshold is the hero's own
+`weapon_range`.
+
+Each label plays through a span and holds on its last frame:
+
+| Label | Frame | Span | How the span holds |
+| --- | --- | --- | --- |
+| `initialise` | 1 | 1–4 | never holds; frame 4 dispatches |
+| `longrange_warrior` | 5 | 5–12 | `Stop`, frame 12 `DoAction@0x23a0fd` |
+| `closerange_warrior` | 13 | 13–19 | `Stop`, frame 19 `DoAction@0x23b152` |
+| `longrange_archer` | 20 | 20–27 | `Stop`, frame 27 `DoAction@0x23c4dc` |
+| `closerange_archer` | 28 | 28–37 | `Stop`, frame 37 `DoAction@0x23d687` |
+| `heroactions` | 52 | 52–61 | frame 61 `DoAction@0x24a1a4` runs `gotoAndPlay(_currentframe - 1)` at `+0x0014`, so it oscillates 60↔61 |
+| `combatwon` | 62 | 62–73 | `Stop`, frame 73 `DoAction@0x24a8b0` |
+| `combatlost` | 74 | 74–84 | `Stop`, frame 84 `DoAction@0x24aefe` |
+
+An autopilot that reads `_currentframe` must expect the resting frame, not the
+label frame. `heroactions` is the one span that never stops; it idles on a
+two-frame loop while `attacker.onEnterFrame` runs the phase machine.
+
+A further `Stop` sits at frame 51 (`DoAction@0x23d773`), immediately before
+`heroactions`. No label was verified between 28 and 52, so frames 38–51 are
+not reachable from any mapped path. This map previously left open whether a
+ninth label might hide in that gap, because the project inspector did not then
+decode `FrameLabel` (tag 43).
+
+**Closed 2026-08-30, and reproduced with the project's own tool.** The
+inspector now has a `--labels` mode with a `--timeline <regex>` filter, so the
+decode no longer depends on the throwaway out-of-repo reader the
+[arena route](ss2-arena-route.md) §Method note first used. Re-run here against
+the same installed SWF and fingerprint:
+
+```powershell
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" `
+  --labels --timeline 'sprite:862'
+```
+
+It reports `8 across 1 of 24 timelines` for `sprite:862[overlay]`, 84 frames
+declared, at frames **1, 5, 13, 20, 28, 52, 62 and 74** — the same eight
+already verified here from the action stream, in the same order. There is no
+ninth label, and frames 38–51 carry none: `closerange_archer` owns the whole
+28–51 range outright. The caveat is closed, and the "cannot be excluded from
+the action stream alone" wording no longer applies to anything in this map.
+
+One convention difference matters when comparing the two tables. `--labels`
+prints the **label-ownership** span (frames a label owns until the next label
+begins), while the Span column above is the **play** span, which ends at the
+`Stop` the playhead actually rests on. They differ only for
+`closerange_archer`: owned 28–51, rests at 37. The frame-51 `Stop` sits inside
+the owned range and no mapped path reaches it.
+
+### Buttons wired per controller frame
+
+Every controller frame opens by recomputing the hero's chance cache with
+`attack_chances(_root.game.hero, _root.game.villain)` — frame 5 `+0x0908`,
+frame 13 `+0x072f`, frame 20 `+0x08d2`, frame 28 `+0x08fb` — then branches once
+on `_root.arena.gladiators.hero.gladiator_dir == "right"` (frame 5 `+0x093a`,
+frame 13 `+0x0761`, frame 20 `+0x0904`, frame 28 `+0x092d`). Both facings wire
+the same eight `optionA`–`optionH` slots with `onRelease` handlers whose whole
+body is a single `getphase("<label>")` call. The label set is facing-invariant
+apart from the charge/ranged handedness; only the slot assignment rotates.
+
+| Controller | Facing | Handler range | `optionA`…`optionH` labels |
+| --- | --- | --- | --- |
+| `longrange_warrior` | right | `+0x0c97`–`+0x0dec` | `jumpleft`, `walkleft`, `taunt`/`rest`, `jumpright`, `walkright`, `chargeright`, `wincrowd`, `psyche_up` |
+| `longrange_warrior` | left | `+0x1134`–`+0x12a0` | `jumpleft`, `walkleft`, `chargeleft`, `jumpright`, `walkright`, `taunt`/`rest`, `psyche_up`, `wincrowd` |
+| `closerange_warrior` | right | `+0x0a90`–`+0x0b8b` | `jumpleft`, `walkleft`, `shove`, `power_attack`, `normal_attack`, `quick_attack`, `wincrowd`, `psyche_up` |
+| `closerange_warrior` | left | `+0x0ebc`–`+0x0fb7` | `power_attack`, `normal_attack`, `quick_attack`, `jumpright`, `walkright`, `shove`, `psyche_up`, `wincrowd` |
+| `longrange_archer` | right | `+0x0ca2`–`+0x0df7` | `jumpleft`, `walkleft`, `taunt`/`rest`, `bombardright`, `walkright`, `sniperight`, `wincrowd`, `psyche_up` |
+| `longrange_archer` | left | `+0x1197`–`+0x12ec` | `bombardleft`, `walkleft`, `snipeleft`, `jumpright`, `walkright`, `taunt`/`rest`, `psyche_up`, `wincrowd` |
+| `closerange_archer` | right | `+0x0c19`–`+0x0d14` | `jumpleft`, `walkleft`, `shove`, `jumpright`, `bash_attack`, `taunt`, `wincrowd`, `psyche_up` |
+| `closerange_archer` | left | `+0x1002`–`+0x10fd` | `jumpleft`, `bash_attack`, `taunt`, `jumpright`, `walkright`, `shove`, `psyche_up`, `wincrowd` |
+
+Consequences a capture campaign has to respect:
+
+- `power_attack`, `normal_attack` and `quick_attack` are wired **only** by
+  `closerange_warrior`; `shove` only by the two close-range controllers.
+- `bombardleft/right` and `snipeleft/right` are wired **only** by
+  `longrange_archer`; `bash_attack` **only** by `closerange_archer`. All four
+  therefore require `using_bow == true` to be offered at all.
+- `rest` is never wired by either close-range controller, and `taunt` is never
+  wired by `closerange_warrior`.
+- On frames 5 and 20 the taunt and rest buttons share one slot, selected by
+  `staminaleft / staminamax * 100 >= 50` — frame 5 `+0x0c0a`/`+0x0c3d` facing
+  right and `+0x10a2`/`+0x10d5` facing left, frame 20 `+0x0c15`/`+0x0c48` and
+  `+0x110a`/`+0x113d`. Below 50% stamina the taunt button does not exist; at or
+  above it the rest button does not. `closerange_archer` has no stamina test at
+  all and always wires `taunt`.
+- `wincrowd` is hidden below `herolevel` 3 on every controller. `psyche_up` is
+  hidden below `herolevel` 7 on the warrior controllers (frame 5 `+0x0999`,
+  frame 13 `+0x07c0`) but below `herolevel` 3 on the archer controllers, where
+  a single test hides both slots (frame 20 `+0x092e`/`+0x0e23`, frame 28
+  `+0x0957`/`+0x0d40`).
+
+### The ammunition-visibility defect
+
+On `longrange_archer` the ranged slots are frame-selected when
+`_root.game.hero.ammo_left > 0` (`+0x099f`, mirrored `+0x0e66`). The zero-ammo
+branch instead assigns `visible` — not `_visible` — on both slots
+(`+0x09eb`/`+0x09f9` facing right, `+0x0eb2`/`+0x0ec0` facing left). `visible`
+is not a MovieClip property, so the buttons are **not** hidden, and their
+`onRelease` handlers are wired unconditionally further down the same branch.
+Nothing in the ranged phase re-checks ammunition either: the ranged branch of
+`attacker.onEnterFrame` decrements `game_attacker.ammo_left` by one at
+`+0x6bf5`–`+0x6c13` with no guard, so a zero-ammo shot drives the counter
+negative. In ordinary play the auto-swap below fires first; a capture harness
+that drives `getphase` directly can reach the defect.
+
+### Weapon mode and `swap_weapons`
+
+No controller frame wires `swap_weapons`. The only manual route is the battle
+inventory overlay: `swap_inventory.onRelease` in sprite 862 frame 1
+`DoAction@0x2378cc`, defined at `+0x1015`, whose body calls
+`getphase("swap_weapons")` at `+0x1067`. That button is correctly hidden with
+`_visible = false` when the hero has no secondary weapon (`+0x0e77`–`+0x0e96`),
+and its icon frame is selected by `using_bow` at `+0x0eb5`.
+
+The `swap_weapons` phase itself is a plain toggle in overlay frame 52
+`DoAction@0x240c7f` (`+0x4d23`): `using_bow != true` sets
+`game_attacker.equipped_weapon = 2` and `using_bow = true` (`+0x4dbd`,
+`+0x4dce`); otherwise it sets `equipped_weapon = 1` and `using_bow = false`
+(`+0x4eba`, `+0x4ecb`). It sets `staminacost = 1` (`+0x4d35`) and never checks
+that the secondary weapon is a bow. Since root frame 221 forces
+`equipped_weapon = 1` and `using_bow = false` at battle construction, a hero
+always starts on a warrior controller and must spend one turn on
+`swap_weapons` before either archer controller can be selected.
+
+### Turn gating, forced phases, and per-turn re-entry
+
+`getphase(whatsdoing)` runs its body only when `turnphase == 1`
+(`+0x0355`–`+0x0365`); the whole body, including the jump to `heroactions`, is
+skipped otherwise. On success it sets `turnphase = 2` (`+0x0372`) and
+`inv_struck = false` (`+0x03a0`). `turnphase` is written back to `1` at exactly
+one site in the build: overlay frame 1 timeline `+0x0a8f`. Therefore **at most
+one `getphase` call takes effect per pass through frame 1**, and every later
+call in that turn is a silent no-op.
+
+Frame 1's timeline then runs a fixed chain of forced phases, all after the
+`turnphase = 1` reset, in this order:
+
+| Order | Condition | Forced call | Offsets |
+| --- | --- | --- | --- |
+| 1 | `ammo_left <= 0` and `using_bow == true` | `getphase("swap_weapons")` | `+0x0cce`–`+0x0d0e` |
+| 2 | `staminaleft <= 0` | `getphase("rest")` | `+0x0d2e`–`+0x0d48` |
+| 3 | `taunted1 == true` or `taunted2 == true` | facing right → `getphase("runleft")`, facing left → `getphase("runright")` | `+0x0d68`–`+0x0e35` |
+| 4 | `frozen == true` | `getphase("frozen")` | clear `+0x0e79`, call `+0x0e81` |
+| 5 | `burning == true` | `getphase("burning")` | read `+0x0ea1`, clear `+0x0ec5`, call `+0x0ecd` |
+| 6 | `poison == true` | `getphase("poisoned")` | clear `+0x0f11`, call `+0x0f19` |
+| 7 | `life_stolen == true` | `getphase("life_stolen")` | read `+0x0f39`, clear `+0x0f5d`, call `+0x0f65` |
+
+These are sequential statements, not an if/else chain, and each one clears its
+own flag *before* calling `getphase`. Combined with the `turnphase` gate this
+means a lower-priority condition can have its flag consumed by a call that does
+nothing — for example a forced rest at zero stamina clears and discards a
+pending `burning` phase in the same pass. Note also that the field is `poison`
+while the phase label is `poisoned`.
+
+The taunted-run rule is mirrored, not shared. The hero runs **against** its
+facing (`gladiator_dir == "right"` → `runleft` at `+0x0dc2`/`+0x0de3`), whereas
+`villainChooseAction` in frame 52 `DoAction@0x23f835` runs the villain **with**
+its facing (`right` → `villaindecisionA = "runright"` at `+0x1224`/`+0x1246`,
+`left` → `runleft` at `+0x1268`/`+0x128a`). The hero path clears only
+`taunted1` in both branches (`+0x0ddb`, `+0x0e2d`) even though the entry
+condition also tests `taunted2`; `villainChooseAction` clears each flag in its
+own block (`+0x123e`, `+0x1282`, `+0x12e6`, `+0x132a`). `taunted1` is set true
+at exactly one site in the build — the taunt phase at `+0x6ad9`, on
+`game_defender` — and `taunted2` is **never** assigned `true` anywhere, so the
+hero-side `taunted2` term and its missing clear are latent in this build.
+
+Re-entry is per turn, not per action. `nextphase` (overlay frame 52
+`DoAction@0x240c7f`, anonymous function at `+0x3193`) advances
+`battle_action` while it is below 3 (`+0x3613`–`+0x3637`), and when it reaches
+3 it calls `changeCombatants`, nulls `battle_action`, deletes both fighters'
+`onEnterFrame` handlers and calls `this.gotoAndPlay("initialise")`
+(`+0x3648`–`+0x3692`). So the selector, the `turnphase` reset and the forced
+chain all re-run once per completed turn. `nextphase` also resets
+`game_attacker.psyche_up = 1` whenever `phase_decision != "psyche_up"`
+(`+0x35c7`–`+0x35ea`), and `damagecharacter` resets the defender's counter the
+same way at `+0x1be4`.
+
+### `getphase` does not validate its argument (byte-verified 2026-08-30)
+
+The function is seven statements long and has been decoded in full. Its entire
+body, in order:
+
+```text
+if (turnphase != 1) return;                    // +0x0355..+0x0365
+decisionA = whatsdoing;                        // +0x036a  (the parameter, register:2)
+turnphase = 2;                                 // +0x0372
+this.battle_action = 1;                        // +0x037d
+inventory_overlay.removeMovieClip();           // +0x038a..+0x039f
+inv_struck = false;                            // +0x03a0
+this.gotoAndPlay("heroactions");               // +0x03a8, +0x03b7 Play
+```
+
+There is **no label table, no membership test, and no read of `_currentframe`
+or of any controller-frame state**. `whatsdoing` is stored verbatim. Downstream,
+`phase_decision` is assigned at exactly five sites, all inside the
+`attacker.onEnterFrame` machine and all selected by `battle_action`, not by
+frame: `decisionA` at `+0x3a9b` (`battle_action == 1`), `villaindecisionA` at
+`+0x3ac0`, `decisionB` at `+0x3ae5`, `villaindecisionB` at `+0x3b0a`, and `null`
+at `+0x3b18`. All 75 `phase_decision` references in the build live in overlay
+frame 52 `DoAction@0x240c7f`, and the dispatch from `+0x3b1f` onward is a flat
+chain of string comparisons. The only two `_currentframe` reads anywhere in
+that block are on other objects entirely — `damage_icon.damage_splat`
+(`+0x18ad`) and `bullet` (`+0x9185`).
+
+**This settles a disagreement with
+[the runtime-capture workflow](ss2-runtime-capture.md) §Hero action
+vocabulary**, which states that "`getphase(whatsdoing)` accepts only the labels
+defined by the controller frame currently in scope". At the byte level that is
+not a property of `getphase`; the table there is an accurate record of which
+labels each controller frame **wires to buttons** (§Buttons wired per
+controller frame above), which is a different claim. Nothing in the decode
+implements "accepts only": there is no rejection path, no failure return, and
+no state the function could consult to build one.
+
+Two structural points make the same case without appealing to the decode alone.
+The frame-1 row of that table is not a button set — those eight labels are the
+forced phases frame 1 issues to *itself* (the table above), and seven of them
+(`swap_weapons`, `runleft`, `runright`, `frozen`, `burning`, `poisoned`,
+`life_stolen`) are wired by no controller frame anywhere, `rest` being the lone
+exception. And frames 1–4 carry no `Stop`, so the playhead never rests on
+`initialise`: by the time a label its forced call issued is dispatched at frame
+52, the frame that "owned" it is long gone and nothing re-checks. The scope the
+table describes is real for *what the player can press*, and has no
+representation inside the dispatch path.
+
+The consequence for the capture wrapper is that its availability gate
+(`ss2-capture-wrapper.as`, `CONTROLLERS` / `stepAutopilot`, which refuses a step
+the resting controller does not offer) is **stricter than the build requires**.
+That is the safe direction and the gate should stay — an unattended run that
+issues an unreachable label burns its one effective `getphase` for the turn and
+stalls with no trace — but the restriction is the wrapper's, not the game's, and
+neither this map nor the bytes should be cited as evidence for it.
+
+What is *not* settled is whether such a cross-controller call completes
+end-to-end at runtime. Nothing above has been observed live, because every
+capture so far issued only labels its resting controller offered. **The
+experiment that would settle it** is one bout that calls
+`getphase("power_attack")` while the overlay rests on frame 12
+(`longrange_warrior`, which wires no melee attack) and shows a `checkattackroll`
+draw plus a `defender-hurt` or `defender-blocked` event in the trace — a
+melee attack takes no distance or range test (§Where `attack_direction` is
+assigned), so nothing else should stand in the way. A single such capture would
+confirm it; a stall with no roll would refute it and mean some gate exists that
+this decode missed.
+
 ## Combatant state objects
 
 Persistent combat data lives in `_root.game.hero` and `_root.game.villain`.
@@ -122,9 +397,21 @@ normalizes undefined status flags to `false` and reads the facing from the
 clip. Live captures also confirmed the `battlevalues` armour sums three
 times over (boot 4 + greaves 4 → 20; helmet 2 + shield 2 → 44; breastplate 1
 + gauntlet 1 → 21), the full physical roll order of a normal attack, the
-`attack_chances` normal formula (attack 3 vs defence 1 → chance 60, hit at
-diceroll 50), the deflection threshold with helmet 2 (97), the armour-first
-damage path, and the unconditional breastplate-stamina write.
+`attack_chances` normal formula (attack 3 vs defence 1 → chance 60, and a hit
+against the derived `rollneeded` 40), the deflection threshold with helmet 2
+(97), the armour-first damage path, and the unconditional breastplate-stamina
+write.
+
+**What a capture can and cannot confirm.** Every claim above rests on the
+observed channels: the ordered mutation trace, the semantic events, the result
+event, the state dumps, `attack_direction`, `fight_mode`, and the *number* of
+draws in the armed window. A capture never observes a roll's bounds or value —
+the wrapper's tap sits on `Math.random`, which takes no arguments, so each
+`roll` line is echoed from the injected tape, which was generated from the
+fixture under test (runtime-capture §What a match actually establishes). So
+where a runtime note in this map names a roll value, that value was *supplied*
+to the build; what the run measured is the outcome the build reached with it.
+Only the draw count constrains the roll stream itself.
 
 Observed data fields include:
 
@@ -141,33 +428,170 @@ Observed data fields include:
 | Conditions | `psyche_up`, `taunted1`, `taunted2`, `burning`, `frozen`, `poison`, `life_stolen`, and timed `spell_*` fields |
 | Inventory | `inventory1` through `inventory6` |
 
-`battlevalues(whichcharacter)` in root frame 35 derives, among other values:
+`battlevalues(whichcharacter)` is `DefineFunction2` at `+0x3062` of root frame
+35 `DoAction@0x3fa9dc`. Register bindings, read off the operands: `register:1`
+is `_root`, `register:2` is `_global`, `register:3` is the `whichcharacter`
+argument. Every offset below was re-read from the bytes on 2026-08-30 rather
+than carried over.
+
+### `battlevalues`: the unconditional derivations
+
+These run on **every** call, in battle or out of it:
 
 ```text
-physical_size = 80 + round(strength / 1.5)
-min_damage = round(strength * 2) + weapon_min_damage
-max_damage = round(strength * 2) + weapon_max_damage
-secondary_min_damage = round(strength) + secondary_weapon_min_damage
-secondary_max_damage = round(strength) + secondary_weapon_max_damage
-hitpointsmax = herolevel * 10 + vitality * 20
-staminamax = 100 + stamina * 10
-movement_speed = clamp(round(speed * 1.5), 4, 60)
-armourclass_max = sum(the active per-piece defence values)
+physical_size        = 80 + round(strength / 1.5)                     // +0x30f1
+breastplate_defence  = round(breastplate * _global.breastplate_dval)  // +0x3480
+helmet_defence       = helmet > 25 ? round(herolevel * 0.5 * 10)      // +0x34eb
+                                   : round(helmet * 10)               // +0x34bf
+  (…the other six pieces likewise, +0x351f onward)
+min_damage           = round(strength * 2) + weapon_min_damage        // +0x3356
+max_damage           = round(strength * 2) + weapon_max_damage        // +0x3386
+secondary_min_damage = round(strength * 1) + secondary_weapon_min_damage  // +0x33b6
+secondary_max_damage = round(strength * 1) + secondary_weapon_max_damage  // +0x33e6
+if (using_bow) { min_damage = secondary_min_damage;                   // +0x3416
+                 max_damage = secondary_max_damage; }
+hitpointsmax         = herolevel * 10 + vitality * 20                 // +0x378e
+staminamax           = 100 + stamina * 10                             // +0x37b6
+movement_speed       = clamp(round(speed * 1.5), 4, 60)               // +0x37d2
+_root.game.hero.experiencelast   = round((L-1)*(L-1)*((L-1)/5)*300)   // +0x3845
+_root.game.hero.experienceneeded = round(L*L*(L/5)*300)               // +0x38d3
+if (_root.game.hero.experienceneeded < 125) … = 125                   // +0x398c
 ```
 
-The armour piece multipliers assigned in this function are breastplate 16,
-helmet 10, shinguard 6, greaves 3, shoulderguard 8, gauntlet 5, boot 2, and
-shield 12. Helmet normally contributes `round(helmet * 10)`, but a helmet value
-above 25 instead contributes `round(herolevel * 0.5 * 10)`. Shield defence is
-zero while `using_bow`; otherwise it contributes `round(shield * 12)`. Thus
-`armourclass_max` does not always include the shield. These are verified static
-calculations, but they are not yet a complete save-schema map.
+The `using_bow` override at `+0x3416` was not previously recorded here, and the
+map's earlier formula list implied the two pairs were independent. They are not:
+it is a plain `if (using_bow)` (`GetMember`, `Not`, `If` past the block), so in
+bow mode `min_damage`/`max_damage` are **overwritten by the secondary pair** —
+carrying the `round(strength * 1)` scaling, not `round(strength * 2)`. Every
+damage row in the `attack_direction` dispatcher (below) reads
+`min_damage`/`max_damage`, so all of them silently follow the weapon mode.
+Because `swap_weapons` writes only `using_bow` and `equipped_weapon`
+(§Weapon mode and `swap_weapons`) and derives nothing itself, the damage pair
+does not move at the instant of the swap: it moves at the next `battlevalues`,
+which `nextphase` runs for both combatants at every phase transition.
+
+**Hazard: the two experience writes are on `_root.game.hero` unconditionally.**
+`L` above is `_root.game.hero.herolevel`, not `whichcharacter.herolevel`, and
+both `SetMember` targets are `_root.game.hero` — `register:1`, never
+`register:3`. They are not inside any branch. So **calling `battlevalues` for a
+villain rewrites the hero's progression fields**, and `nextphase` calls it for
+both combatants at every phase transition (`+0x35f1` attacker, `+0x3605`
+defender). In vanilla this is invisible because the values are pure functions of
+`herolevel` and so are idempotent; it becomes a real hazard for anything that
+stages `experienceneeded`/`experiencelast`, or that calls `battlevalues` on a
+scratch object and expects the hero untouched. The floor at `+0x398c` also
+explains a correction the project made from observation: at `herolevel` 1 the
+formula gives `round(1 * 1 * 0.2 * 300) = 60`, and the floor immediately
+replaces it with **125** — which is the value the arena route measured live,
+and 60 is what an audit reading the formula without the floor would report.
+
+### `battlevalues`: the block skipped during a battle
+
+`+0x3a90` reads `_global.battle_started`; if it is `true` the `If` at `+0x3aa0`
+jumps 360 bytes to `+0x3c0d`, skipping this whole block:
+
+```text
+hitpoints       = round(hitpointsmax)                                 // +0x3aa5
+armourclass_max = breastplate_defence + helmet_defence + shinguard_defence
+                + greaves_defence + shoulderguard_defence
+                + gauntlet_defence + boot_defence + shield_defence    // +0x3ac3
+armourclass     = armourclass_max                                     // +0x3b0f
+if (!(staminaleft > 0)) staminaleft = staminamax                      // +0x3b1c
+if (!(ammo_left  > 0) || ammo_left == undefined)
+                        ammo_left  = maximum_ammo                     // +0x3b45
+character_xp    = secondary_min_damage + secondary_max_damage * 10
+                + min_damage + max_damage * 20
+                + weapon_enchantment_damage * 10
+                + secondary_weapon_enchantment_damage * 10
+                + herolevel^2 + armourclass * 10 + 150                // +0x3b82..+0x3c0c
+```
+
+Three consequences follow directly, and they are the reason staged fields
+behave differently from one another:
+
+- **`armourclass_max` is summed only outside a battle.** The eight per-piece
+  `*_defence` fields are recomputed unconditionally at `+0x3480` onward, but
+  nothing re-sums them into `armourclass_max` while `battle_started` is true,
+  and `armourclass` is not reset either. Once a battle starts the only writer of
+  `armourclass_max` in the whole build is `remove_armour`, which subtracts a
+  destroyed piece's defence from it (`+0x0352`, `+0x048d`, `+0x064d`, `+0x072f`,
+  `+0x087e`, `+0x0a1a`, `+0x0b69`, `+0x0cb8`) and zero-clamps it at `+0x0d94`;
+  `armourclass` additionally takes the two damage ingresses' subtractions and
+  `check_stats`'s clamps. This is the byte-level reason staged armour survives a
+  bout where staged `hitpoints` does not — but see the sharper form below,
+  because *which* armour field is staged decides the answer.
+- **`hitpointsmax` is recomputed unconditionally** (`+0x378e`), while the full
+  heal that would raise `hitpoints` to match is inside the skip. Combined with
+  `check_stats` clamping `hitpoints` down to `hitpointsmax` (next section),
+  a staged `hitpoints` above maximum cannot survive one phase transition, and a
+  staged `hitpointsmax` cannot survive one `battlevalues` call.
+- **`character_xp` is not recomputed during a battle.** It is the win reward's
+  input (§Battle result and reward callbacks), and it is frozen at the value
+  computed the last time `battlevalues` ran with `battle_started` false — i.e.
+  at generation, when `armourclass` still equalled `armourclass_max`. The reward
+  therefore reflects the loser's *undamaged* armour, whatever the bout did to it.
+
+### `check_stats` is a pure clamp
+
+`check_stats(whichcharacter)` is `DefineFunction2` at `+0x10e4` of overlay frame
+52 `DoAction@0x240c7f`, and its body (`+0x110a`–`+0x11ff`) is three clamped
+pairs and nothing else:
+
+| Field | Upper clamp | Lower clamp |
+| --- | --- | --- |
+| `staminaleft` | to `staminamax` `+0x1122` | to `0` `+0x114b` |
+| `hitpoints` | to `hitpointsmax` `+0x1174` | to `0` `+0x119d` |
+| `armourclass` | to `armourclass_max` `+0x11c6` | to `0` `+0x11ef` |
+
+No other member is written, nothing is derived, and there is no RNG. The lower
+clamps are `if (!(x > 0)) x = 0`, so they also convert `undefined` and `NaN` to
+zero.
+
+It has exactly **11 call sites** (12 references including the definition):
+`magic_damage_character` `+0x14e0`, `damagecharacter` `+0x193c`, six inside
+`nextphase` (`+0x334d`, `+0x33b1`, `+0x346a`, `+0x3523`, `+0x3535`, `+0x35bb`),
+and three in the `attacker.onEnterFrame` machine (`+0x525c`, `+0x5d6d`,
+`+0x68d3`). Both damage ingresses call it **one instruction before the defeat
+gate** — `+0x1948 CallFunction`, `+0x1949 Pop`, `+0x194a` first opcode of the
+gate — so the gate always tests clamped values.
+
+**The sharp form of "staged armour survives".** `check_stats` clamps
+`armourclass` to `armourclass_max`, and in battle `armourclass_max` is whatever
+it was when the fight began. So:
+
+| Staged field | Survives a phase transition? |
+| --- | --- |
+| `helmet`, `greaves`, … (piece ids) | yes — never written by `battlevalues` |
+| `<piece>_defence` | **no** — recomputed from the piece id at `+0x3480` onward |
+| `armourclass_max` | yes — its only writers in battle are `remove_armour` |
+| `armourclass` | yes, but clamped to the current `armourclass_max` |
+| `hitpoints`, `hitpointsmax`, `min_damage`, `max_damage`, `staminamax`, `physical_size`, `movement_speed` | no — recomputed unconditionally |
+
+This is a static reading of the writers, not a runtime measurement. The two
+rows that matter for the `candidate-armoured-*` family are the second and
+third: staging a `<piece>_defence` name alone is overwritten before the first
+roll, and staging piece ids alone changes the deflection threshold and
+`remove_armour`'s piece selection without moving `armourclass_max`. Confirming
+which of those a capture actually produces needs a bout, not a decode.
+
+Back in `battlevalues`: the armour piece multipliers are written to `_global` at
+the top of that function (`+0x3089`–`+0x30f0`) as `<piece>_dval` —
+breastplate 16, helmet 10,
+shinguard 6, greaves 3, shoulderguard 8, gauntlet 5, boot 2, and shield 12.
+Helmet normally contributes `round(helmet * helmet_dval)`, but a helmet value
+above 25 instead contributes `round(herolevel * 0.5 * helmet_dval)`
+(`+0x34a7`–`+0x351e`). Shield defence is zero while `using_bow`; otherwise it
+contributes `round(shield * 12)`. Thus `armourclass_max` does not always include
+the shield. These are verified static calculations, but they are not yet a
+complete save-schema map.
 
 Maximum ammunition is tiered by character level: 5 below level 9, 10 for levels
-9–22, 15 for 23–27, 20 for 28–34, 25 for 35–44, and 30 at level 45 or above.
-When `_global.battle_started` is false, `battlevalues` refills hitpoints and
-armour; stamina and ammunition refill only when their current values are zero,
-negative, or undefined as applicable.
+9–22, 15 for 23–27, 20 for 28–34, 25 for 35–44, and 30 at level 45 or above
+(the chain runs `+0x3634`–`+0x378d`, with the assignments at `+0x364b`,
+`+0x368e`, `+0x36d1`, `+0x3714`, `+0x3757` and `+0x3781`; the level-45 arm
+re-tests `herolevel >= 35` redundantly at `+0x3769`, which changes nothing).
+The tier assignment is unconditional, but the `ammo_left` refill that consumes
+it is inside the `battle_started` skip above.
 
 ## RNG surface
 
@@ -186,6 +610,35 @@ choose `attack_direction` and therefore affect combat. Exact deterministic parit
 cannot be achieved by replacing only `randomBetween`; both sources must be
 routed through one ordered roll stream, with cosmetic rolls either represented
 in that stream or removed from authoritative simulation.
+
+The overlay's complete `RandomNumber` inventory is small enough to enumerate
+(byte-verified 2026-08-30; nine opcode sites on sprite 862):
+
+| Site | Use | Draws per invocation |
+| --- | --- | --- |
+| `destroy_armour` `+0x0dfb`, `+0x0e28` | `xspeed`, `-30 + RandomNumber(20)` facing right or `10 + RandomNumber(30)` facing left | exactly one of the two |
+| `destroy_armour` `+0x0e5b`, `+0x0e6f` | `dy = -40 + RandomNumber(20)`, `rotationspeed = -5 + RandomNumber(5)` | both, unconditionally |
+| `attacker.onEnterFrame` `+0x5091` | `attacker.wincrowd_move = 1 + RandomNumber(6)`, only while the member is `undefined` (`+0x5071`) | at most one per battle |
+| `attacker.onEnterFrame` `+0x7815`, `+0x7845`, `+0x7875` | `attack_direction = 1 + RandomNumber(9)` on the `cast_weaken_armour` path | three |
+| frame 74 `DoAction@0x24a8ba` `+0x0149`, `+0x039b` | `combatlost` presentation, outside the turn loop | — |
+
+So `destroy_armour` consumes exactly three rolls per call, of which only the
+first is facing-selected — and if `gladiator_dir` matches neither `"right"` nor
+`"left"`, that first roll is instead `randomBetween(-30, 60)` at `+0x0e30`,
+which *would* consume a tape slot. Only the `cast_weaken_armour` trio is
+authoritative; the rest is presentation, but the fallback above shows the
+cosmetic path can still perturb tape position.
+
+Two `randomBetween` draws on the taunt path also precede `checkattackroll` and
+must be budgeted before its own `diceroll`: `diceroll = randomBetween(1, 100)`
+at `+0x6921`, which succeeds when `diceroll < game_attacker.taunt_percentage`
+(`+0x694b` — note the polarity is the direct comparison, not the dispatcher's
+`100 - chance` form), and then `taunt_effect = randomBetween(1, 2)` at
+`+0x6952`. Only `taunt_effect == 1` sets `attack_direction = 20` and calls
+`checkattackroll`; `taunt_effect == 2` runs a charisma-scaled knockback or sets
+`game_defender.taunted1 = true` (`+0x6ad9`) and never reaches the dispatcher.
+The taunt phase also carries a 60-tick watchdog (`taunttimer`, `+0x67e4`) that
+calls `nextphase` and abandons the phase if the animation never reports back.
 
 Recommended adapter boundary: rules accept explicit samples (or an injected,
 versioned RNG) and emit outcomes. Movie clips consume outcomes and may use a
@@ -219,14 +672,191 @@ snipe chance. This is counterintuitive; treat it as a statically mapped build
 behavior or possible vanilla bug and confirm it with golden runs before
 encoding measured rules.
 
+### Where `attack_direction` is assigned (byte-verified 2026-08-30)
+
+The dispatcher table below records what each direction band *means*; this
+records where the value comes from. Across the whole build `attack_direction`
+is assigned at seventeen sites — fifteen to the overlay timeline variable, and
+two to a same-named member on the fighter clip — all inside overlay frame 52
+`DoAction@0x240c7f`, and all inside the one anonymous function assigned to
+`attacker.onEnterFrame` at `+0x36ae` (the `phase_decision` state machine).
+Everything else that mentions the name is a read, or the shadowing parameter of
+`remove_armour(whichcharacter, whichavatar, attack_direction)` and
+`damagecharacter(..., attack_direction)`.
+
+| Phase branch | Site | Expression | RNG kind |
+| --- | --- | --- | --- |
+| `power_attack` (`+0x601d`) | `+0x608a` | `randomBetween(9, 12)` | `randomBetween` |
+| `normal_attack` (`+0x6191`) | `+0x61f1` | `randomBetween(5, 8)` | `randomBetween` |
+| `quick_attack` (`+0x62f8`) | `+0x635c` | `randomBetween(1, 4)` | `randomBetween` |
+| `bash_attack` (`+0x6463`) | `+0x64c3` | `23` | none |
+| `psyche_up` (`+0x652d`), facing right | `+0x669e` | `30` | none |
+| `psyche_up`, facing left | `+0x6717` | `30` | none |
+| `taunt` (`+0x679c`) | `+0x6981` | `20` | none |
+| `bombardright`/`bombardleft` | `+0x6c67` | `21` | none |
+| `sniperight`/`snipeleft` | `+0x6c8c` | `22` | none |
+| `cast_weaken_armour` (`+0x7782`) ×3 | `+0x7815`, `+0x7845`, `+0x7875` | `1 + RandomNumber(9)` | `RandomNumber` opcode |
+| `cast_whirlwind` (`+0x78e0`), facing right | `+0x79d0` | `30` | none |
+| `cast_whirlwind`, facing left | `+0x7a49` | `30` | none |
+| `cast_ghost_strike` (`+0x7dbd`) | `+0x7ebb` | `randomBetween(9, 12)` | `randomBetween` |
+
+Only the four `randomBetween` draws — power, normal, quick and ghost strike —
+are interceptable and recordable by the capture wrapper. The three
+`cast_weaken_armour` draws use the AVM1 `RandomNumber` opcode directly and can
+be neither observed nor injected by a wrapper that only replaces
+`randomBetween`; the remaining eight sites are fixed constants and need no
+sample at all. This is the boundary that decides what a capture campaign can
+ever control on the direction input.
+
+The two charge sites are the exception that explains an earlier runtime
+observation. `chargeright` (`+0x41f5`) at `+0x4398` and `chargeleft`
+(`+0x4461`) at `+0x4604` both execute
+`attacker.attack_direction = 9` as a **`SetMember` on the fighter clip**, then
+call `checkattackroll()` at `+0x43a3`/`+0x460f`. `checkattackroll` reads the
+overlay timeline variable with `GetVariable` (`+0x2c68`, `+0x2c80`, `+0x2cd7`,
+…) and never reads the clip member, so the charge write is invisible to it.
+That is why the 2026-08-30 charge capture saw `attack_direction` **undefined**
+inside `checkattackroll`: not a missing assignment, but an assignment to the
+wrong object. Reconstructions must not "fix" this by treating a charge as
+direction 9.
+
+Note also that `power_attack`, `normal_attack` and `quick_attack` draw their
+direction and call `checkattackroll()` with **no distance or range test**
+(`power_attack` runs straight from `+0x607c` to the call at `+0x6146`). Only
+`psyche_up` and `cast_whirlwind` gate on range, comparing `attacker._x` against
+`defender._x -/+ round(game_attacker.weapon_range + 50)` by facing
+(`+0x6658`–`+0x6699` and `+0x66d1`–`+0x6712`). Out of range those two decide
+nothing at all — no roll, no damage, no death — while a melee attack issued
+from any distance still resolves. The phase machine itself never consults the
+controller frame, so a driver that calls `getphase` directly can reach a label
+the current controller does not wire — byte-verified in
+§`getphase` does not validate its argument, which also records why the capture
+wrapper nonetheless refuses to do it and what would settle the question live.
+
+Direction 30 has exactly two producers in the table above: the `psyche_up`
+counter and `cast_whirlwind`. Only the first is a player action with a
+`getphase` label — `cast_*` labels are consumed by the phase machine and have
+no callable entry point (§Spell and vanilla AI surface) — so `psyche_up` is the
+only route a capture can drive, and every controller wires it (above:
+`herolevel >= 7` on the warrior frames, `>= 3` on the archer frames).
+
+The `psyche_up` counter's full lifecycle is: the phase plays
+`psyche_up`, `psyche_up2` or
+`psyche_up3` for counter values 1, 2 and >= 3 (`+0x658a`, `+0x65b9`, `+0x65ef`);
+at 3 it fires the range-gated grievous and then writes
+`game_attacker.psyche_up = 1` at `+0x6738`; when the animation reports back
+(`attacker.struck == true`) it adds one at `+0x6761`. Statically the counter
+therefore lands on 2, not 1, after a discharge, which would let the next
+`psyche_up` press discharge again. Recorded as a static candidate — the two
+writes are in different ticks of the same phase, so a runtime capture of two
+consecutive `psyche_up` presses would settle it. Every non-`psyche_up`
+decision resets the counter through `nextphase` (`+0x35e0`), and taking damage
+resets the defender's through `damagecharacter` (`+0x1be4`).
+
+### Spell-path reuse of `attack_direction` (byte-verified 2026-08-30)
+
+`cast_weaken_armour` is the only cast path that reuses `attack_direction` as an
+armour-piece selector. Its body repeats the pair
+
+```text
+attack_direction = 1 + RandomNumber(9);           // +0x7815 / +0x7845 / +0x7875
+remove_armour(game_defender, defender, attack_direction);
+                                                  // +0x7839 / +0x7869 / +0x7899
+```
+
+three times in a row, immediately after `attacker.gotoAndPlay("Cast1")` at
+`+0x7800`. Argument binding is verified against the `remove_armour`
+`DefineFunction2` header in overlay frame 52 `DoAction@0x23d7fe` `+0x0265`, and
+matches the physical-path call in `damagecharacter` (`+0x176a`, `+0x1791`,
+pushing `register:3`, `register:5`, `register:6`).
+
+Three boundaries must not be blurred:
+
+- This value is **not** a physical attack direction. It is drawn on a cast
+  path, it never reaches `checkattackroll`, and it feeds only the piece-group
+  selection inside `remove_armour`. Its `1..9` range also means directions
+  10–12, and the group memberships they carry, are unreachable from this path.
+- It is a `RandomNumber` opcode draw, so unlike the physical bands it cannot be
+  recorded or injected. A `cast_weaken_armour` fixture can only be an
+  observation of the outcome, never a controlled sample.
+- `magic_damage_character` remains, as byte-verified in its own section below,
+  entirely free of any armour-removal call. `remove_armour` has exactly five
+  call sites in the build — two in `damagecharacter` and these three — so no
+  spell *damage* ingress removes armour; only this one spell *effect* path
+  does.
+  `cast_whirlwind` and `cast_ghost_strike` write `attack_direction` for the
+  physical dispatcher instead and call `checkattackroll` — at `+0x79db` and
+  `+0x7a54` for whirlwind (after the same `weapon_range + 50` range gate as
+  `psyche_up`, `+0x79a8`/`+0x79c9`) and at `+0x7f77` for ghost strike, which
+  first plays `Attack9`–`Attack12` from its drawn band. Neither calls
+  `remove_armour`.
+
+The direction-to-piece mapping inside `remove_armour` is fully determined and
+applies to both call families (overlay frame 52 `DoAction@0x23d7fe`):
+
+| Directions | Selector | Pieces in selector order |
+| --- | --- | --- |
+| 1, 5, 8, 9 (`+0x02ac`–`+0x02e2`) | `armour_to_remove = randomBetween(1, 2)` (`+0x02f3`) | helmet (`+0x0320`), shoulderguard (`+0x050a`) |
+| 2, 4, 6, 10, 12 (`+0x0595`–`+0x05dd`) | `randomBetween(1, 3)` (`+0x05ee`) | breastplate (`+0x0694`), gauntlet (`+0x07ac`), greaves (`+0x08fb`) |
+| 3, 7, 11 (`+0x0986`–`+0x09aa`) | `randomBetween(1, 3)` (`+0x09bb`) | shinguard (`+0x0a97`), boot (`+0x0be6`), shield (`+0x0d35`) |
+
+Every `remove_armour` call therefore consumes exactly one interceptable
+`randomBetween` sample, and it is drawn *before* the per-piece
+`piece != 0` test (`+0x0328` for helmet, and the matching tests in the other
+groups), so the sample is consumed even when the selected piece is not
+equipped and nothing is destroyed. A `cast_weaken_armour` cast consumes three
+of them.
+
+Directions outside 1–12 fall through all three group tests and
+consume nothing; the unmatched path reaches only the trailing
+`armourclass` / `armourclass_max` zero-clamp (`+0x0d4d`–`+0x0da4`). That is the
+byte-level reason the direction-30 grievous's unconditional `remove_armour`
+call cannot destroy equipment, as the earlier section suspected.
+
+**Runtime-resolved 2026-08-30.** The draw-before-the-equipped-test ordering
+above, and the physical path's `> 66` removal gate, are now measured — by the
+one probe pair whose arms are separated by the **draw count alone**. The pair
+`golden-probe-armour-removal-gate-{below,above}` stages a direction-5 hit
+against the unarmoured tutorial prisoner and moves only the injected removal
+roll, 66 against 67. Events, mutation trace and final state are identical; the
+67 arm draws one extra `randomBetween(1, 2)` in the mapped position. So 66 does
+not clear the gate and 67 does, and the group selection is drawn even against a
+defender who wears nothing in the selected group. Because that defender wears
+no armour, the extra draw is the *only* trace the call leaves — which is
+exactly why the pair is evidence where a repeated kill capture would not be.
+
 ### Attack roll dispatcher
 
 `checkattackroll` is an anonymous function assigned in overlay frame 52. It
 calls `attack_chances`, rolls `diceroll = randomBetween(1, 100)`, derives damage
 and a critical sample from `attack_direction`, then computes
-`rollneeded = 100 - chance`. Control flow is consistent with a hit when
-`diceroll >= rollneeded`; the miss branch runs only when
-`diceroll < rollneeded`.
+`rollneeded = 100 - chance`. A hit runs when `diceroll >= rollneeded`; the miss
+branch runs only when `diceroll < rollneeded`.
+
+**Runtime-resolved 2026-08-30.** That comparison used to be recorded here as
+only *consistent with* the control flow. Three promoted probe pairs settle it.
+Each pair stages one fight (attacker attack 1 against defender defence 0, so
+`ratio = 10/9`) twice and moves the injected `diceroll` by one, and the arms
+separate in an observed channel — `defender-blocked` against `defender-hurt`:
+
+| Band | Direction | `chance` | Miss at | Hit at | Goldens |
+| --- | --- | --- | --- | --- | --- |
+| quick | 1 | 73 | 26 | 27 | `golden-probe-quick-rollneeded-{miss,hit}` |
+| normal | 5 | 56 | 43 | 44 | `golden-probe-normal-rollneeded-{miss,hit}` |
+| power | 9 | 37 | 62 | 63 | `golden-probe-power-rollneeded-{miss,hit}` |
+
+The three smallest hitting rolls are exactly `100 - chance`, which is the
+inclusive reading. A strict `diceroll > rollneeded` would require chances
+74 / 57 / 38, and none of the factors in the table above yields any of them at
+this ratio — so the three pairs together decide the comparison's *polarity*,
+not merely three thresholds. The miss arms are also evidence for the ordering
+in the sentence above — a miss still consumes its band's damage and critical
+draws and nothing after them — but only to the strength of the draw count,
+which catches a run that drew *fewer* samples than the fixture models more
+readily than one that drew more (runtime-capture §Reading divergent traces).
+Note what these pairs do **not** establish: the injected dicerolls themselves
+are echoed back from the tape, never measured. What the capture measured is
+which side of the bracket each arm landed on.
 
 | `attack_direction` | Damage | Critical sample | Chance field |
 | --- | --- | --- | --- |
@@ -246,13 +876,50 @@ dispatches `defender_hurt("critical")`, and all other hits dispatch
 critical. Its threshold simplifies to
 `(100 - 1.5 * game_defender.helmet) + game_defender.greaves`; an inclusive
 1–100 roll at or above that threshold clears the critical, except that direction
-30 remains grievous. This counterintuitive operand mix also needs a fixture.
-A miss calls `defender_blocked()`.
+30 remains grievous. A miss calls `defender_blocked()`.
+
+**Runtime-resolved 2026-08-30 — the comparison, not the formula.** The
+inclusive "at or above" reading is now measured. The pair
+`golden-probe-deflection-threshold-{critical,cleared}` stages one fight against
+a defender wearing neither helmet nor greaves, so the threshold is
+`100 - 0 + 0` — the largest
+value the roll can take — and move only the deflection roll, 99 against 100.
+The arms are identical in mutations, final state and draw count; the single
+channel that moves is the dispatched method, `critical` against `normal`. A
+strictly-above reading would have predicted `critical` on both. This settles
+the boundary and nothing else: the operand mix in the threshold formula is
+still unobserved, and `candidate-deflection-threshold-discriminator`, whose
+injected roll 85 sits between the rival readings 83 < 85 < 87 against helmet 10
+and greaves 2, is still the fixture that would settle it.
 
 `defender_hurt` selects an animation label (`hurtN`, adjusted for ranged
 directions, or `knockback`), calls
 `damagecharacter(defender, attacker, game_defender, game_attacker,
-damage_method, attack_direction)`, then plays the defender animation.
+damage_method, attack_direction)`, then plays the defender animation. The
+animation label is `"hurt" + attack_direction` (`+0x2086`), rewritten to
+`"hurt" + (attack_direction - 20)` for directions 21–23 (`+0x2093`–`+0x20d6`)
+and replaced by `knockback` when the direction is 30 (`+0x20dd`–`+0x20ec`).
+
+**Knockback dispatch gate (byte-verified 2026-08-30).** Knockback is not
+dispatched on every hit, and the map previously documented only the force.
+Inside `damagecharacter`, with `register:6 = attack_direction`, the whole
+knockback block is guarded by a short-circuit chain at `+0x1a72`–`+0x1aa5`:
+`attack_direction >= 5` (`+0x1a7c`) **and** `attack_direction <= 12`
+(`+0x1a90`), **or** `attack_direction == 30` (`+0x1aa3`). Any other direction
+jumps to `+0x1be4` and the block is skipped entirely. Directions 1–4 (quick),
+20 (taunt), 21 (bombard), 22 (snipe) and 23 (bash) therefore never enter it.
+
+Inside the gate the first statement is
+`randosmash = randomBetween(1, 4)` (`+0x1aaa`). The force is applied when
+`randosmash > 3` (`+0x1ac8`–`+0x1ad2`), and otherwise only when
+`attack_direction == 30` (`+0x1ad8`–`+0x1ae4`); direction 30 always applies it.
+Both rules match the isolated resolver's `knockback` block. Two consequences
+for tape alignment: the `randomBetween(1, 4)` sample exists only on the 5–12
+and 30 paths, so a quick-band fixture's tape is genuinely one sample shorter
+than a power-band or normal-band fixture's; and the sample is still **drawn**
+on direction 30 even though its value cannot change the outcome, so it must
+still occupy a tape slot there.
+
 Physical knockback force is signed
 `damage + game_attacker.strength * 6` and forced to a minimum magnitude of
 20 — where `damage` is the timeline-aliased register read AFTER the
@@ -298,14 +965,53 @@ still passed to `knockback`; 80 is not a force clamp.
 ### Defeat gate and death dispatch (byte-verified 2026-08-30)
 
 Both damage ingresses end with the same gate, decoded opcode-by-opcode from
-`damagecharacter` (`+0x195e..+0x1a72`) and `magic_damage_character`
-(`+0x14ee..+0x157c`) in overlay block `DoAction@0x240c7f`:
+`damagecharacter` (`+0x194a..+0x1a71`) and `magic_damage_character`
+(`+0x14ee..+0x157c`) in overlay block `DoAction@0x240c7f`.
+
+**Independently re-decoded 2026-08-30.** This gate had been read by one agent
+only, and it is load-bearing for the three `candidate-tournament-*` fixtures, so
+it was decoded a second time from scratch. The condition reproduces exactly.
+`damagecharacter`, with `register:2 = _global` and `register:3 = game_defender`:
+
+```text
++0x194a  hitpoints                       ; push
++0x1952  0                               ; push
++0x195e  Greater      -> hitpoints > 0
++0x195f  Not          -> hitpoints <= 0                        [A]
++0x1960  Duplicate
++0x1961  If  -> +0x198f                  ; short-circuit ||, A stays on the stack
++0x1966  Pop
++0x1967  hitpoints
++0x196f  hitpointsmax
++0x1977  Less2        -> hitpoints < hitpointsmax              [B]
++0x1978  Duplicate
++0x1979  Not
++0x197a  If  -> +0x198f                  ; short-circuit &&, false stays
++0x197f  Pop
++0x1980  _global.fight_mode
++0x1988  "tournament"
++0x198d  Equals2
++0x198e  Not          -> fight_mode != "tournament"            [C]
++0x198f  Not                             ; merge: value = A || (B && C)
++0x1990  If {delta 221} -> +0x1a72       ; skip the block when !value
+```
 
 - The defeat block is entered iff `hitpoints <= 0` **or** (`hitpoints <
   hitpointsmax` **and** `_global.fight_mode != "tournament"`). The second
   term is a first-blood-style condition the earlier map wording did not
   record: statically, any post-`check_stats` damage below maximum enters the
-  block in every non-tournament mode.
+  block in every non-tournament mode. The `+0x1990` jump target `+0x1a72` is
+  the first opcode of the knockback gate, so the defeat block is exactly
+  `+0x1995`–`+0x1a71`.
+- The dispatch offsets reproduce too: `phasecomplete` at `+0x1995`, the duel
+  test at `+0x199f` branching to `death(clip, "yield")` at `+0x1a62`, then
+  `<= 12` → `slain` `+0x19c6`, `== 20` → `taunt` `+0x19ec`, `21..23` → `arrow`
+  `+0x1a27`, `== 30` → `grievous` `+0x1a4d`, and the fall-through `Jump` at
+  `+0x1a5d` for every other direction — which reaches `+0x1a72` with
+  `phasecomplete` set and no `death` call, as recorded below.
+- `magic_damage_character` matches statement for statement with no direction
+  chain: condition `+0x14ee`–`+0x1534`, `phasecomplete` `+0x1539`, duel test
+  `+0x1543`, `slain` `+0x1558`, `yield` `+0x156d`.
 - On entry, `_global.phasecomplete = true` is set first, unconditionally,
   before any `death` call.
 - `fight_mode == "duel"` always calls `death(defenderClip, "yield")`,
@@ -468,11 +1174,18 @@ There is no generic team-result callback.
 
 The root `arena` instance is sprite 2249. Its result timeline includes:
 
-- `initbattle` frame 1, `combat` 71, `combat_won` 81,
-  `combat_wonitem` 94, `combat_delay` 189, `combat_exp` 222, and
-  `combat_lost` 250;
-- frame 88: attaches export 777, `fight_win_stuff`, and begins win/reward UI;
-- frames 189, 222, and 231: continue win item/reward/transition processing;
+- exactly seven labels, confirmed with `--labels --timeline 'sprite:2249'` on
+  334 declared frames: `initbattle` frame 1 (span 1–70), `combat` 71 (71–80),
+  `combat_won` 81 (81–93), `combat_wonitem` 94 (94–188), `combat_delay` 189
+  (189–221), `combat_exp` 222 (222–249), and `combat_lost` 250 (250–334);
+- frame 88: attaches export 777, `fight_win_stuff`, and settles the win —
+  gold, battle counters, and the branch below;
+- frames 94–188 (`combat_wonitem`): the **tournament**-victory screen, not the
+  ordinary one; frame 182 attaches the `won_tournament` linkage at depth
+  100005 and the span stops at 188;
+- frames 189–221 (`combat_delay`): animation only; frame 222 removes
+  `won_tournament` and reveals `fight_win_stuff`; frame 231 awards experience
+  and detects a level-up; frame 249 stops on the reward panel;
 - frame 315: increments fights and losses, restores the hero, clears
   `battle_started`, sends tournament losses to game-over, or otherwise deducts
   `ceil(herolevel^2 * 50)` gold (clamped at zero) and displays
@@ -481,6 +1194,74 @@ The root `arena` instance is sprite 2249. Its result timeline includes:
   and town-square transitions; button 778 is tournament-win progression;
 - the non-tournament loss panel embeds button 2244, whose release returns the
   root timeline to the town square.
+
+**Correction: the reward is not `ceil(herolevel^2 * 50)`.** An earlier revision
+of this map recorded that figure as the fight reward. It is the **loss
+deduction** — `goldlost = ceil(herolevel * herolevel * 50)`, clamped at zero,
+computed on the loss frame 315 (`+0x041d`–`+0x046a`). The win reward is a
+different formula on a different frame, and this map did not record it at all:
+
+```text
+_root.game.hero.goldpieces += round(_root.game.villain.character_xp
+                    * (100 + _global.crowd_interest) / 100);  // 2249/frame:88 +0x078c..+0x07ff
+if (_root.game.hero.herolevel == 1)                           // test +0x0867..+0x0889
+    _root.game.hero.goldpieces = 2500;                        // flat SetMember +0x08ae
+```
+
+`character_xp` is a `battlevalues` derivation on the *defeated opponent*, not a
+stored field, and `crowd_interest` is derived from `herolevel` at
+`sprite:2224/frame:1` `+0x0f48` with a `RandomNumber(899)` opcode draw. Four
+consequences worth stating.
+
+The reward is a function of the **defeated** combatant's damage, enchantments,
+armour and level, not of the winner's — though generated opponents are built at
+the hero's own level, so in ordinary play the two track each other.
+
+Because `crowd_interest` comes from the opcode rather than `randomBetween`,
+**the win gold is neither recordable nor injectable** by a capture wrapper.
+
+The level-1 override is a flat set, not an addition, and it is a set of the
+**whole purse**: `+0x08ae` pushes the literal 2500 straight onto
+`_root.game.hero.goldpieces`, discarding both the prior balance and the reward
+the `+=` at `+0x079e` just added. `+0x0894` — a nearby offset easy to mistake
+for the money write — sets only the `fight_win_stuff.goldwon` display string
+("a gift from the emperor…"); the same field is given the computed-reward text
+at `+0x0806`–`+0x0866` on the ordinary arm.
+
+And `villain.character_xp` is read **frozen**. Its only writer is
+`battlevalues` at `+0x3b82`, which sits inside that function's
+`battle_started == true` skip (§Combatant state objects), so it still holds the
+value derived when the opponent was generated — computed while
+`armourclass == armourclass_max`. A fight that strips the loser's armour to
+nothing pays the same gold as one that does not.
+
+**Correction: an ordinary win skips frames 94–188.** This map previously
+described frames 94/189/222/231 as a single run of "win item/reward/transition
+processing". Frame 88 branches instead:
+
+```text
+if (_global.tournament_in_progress == true) {                 // +0x0925
+    hero.tournament_ranking -= 1;                             // +0x094f
+    if (hero.tournament_ranking == 1)                         // +0x0973..+0x0995
+        gotoAndPlay("combatwonitem");                         // +0x099a  (inert, below)
+    else gotoAndPlay("combat_delay");                          // +0x09b1
+} else gotoAndPlay("combat_delay");                            // +0x09c7
+```
+
+So with `tournament_in_progress` true and the post-win `tournament_ranking`
+reaching 1 it heads for the tournament screen, and in every other case —
+including every non-tournament win — it goes straight to `combat_delay` at 189.
+The label written on the tournament arm is `combatwonitem`, while the label
+defined on sprite 2249 is `combat_wonitem`, so that `gotoAndPlay` matches
+nothing and is inert; the playhead simply runs on from 88 into 94, which is
+where it was going. A reconstruction must not "fix" that into a real jump.
+
+All three of the above were first decoded in [the leveled-gladiator arena
+route](ss2-arena-route.md) §4 and §7. They have since been **re-read here from
+the same installed SWF and fingerprint** — the win `+=` and its operands, the
+level-1 flat set, the `goldlost` deduction and its zero clamp
+(`+0x047d`–`+0x04ec`), the frame-88 branch above, and the sprite-2249 label
+spans — and every offset reproduced.
 
 Team mode must declare victory only when a team has no living combatants, wait
 for the final defeat animation, and invoke a one-shot result bridge. It must not
@@ -563,6 +1344,22 @@ fingerprint-keyed candidate schema, strict ordered `randomBetween` and
 result bridge. It does not change `classicStyleRules`, and its static candidates
 do not yet count as vanilla parity.
 
+**Twenty-two goldens are promoted** as of 2026-08-30, all from the one staged
+tutorial fight: twelve kills covering all twelve melee directions
+(`golden-prisoner-quick-kill-dir1..4`, `golden-prisoner-normal-kill*` at 5–8,
+`golden-prisoner-power-kill-dir9..12` — all three bands now complete; an earlier
+revision of this section said eighteen and "the quick band has no kill golden
+yet", which the quick-band campaign has since overtaken) and ten
+`golden-probe-*` in five pairs. The probes are
+the reason four claims in this map moved from static reading to measurement:
+the dispatcher's `>=` hit comparison and each melee band's `rollneeded`
+(§Attack roll dispatcher), the inclusive critical-deflection boundary (same
+section), and the `> 66` removal gate with its draw-before-the-equipped-test
+ordering (§Spell-path reuse of `attack_direction`). Each pair moves one
+injected value and is predicted to separate in a channel the capture genuinely
+observes; the staging behind them is in
+[the capture staging guide](ss2-capture-staging.md).
+
 ## Next checkpoint
 
 The controlled capture, verification, and promotion pipeline for these steps
@@ -590,6 +1387,14 @@ node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --func
 node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --references 'fight_over_win|fight_over_lost|combatwon|combatlost'
 ```
 
-The inspector also supports `--function-names`, `--references`, and
-`--around`. These commands print analysis only; do not redirect decompiled game
+The inspector also supports `--function-names`, `--references`, `--around`, and
+`--labels [regex]` with an optional `--timeline <regex>`. The label tables in
+this map are reproduced with:
+
+```powershell
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels --timeline 'sprite:862'
+node tools/inspect-swf.mjs "$ss2Install\swf\swords_sandals2_download.swf" --labels --timeline 'sprite:2249'
+```
+
+These commands print analysis only; do not redirect decompiled game
 code or assets into the repository.

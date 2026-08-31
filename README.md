@@ -88,8 +88,14 @@ node tools/capture-session.mjs promote --fixture <candidate.json> --manifest <ma
 ```
 
 `simulate` writes a reference trace (`synthetic-simulator` method) for
-pipeline dry runs and wrapper validation; promotion always rejects simulated
-evidence.
+pipeline dry runs and wrapper validation, and promotion rejects that method.
+Be precise about how strong that is: the method is a string in the trace's own
+meta line, so the rejection is only as strong as the string. A simulated trace
+with the method rewritten will ingest, match and promote. What actually
+distinguishes a live run is the raw log under ignored `captures/`. See
+[what a match establishes](docs/integration/ss2-runtime-capture.md#what-a-match-actually-establishes)
+for the full account of which parts of an observation are measured and which
+are echoed from the candidate.
 
 Capture sessions are fully unattended — no cursor, no window focus, no
 clicking — because the wrapper navigates and fights with the game's own calls:

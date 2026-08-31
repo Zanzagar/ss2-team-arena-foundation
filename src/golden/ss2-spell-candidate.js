@@ -248,6 +248,14 @@ function readScenarioEnvelope(scenario) {
   if (!FIGHT_MODES.has(fightMode)) {
     throw new Ss2SpellCandidateError("fightMode must be tournament, duel, or misc.");
   }
+  // Map line 317: `magic_damage_character` "has no direction chain". A spell
+  // scenario therefore carries no attack direction at all, and one that does is
+  // a physical scenario handed to the wrong resolver.
+  if (scenario.attackDirection !== undefined) {
+    throw new Ss2SpellCandidateError(
+      "A spell scenario carries spellId, not attackDirection: the spell ingress reads no attack direction."
+    );
+  }
   return { attackerSide, defenderSide: attackerSide === "hero" ? "villain" : "hero", fightMode };
 }
 
@@ -424,12 +432,12 @@ export function applySs2MagicDamageCandidate(scenario, damage, identity = {}) {
  * Resolves one mapped direct-damage spell with a strict ordered-roll tape, in
  * the `(scenario, rolls)` shape the 1v1 fixture runner calls.
  *
- * Schema note: the shared 1v1 scenario schema has no spell field, so the spell
- * identity travels in `scenario.attackDirection` as the mapped inventory ID
- * (map lines 415-419). That is sound for this ingress precisely because
- * `magic_damage_character` "has no direction chain" (map line 317) — no rule
- * below reads an attack direction. Fixtures flag this with the
- * `spell-id-in-attack-direction` candidate flag.
+ * Schema note: the spell identity is `scenario.spellId`, the caller's mapped
+ * inventory ID (map lines 415-419). It is a distinct field from
+ * `scenario.attackDirection` precisely because `magic_damage_character` "has no
+ * direction chain" (map line 317): no rule below reads an attack direction, and
+ * the inventory ids overlap the physical direction space (id 30 is fireball,
+ * direction 30 is the grievous attack), so the two must not share one field.
  *
  * The single tape sample belongs to the *caller* (`villain_cast_spells` and
  * the `cast_*` phase decisions), not to the ingress, which contains no RNG
@@ -437,9 +445,9 @@ export function applySs2MagicDamageCandidate(scenario, damage, identity = {}) {
  */
 export function resolveSs2SpellDamageCandidate(scenario, rolls) {
   if (!isPlainish(scenario)) throw new Ss2SpellCandidateError("scenario must be an object.");
-  const spellId = scenario.attackDirection;
+  const spellId = scenario.spellId;
   if (!Number.isInteger(spellId)) {
-    throw new Ss2SpellCandidateError("attackDirection must be an integer spell inventory id.");
+    throw new Ss2SpellCandidateError("scenario.spellId must be an integer spell inventory id.");
   }
   const spell = SS2_DIRECT_DAMAGE_SPELLS[spellId];
   if (!spell) {

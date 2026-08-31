@@ -48,8 +48,9 @@ function spellScenario(overrides = {}) {
   const { hero = {}, villain = {}, ...scenarioOverrides } = overrides;
   return {
     attackerSide: "hero",
-    // Fireball's mapped inventory id; see the resolver's schema note.
-    attackDirection: 30,
+    // Fireball's mapped inventory id; see the resolver's schema note. A spell
+    // scenario carries no attackDirection at all — the ingress reads none.
+    spellId: 30,
     result: null,
     ...scenarioOverrides,
     hero: {
@@ -105,8 +106,19 @@ test("every spell fixture is an unverified static candidate of the spell ingress
     // caller's mapped randomBetween damage range.
     assert.equal(fixture.samples.length, 1);
     assert.equal(fixture.samples[0].source, RollSource.RANDOM_BETWEEN);
-    const spell = SS2_DIRECT_DAMAGE_SPELLS[fixture.scenario.attackDirection];
+    // The spell identity rides in its own schema field. The old
+    // `spell-id-in-attack-direction` hack (and its candidate flag) is retired:
+    // a spell scenario carries no attack direction, because the ingress reads
+    // none (map line 317).
+    assert.equal(fixture.scenario.attackDirection, undefined);
+    assert.equal(
+      fixture.provenance.candidateFlags.includes("spell-id-in-attack-direction"),
+      false,
+      `${fixture.fixtureId} must not carry the retired spell-id-in-attack-direction flag`
+    );
+    const spell = SS2_DIRECT_DAMAGE_SPELLS[fixture.scenario.spellId];
     assert.ok(spell, `${fixture.fixtureId} must name a mapped direct-damage spell id`);
+    assert.equal(fixture.expected.calculation.spellId, fixture.scenario.spellId);
     assert.equal(fixture.samples[0].label, spell.rollLabel);
     assert.equal(fixture.samples[0].min, spell.min);
     assert.equal(fixture.samples[0].max, spell.max);
@@ -200,7 +212,7 @@ test("rule: exact armour equality skips the overflow rewrite and applies the ful
 test("rule: strict overflow rewrites the damage register and leaves armour negative until the clamp", () => {
   // Map line 355: armourclass is left negative until check_stats clamps it.
   const scenario = spellScenario({
-    attackDirection: 32,
+    spellId: 32,
     villain: { armourclass: 96, armourclass_max: 96, hitpoints: 500, hitpointsmax: 500 }
   });
   const { outcome } = runSpellScenario(scenario, [
@@ -217,7 +229,7 @@ test("rule: strict overflow rewrites the damage register and leaves armour negat
 
 test("rule: an already depleted armour class skips the armour branch entirely", () => {
   const scenario = spellScenario({
-    attackDirection: 34,
+    spellId: 34,
     villain: { armourclass: 0, armourclass_max: 108, hitpoints: 250, hitpointsmax: 250 }
   });
   const { outcome } = runSpellScenario(scenario, [
@@ -271,7 +283,7 @@ test("rule: breastplate stamina is unconditional and uses the current damage reg
   // remainder after a rewrite.
   const absorbed = runSpellScenario(
     spellScenario({
-      attackDirection: 34,
+      spellId: 34,
       villain: {
         armourclass: 112,
         armourclass_max: 112,
@@ -289,7 +301,7 @@ test("rule: breastplate stamina is unconditional and uses the current damage reg
 
   const overflowed = runSpellScenario(
     spellScenario({
-      attackDirection: 32,
+      spellId: 32,
       villain: {
         armourclass: 96,
         armourclass_max: 96,
@@ -486,11 +498,13 @@ test("the resolver rejects malformed scenarios", () => {
     ["non-object", null],
     ["array", []],
     ["missing attackerSide", { ...spellScenario(), attackerSide: "ally" }],
-    ["non-integer spell id", { ...spellScenario(), attackDirection: 30.5 }],
-    ["string spell id", { ...spellScenario(), attackDirection: "30" }],
-    ["unmapped physical direction", { ...spellScenario(), attackDirection: 5 }],
-    ["little fat kid is not direct damage", { ...spellScenario(), attackDirection: 33 }],
-    ["multi-impact death from above", { ...spellScenario(), attackDirection: 49 }],
+    ["absent spell id", (({ spellId, ...rest }) => rest)(spellScenario())],
+    ["non-integer spell id", { ...spellScenario(), spellId: 30.5 }],
+    ["string spell id", { ...spellScenario(), spellId: "30" }],
+    ["unmapped physical direction as a spell id", { ...spellScenario(), spellId: 5 }],
+    ["little fat kid is not direct damage", { ...spellScenario(), spellId: 33 }],
+    ["multi-impact death from above", { ...spellScenario(), spellId: 49 }],
+    ["an attack direction alongside the spell id", { ...spellScenario(), attackDirection: 5 }],
     ["unknown fight mode", { ...spellScenario(), fightMode: "skirmish" }],
     ["non-finite combatant number", spellScenario({ villain: { armourclass: Number.NaN } })]
   ]) {
@@ -552,7 +566,7 @@ test("the ordered tape rejects a wrong caller roll and reports leftovers", () =>
   );
   assert.throws(
     () => resolveSs2SpellDamageCandidate(
-      spellScenario({ attackDirection: 34 }),
+      spellScenario({ spellId: 34 }),
       createOrderedRollTape([betweenSample("fireball-damage-roll", 80, 160, 100)])
     ),
     RollSequenceError
@@ -569,14 +583,18 @@ test("the ordered tape rejects a wrong caller roll and reports leftovers", () =>
 
 test("the spell resolver rejects every physical-attack fixture scenario", () => {
   // Isolation guard: the two families must never silently accept each other's
-  // fixtures just because they share the 1v1 schema.
-  for (const attackDirection of [1, 5, 9, 20, 21, 22, 23]) {
+  // fixtures just because they share the 1v1 schema. Direction 30 is the
+  // sharpest case — it is the grievous attack direction AND fireball's
+  // inventory id, which is exactly why the two identities cannot share a field.
+  for (const attackDirection of [1, 5, 9, 20, 21, 22, 23, 30]) {
+    const { spellId, ...physical } = spellScenario();
     assert.throws(
       () => resolveSs2SpellDamageCandidate(
-        spellScenario({ attackDirection }),
+        { ...physical, attackDirection },
         createOrderedRollTape([betweenSample("hit-roll", 1, 100, 50)])
       ),
-      Ss2SpellCandidateError
+      Ss2SpellCandidateError,
+      `attack direction ${attackDirection} must not resolve as a spell`
     );
   }
 });
@@ -585,15 +603,15 @@ test("the spell resolver rejects every physical-attack fixture scenario", () => 
 // Capture pipeline
 // ---------------------------------------------------------------------------
 
-test("spell fixtures without a result round-trip through simulate -> ingest -> verify", () => {
-  // Known pipeline gap: observation.js derives the runtime event list from the
-  // physical dispatcher (deriveExpectedEventsFromSs2Fixture keys on
-  // expected.calculation.hit) and capture-ingest.js synthesizes howDied from
-  // attack_direction, so a result-bearing spell fixture cannot be projected
-  // yet. Those two files belong to another track; see the handoff notes.
-  const projectable = fixtures.filter((fixture) => fixture.expected.resultEvent === null);
-  assert.ok(projectable.length >= 5);
-  for (const fixture of projectable) {
+test("every spell fixture round-trips through simulate -> ingest -> verify", () => {
+  // Result-bearing spell fixtures used to be unprojectable: the derived event
+  // list keyed on the physical dispatcher's `expected.calculation.hit`, and the
+  // ingest death dispatch synthesized howDied from the physical
+  // `attack_direction` chain. Both now have a spell arm, so the whole family
+  // round-trips — including the two fixtures that end the battle.
+  assert.equal(fixtures.length, 8);
+  assert.equal(fixtures.filter((fixture) => fixture.expected.resultEvent !== null).length, 2);
+  for (const fixture of fixtures) {
     const trace = simulateSs2CaptureTrace(fixture, {
       observationId: `sim-${fixture.fixtureId}`,
       sessionId: "sim-spell-session-1"
@@ -601,8 +619,122 @@ test("spell fixtures without a result round-trip through simulate -> ingest -> v
     const record = ingestSs2CaptureTrace(trace, fixture);
     assert.equal(record.capture.method, SS2_SIMULATED_CAPTURE_METHOD);
     assert.equal(record.target.fixtureId, fixture.fixtureId);
+    assert.equal(record.scenario.spellId, fixture.scenario.spellId);
+    assert.equal(Object.hasOwn(record.scenario, "attackDirection"), false);
     const comparison = matchSs2ObservationToFixture(fixture, record);
     assert.deepEqual(comparison.differences, []);
     assert.equal(comparison.match, true);
   }
+});
+
+test("a spell action is observed as the spell ingress, never as a hit or a miss", () => {
+  // Map lines 366-371: the complete call inventory of magic_damage_character
+  // contains neither defender_hurt nor defender_blocked, so neither event may
+  // appear. `method` is its damage_method argument — the defender animation
+  // label (map lines 346-350), null where the map records none.
+  const observed = (fixtureId) => {
+    const fixture = fixturesById.get(fixtureId);
+    return ingestSs2CaptureTrace(
+      simulateSs2CaptureTrace(fixture, { observationId: `sim-ev-${fixtureId}`, sessionId: "sim-ev" }),
+      fixture
+    ).events;
+  };
+
+  assert.deepEqual(observed("candidate-spell-fireball-armour-absorbed"), [
+    { type: "magic-damage", method: "burning" }
+  ]);
+  assert.deepEqual(observed("candidate-spell-first-blood-duel"), [
+    { type: "magic-damage", method: "burning" },
+    { type: "death", side: "villain" },
+    { type: "overlay-label", label: "combatwon" }
+  ]);
+  // dire fireball: the map records a damage range but no animation label.
+  assert.deepEqual(observed("candidate-spell-lethal-slain"), [
+    { type: "magic-damage", method: null },
+    { type: "death", side: "hero" },
+    { type: "overlay-label", label: "combatlost" }
+  ]);
+  for (const fixture of fixtures) {
+    const events = observed(fixture.fixtureId);
+    assert.equal(events.some((event) => event.type === "defender-hurt"), false);
+    assert.equal(events.some((event) => event.type === "defender-blocked"), false);
+  }
+});
+
+test("the spell defeat gate synthesizes slain outside duels and yield inside them", () => {
+  // Map lines 313-318: the duel arm is on the shared gate, so it covers both
+  // ingresses; outside duels magic_damage_character "has no direction chain and
+  // always uses `slain`". The old direction chain could not reach this: ids
+  // 31/32/34/35 hit no arm at all, and id 30 would have read as grievous.
+  const resultOf = (fixtureId) => {
+    const fixture = fixturesById.get(fixtureId);
+    return ingestSs2CaptureTrace(
+      simulateSs2CaptureTrace(fixture, { observationId: `sim-gate-${fixtureId}`, sessionId: "sim-gate" }),
+      fixture
+    ).resultEvent;
+  };
+
+  const misc = resultOf("candidate-spell-lethal-slain");
+  assert.equal(misc.howDied, "slain");
+  assert.equal(misc.reason, "elimination");
+  assert.equal(misc.loserSide, "hero");
+
+  const duel = resultOf("candidate-spell-first-blood-duel");
+  assert.equal(duel.howDied, "yield");
+  assert.equal(duel.reason, "first-blood");
+  assert.equal(duel.loserSide, "villain");
+});
+
+test("spell mutations are attributed to the spell ingress, not to damagecharacter", () => {
+  // Map lines 351-364: steps 2-6 (the armour/hitpoint writes, the unconditional
+  // psyche_up join, the breastplate stamina join and check_stats) are all
+  // inside magic_damage_character, so a wrapper attributing by call frame never
+  // reports `damagecharacter` for a spell action. `death` is genuinely shared.
+  const hooks = (fixtureId) => {
+    const fixture = fixturesById.get(fixtureId);
+    return simulateSs2CaptureTrace(fixture, {
+      observationId: `sim-hook-${fixtureId}`,
+      sessionId: "sim-hook"
+    })
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((line) => line.t === "set")
+      .map((line) => `${line.path}=${line.hook}`);
+  };
+
+  assert.deepEqual(hooks("candidate-spell-fireball-armour-absorbed"), [
+    "/villain/armourclass=magic-damage-character",
+    "/villain/psyche_up=magic-damage-character"
+  ]);
+  assert.deepEqual(hooks("candidate-spell-lethal-slain"), [
+    "/hero/armourclass=magic-damage-character",
+    "/hero/hitpoints=magic-damage-character",
+    "/hero/psyche_up=magic-damage-character",
+    "/hero/staminaleft=magic-damage-character",
+    "/hero/hitpoints=magic-damage-character",
+    "/hero/armourclass=magic-damage-character",
+    "/hero/poison=death",
+    "/villain/taunted2=death"
+  ]);
+  for (const fixture of fixtures) {
+    for (const hook of hooks(fixture.fixtureId)) {
+      assert.equal(hook.endsWith("=unattributed"), false, `${fixture.fixtureId}: ${hook}`);
+      assert.equal(hook.endsWith("=damagecharacter"), false, `${fixture.fixtureId}: ${hook}`);
+    }
+  }
+});
+
+test("a spell trace records spell_id, and a spell fixture cannot be ingested without it", () => {
+  const fixture = fixturesById.get("candidate-spell-fireball-armour-absorbed");
+  const lines = simulateSs2CaptureTrace(fixture).trim().split("\n").map((line) => JSON.parse(line));
+  const vars = lines.filter((line) => line.t === "var").map((line) => line.name);
+  assert.deepEqual(vars, ["fight_mode", "spell_id"]);
+  assert.equal(vars.includes("attack_direction"), false);
+
+  const withoutSpellId = lines.filter((line) => !(line.t === "var" && line.name === "spell_id"));
+  assert.throws(
+    () => ingestSs2CaptureTrace(`${withoutSpellId.map((line) => JSON.stringify(line)).join("\n")}\n`, fixture),
+    /never recorded the spell_id variable/
+  );
 });

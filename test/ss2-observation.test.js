@@ -37,18 +37,23 @@ import {
   validateSs2OneVsOneFixture
 } from "../src/golden/run-1v1-fixture.js";
 import { resolveSs2PhysicalAttackCandidate } from "../src/golden/ss2-attack-candidate.js";
+import { resolveSs2SpellDamageCandidate } from "../src/golden/ss2-spell-candidate.js";
 import { verifyInstallAgainstFingerprint } from "../tools/capture-session.mjs";
 
-import { loadSs2Fixtures } from "./ss2-fixture-files.js";
+import { loadSs2Fixtures, loadSs2SpellFixtures } from "./ss2-fixture-files.js";
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
 
 const fixtures = await loadSs2Fixtures();
 const fixturesById = new Map(fixtures.map((fixture) => [fixture.fixtureId, fixture]));
+const spellFixtures = await loadSs2SpellFixtures();
+const spellFixturesById = new Map(spellFixtures.map((fixture) => [fixture.fixtureId, fixture]));
 
 const CALL_SITE = "overlay:862/frame:52/DoAction@0x240c7f";
 const HOOK_FOR_REASON = {
   "physical-damage": "damagecharacter",
+  "magic-damage": "magic-damage-character",
+  "psyche-up": "magic-damage-character",
   "breastplate-stamina": "damagecharacter",
   "stat-clamp": "damagecharacter",
   "weapon-enchantment": "damagecharacter",
@@ -77,11 +82,22 @@ function observationFromFixture(fixture, overrides = {}) {
     },
     target: { fixtureId: fixture.fixtureId },
     scenario: cloneJson(fixture.scenario),
-    samples: fixture.samples.map((sample) => ({
-      ...sample,
-      callSite: CALL_SITE,
-      injected: sample.source === "randomBetween"
-    })),
+    // Opcode samples are DROPPED, because a real capture never records one.
+    // The wrapper observes `randomBetween` through a tap on Math.random; the
+    // AVM1 RandomNumber opcode is not reachable by any instrumentation it has,
+    // which is the documented reason cosmetic debris rolls are excluded from
+    // matching in the first place. This helper used to copy them straight out
+    // of the fixture, which made it model a wrapper that cannot exist - and an
+    // adversarial pass showed why that mattered: an observation carrying the
+    // fixture's 7 samples plus 120 invented debris rolls validated, matched a
+    // 7-sample fixture, and promoted.
+    samples: fixture.samples
+      .filter((sample) => sample.source !== "randomNumber")
+      .map((sample) => ({
+        ...sample,
+        callSite: CALL_SITE,
+        injected: sample.source === "randomBetween"
+      })),
     mutationTrace: fixture.expected.mutationTrace.map((entry) => ({
       ...entry,
       reason: HOOK_FOR_REASON[entry.reason] ?? "unattributed"
@@ -224,35 +240,58 @@ test("independent observations match while identity metadata differs", () => {
   );
 });
 
-test("observation matching redacts cosmetic debris values but not combat rolls", () => {
+test("an observation cannot carry an opcode sample, and combat roll values still separate", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
-  const withDebris = (observationId, sessionId, debrisValue, hitValue) =>
-    observationFromFixture(fixture, {
-      observationId,
-      sessionId,
+
+  // A record carrying an opcode roll is REFUSED, rather than carrying it and
+  // having it excluded from comparison.
+  //
+  // The earlier form of this test built two observations that each carried a
+  // fabricated `armour-debris-1-x` sample and asserted they matched. That was
+  // true, and it was the hole: the exclusion is by label regex and applies to
+  // BOTH sides, so an observation could carry an unbounded number of invented
+  // opcode rolls invisibly. An adversarial pass built one with 120 of them; it
+  // validated, matched a 7-sample fixture, and promoted — which contradicts the
+  // runtime-capture doc's own list, where "the NUMBER of draws in the armed
+  // window" sits under *genuinely observed*.
+  //
+  // The channel is closed rather than widened, because the doc's own reason for
+  // the exclusion is that no instrumentation can observe the opcode stream. If
+  // no capture can record one, no record should hold one.
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
       mutate: (draft) => {
-        draft.samples[0].value = hitValue;
         draft.samples.push({
           label: "armour-debris-1-x",
           source: "randomNumber",
           min: 0,
           max: 19,
-          value: debrisValue,
+          value: 3,
           callSite: CALL_SITE,
           injected: false
         });
       }
-    });
-
-  const debrisOnly = ss2ObservationsMatch(
-    withDebris("obs-a", "session-a", 3, 50),
-    withDebris("obs-b", "session-b", 17, 50)
+    })),
+    /no live capture can record/
   );
-  assert.equal(debrisOnly.match, true);
+
+  // And the channel that IS observed still separates: two records differing in
+  // a combat roll's value do not match.
+  const withHit = (observationId, sessionId, hitValue) =>
+    observationFromFixture(fixture, {
+      observationId,
+      sessionId,
+      mutate: (draft) => { draft.samples[0].value = hitValue; }
+    });
+  const identical = ss2ObservationsMatch(
+    withHit("obs-a", "session-a", 50),
+    withHit("obs-b", "session-b", 50)
+  );
+  assert.equal(identical.match, true);
 
   const combatRoll = ss2ObservationsMatch(
-    withDebris("obs-a", "session-a", 3, 50),
-    withDebris("obs-b", "session-b", 3, 51)
+    withHit("obs-a", "session-a", 50),
+    withHit("obs-b", "session-b", 51)
   );
   assert.equal(combatRoll.match, false);
   assert.ok(combatRoll.differences.some((difference) => difference.path === "/samples/0/value"));
@@ -321,6 +360,104 @@ test("derived expected events cover miss, hit, and lethal candidates", () => {
   );
 });
 
+test("the physical event derivation is pinned and untouched by the spell ingress", () => {
+  // Regression pin. deriveExpectedEventsFromSs2Fixture is shared by both
+  // ingresses, so the physical contract is re-stated here independently of the
+  // implementation: a miss dispatches defender_blocked() alone (map line 250),
+  // a hit dispatches defender_hurt(<dispatchedMethod>) (map lines 242-244), and
+  // a defeat adds the death call plus the overlay transition it drives (map
+  // lines 457-466). A future spell change that alters any of this fails here.
+  assert.ok(fixtures.length >= 21);
+  for (const fixture of fixtures) {
+    assert.equal(
+      Number.isSafeInteger(fixture.scenario.attackDirection),
+      true,
+      `${fixture.fixtureId} is a physical fixture and must stage an attack direction`
+    );
+    assert.equal(fixture.scenario.spellId, undefined, `${fixture.fixtureId} must stage no spell id`);
+
+    const { calculation, resultEvent } = fixture.expected;
+    const expected = calculation.hit !== true
+      ? [{ type: "defender-blocked" }]
+      : [
+        { type: "defender-hurt", method: calculation.dispatchedMethod },
+        ...(resultEvent
+          ? [
+            { type: "death", side: resultEvent.loserSide },
+            { type: "overlay-label", label: resultEvent.overlayLabel }
+          ]
+          : [])
+      ];
+    const derived = deriveExpectedEventsFromSs2Fixture(fixture);
+    assert.deepEqual(derived, expected, fixture.fixtureId);
+    assert.equal(
+      derived.some((event) => event.type === "magic-damage"),
+      false,
+      `${fixture.fixtureId} must never derive a spell-ingress event`
+    );
+  }
+});
+
+test("spell fixtures derive and validate the spell-ingress event", () => {
+  // Map lines 366-371: magic_damage_character's complete call inventory has no
+  // defender_hurt and no defender_blocked, so a spell action can be neither a
+  // "hit" nor a "miss"; its damage_method argument is the defender animation
+  // label it plays (map lines 346-350).
+  assert.equal(spellFixtures.length, 8);
+  for (const fixture of spellFixtures) {
+    assert.equal(fixture.scenario.attackDirection, undefined);
+    assert.equal(Number.isSafeInteger(fixture.scenario.spellId), true);
+
+    const derived = deriveExpectedEventsFromSs2Fixture(fixture);
+    assert.deepEqual(derived[0], {
+      type: "magic-damage",
+      method: fixture.expected.calculation.damageMethod
+    });
+    assert.deepEqual(
+      derived.slice(1),
+      fixture.expected.resultEvent
+        ? [
+          { type: "death", side: fixture.expected.resultEvent.loserSide },
+          { type: "overlay-label", label: fixture.expected.resultEvent.overlayLabel }
+        ]
+        : []
+    );
+
+    const record = observationFromFixture(fixture, {
+      observationId: `obs-${fixture.fixtureId}`,
+      sessionId: "session-spell"
+    });
+    assert.equal(validateSs2Observation(record), record);
+    const comparison = matchSs2ObservationToFixture(fixture, record);
+    assert.deepEqual(comparison.differences, []);
+    assert.equal(comparison.match, true);
+  }
+});
+
+test("the magic-damage event accepts an animation label or none, and nothing else", () => {
+  const fixture = spellFixturesById.get("candidate-spell-fireball-armour-absorbed");
+  const withEvent = (event) =>
+    observationFromFixture(fixture, { mutate: (draft) => { draft.events[0] = event; } });
+
+  // "burning" (map line 388) and "lightning" (map line 391) are the two labels
+  // the direct-damage spell table records; null is the honest value where it
+  // records none. The map never enumerates the full animation-label set, so the
+  // shape is checked and the vocabulary is deliberately left open.
+  for (const method of ["burning", "lightning", "psyche_up", null]) {
+    const record = withEvent({ type: "magic-damage", method });
+    assert.equal(validateSs2Observation(record), record);
+  }
+  for (const event of [
+    { type: "magic-damage" },
+    { type: "magic-damage", method: 30 },
+    { type: "magic-damage", method: "" },
+    { type: "magic-damage", method: "not a label" },
+    { type: "magic-damage", method: "burning", spellId: 30 }
+  ]) {
+    assert.throws(() => validateSs2Observation(withEvent(event)), ObservationValidationError);
+  }
+});
+
 const PROJECTION_DEFAULTS = Object.freeze({
   armourclass: 0,
   armourclass_max: 0,
@@ -343,6 +480,19 @@ const PROJECTION_DEFAULTS = Object.freeze({
 function stagedDump(scenarioSide) {
   return { ...PROJECTION_DEFAULTS, ...scenarioSide };
 }
+
+/**
+ * The end line as the wrapper actually emits it, minus the `null`
+ * after-attestation placeholder that only a live run carries. `overdraw` is
+ * mandatory for `injected-tape-runtime` traces and `launchNonce` is the
+ * player-minted identity; both are carried into `capture.*` by ingest.
+ */
+const END_LINE = Object.freeze({
+  t: "end",
+  installHashVerifiedAfter: true,
+  overdraw: 0,
+  launchNonce: "417238-1900311477"
+});
 
 function thresholdTraceLines() {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
@@ -379,7 +529,7 @@ function thresholdTraceLines() {
     ...fixture.samples.slice(5).map(roll),
     { t: "final", side: "hero", fields: heroFinal },
     { t: "final", side: "villain", fields: villainFinal },
-    { t: "end", installHashVerifiedAfter: true }
+    { ...END_LINE }
   ];
 }
 
@@ -530,6 +680,78 @@ test("two matching independent observations promote a candidate to golden", () =
   assert.equal(flaggedPromotion.golden.fixtureId, "golden-armour-equality-quirk");
   assert.equal(flaggedPromotion.golden.provenance.candidateFlags, undefined);
   assert.equal(validateSs2OneVsOneFixture(flaggedPromotion.golden), flaggedPromotion.golden);
+});
+
+test("the promotion gate is exactly as strong for the spell family", () => {
+  // Nothing in the spell-ingress work touched promote-1v1-golden.js: the gate
+  // is resolver-agnostic (it runs matchSs2ObservationToFixture and the fixture
+  // validator, not a rules module), so the spell family passes through the same
+  // two-observation, two-session, manifest-attested, digest-checked gate.
+  const fixture = spellFixturesById.get("candidate-spell-lethal-slain");
+  const observations = [
+    observationFromFixture(fixture, { observationId: "obs-spell-a", sessionId: "session-spell-a" }),
+    observationFromFixture(fixture, {
+      observationId: "obs-spell-b",
+      sessionId: "session-spell-b",
+      observedAt: "2026-08-30T19:00:00Z"
+    })
+  ];
+  const manifest = captureManifestFor(observations);
+  const { golden, captureManifestSha256 } = promoteSs2CandidateToGolden(fixture, observations, manifest);
+  assert.equal(golden.fixtureId, "golden-spell-lethal-slain");
+  assert.equal(golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(golden.provenance.kind, GoldenProvenance.LICENSED);
+  assert.equal(golden.provenance.runtimeVerified, true);
+  assert.equal(golden.provenance.repetitions, 2);
+  assert.equal(golden.provenance.candidateFlags, undefined);
+  assert.equal(golden.provenance.captureManifestSha256, captureManifestSha256);
+  assert.equal(validateSs2OneVsOneFixture(golden), golden);
+  assert.equal(golden.scenario.spellId, fixture.scenario.spellId);
+  assert.deepEqual(
+    runSs2OneVsOneGoldenFixture(golden, resolveSs2SpellDamageCandidate).outcome,
+    golden.expected
+  );
+
+  // One session is still not evidence.
+  const single = [observations[0]];
+  assert.throws(
+    () => promoteSs2CandidateToGolden(fixture, single, captureManifestFor(single)),
+    PromotionError
+  );
+
+  // A simulated reference trace is still never evidence.
+  const simulated = ["a", "b"].map((suffix) =>
+    observationFromFixture(fixture, {
+      observationId: `obs-spell-sim-${suffix}`,
+      sessionId: `session-spell-sim-${suffix}`,
+      mutate: (draft) => { draft.capture.method = "synthetic-simulator"; }
+    })
+  );
+  assert.throws(
+    () => promoteSs2CandidateToGolden(fixture, simulated, captureManifestFor(simulated)),
+    /synthetic simulator trace, not runtime evidence/
+  );
+
+  // A divergent spell observation still blocks promotion and keeps its report.
+  const divergent = observationFromFixture(fixture, {
+    observationId: "obs-spell-c",
+    sessionId: "session-spell-c",
+    mutate: (draft) => { draft.resultEvent.howDied = "grievous"; draft.finalState.result.howDied = "grievous"; }
+  });
+  let blocked;
+  try {
+    promoteSs2CandidateToGolden(fixture, [observations[0], divergent], captureManifestFor([observations[0], divergent]), {
+      recordedAt: "2026-08-30T20:00:00Z"
+    });
+    assert.fail("a divergent spell observation must block promotion");
+  } catch (error) {
+    blocked = error;
+  }
+  assert.ok(blocked instanceof PromotionBlockedError);
+  assert.equal(blocked.divergences.length, 1);
+  assert.ok(blocked.divergences[0].differences.some(
+    (difference) => difference.path === "/resultEvent/howDied"
+  ));
 });
 
 test("promotion requires two observations from independent sessions", () => {
@@ -840,22 +1062,39 @@ test("fixture validation enforces trace/result/state internal consistency", () =
   assert.throws(() => validateSs2OneVsOneFixture(mismatchedStateResult), GoldenFixtureValidationError);
 });
 
-test("cosmetic debris samples are excluded from matching on both sides", () => {
+test("a fixture's cosmetic debris is excluded from matching; an observation cannot carry any", () => {
+  // The exclusion is still needed on the FIXTURE side, and still works: a
+  // candidate models the debris rolls the game really makes, and an observation
+  // - which cannot see the opcode stream - carries none, yet the two match.
   const fixture = fixturesById.get("candidate-armour-removal-debris");
-  const withDebris = observationFromFixture(fixture, {
-    observationId: "obs-debris", sessionId: "session-debris"
+  assert.ok(
+    fixture.samples.some((sample) => sample.source === "randomNumber"),
+    "this fixture is chosen because it models cosmetic opcode rolls"
+  );
+  const observed = observationFromFixture(fixture, {
+    observationId: "obs-wrapper", sessionId: "session-wrapper"
   });
-  assert.ok(withDebris.samples.some((sample) => sample.source === "randomNumber"));
-  assert.equal(matchSs2ObservationToFixture(fixture, withDebris).match, true);
+  assert.ok(
+    observed.samples.every((sample) => sample.source !== "randomNumber"),
+    "a capture records no opcode roll"
+  );
+  assert.equal(matchSs2ObservationToFixture(fixture, observed).match, true);
 
-  const withoutDebris = observationFromFixture(fixture, {
-    observationId: "obs-wrapper", sessionId: "session-wrapper",
-    mutate: (draft) => {
-      draft.samples = draft.samples.filter((sample) => sample.source !== "randomNumber");
-    }
-  });
-  assert.equal(matchSs2ObservationToFixture(fixture, withoutDebris).match, true);
-  assert.equal(ss2ObservationsMatch(withDebris, withoutDebris).match, true);
+  // What is no longer true, and was the hole: an observation carrying one.
+  // Excluding it from BOTH sides meant an arbitrary number of invented opcode
+  // rolls was invisible to comparison, so the doc's claim that the NUMBER of
+  // draws is genuinely observed did not hold. The record now refuses them.
+  assert.throws(
+    () => validateSs2Observation(observationFromFixture(fixture, {
+      observationId: "obs-debris",
+      sessionId: "session-debris",
+      mutate: (draft) => {
+        const debris = fixture.samples.find((sample) => sample.source === "randomNumber");
+        draft.samples.push({ ...cloneJson(debris), callSite: CALL_SITE, injected: false });
+      }
+    })),
+    /no live capture can record/
+  );
 });
 
 test("an invalid manifest cannot discard divergence evidence during promotion", () => {
@@ -896,7 +1135,7 @@ test("an invalid manifest cannot discard divergence evidence during promotion", 
 test("ingest requires a live attestation for placeholder end lines", () => {
   const fixture = fixturesById.get("candidate-normal-threshold-hit");
   const lines = thresholdTraceLines();
-  lines[lines.length - 1] = { t: "end", installHashVerifiedAfter: null };
+  lines[lines.length - 1] = { ...END_LINE, installHashVerifiedAfter: null };
   assert.throws(
     () => ingestSs2CaptureTrace(traceText(lines), fixture),
     /null after-attestation placeholder/
@@ -906,7 +1145,7 @@ test("ingest requires a live attestation for placeholder end lines", () => {
   assert.throws(
     () => ingestSs2CaptureTrace(
       traceText(lines.map((line) =>
-        line.t === "end" ? { t: "end", installHashVerifiedAfter: false } : line
+        line.t === "end" ? { ...END_LINE, installHashVerifiedAfter: false } : line
       )),
       fixture
     ),
@@ -920,4 +1159,61 @@ test("projected combatant keys stay aligned with the fixture state projection", 
     [...SS2_PROJECTED_COMBATANT_KEYS].sort(),
     Object.keys(fixture.expected.state.villain).sort()
   );
+});
+
+test("end.staged rides the raw trace grammar into capture.staged", () => {
+  // Built from this file's hand-written trace lines rather than the reference
+  // simulator, so the grammar is exercised directly rather than through a
+  // generator that never stages anything.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const staged = `hero.strength=${fixture.scenario.hero.strength},villain.helmet_defence=6`;
+  const withStaging = thresholdTraceLines().map((line, index, all) =>
+    index === all.length - 1 ? { ...line, staged } : line
+  );
+  const record = ingestSs2CaptureTrace(traceText(withStaging), fixture);
+
+  assert.equal(record.capture.staged, staged);
+  assert.equal(validateSs2Observation(record), record);
+  // Staging is a scenario input, not a fabricated outcome — the game still
+  // resolved the action, so the observation still matches the fixture.
+  assert.equal(matchSs2ObservationToFixture(fixture, record).match, true);
+
+  // The same trace with no declaration: a record that carries no key at all,
+  // validates identically, matches identically, and digests DIFFERENTLY. That
+  // last point is why the field had to be optional rather than defaulted —
+  // stamping it onto the ~70 committed records would have rewritten every
+  // digest their goldens cite.
+  const unstaged = ingestSs2CaptureTrace(
+    traceText(thresholdTraceLines()),
+    fixture
+  );
+  assert.equal(Object.hasOwn(unstaged.capture, "staged"), false);
+  assert.equal(validateSs2Observation(unstaged), unstaged);
+  assert.equal(unstaged.digest, computeSs2ObservationDigest(unstaged));
+  assert.equal(matchSs2ObservationToFixture(fixture, unstaged).match, true);
+  assert.notEqual(record.digest, unstaged.digest);
+});
+
+test("a record with no staging declaration promotes exactly as it always did", () => {
+  // The compatibility guarantee, stated against the promotion gate rather than
+  // the schema: every committed record predates `staged`, and none of them may
+  // need re-ingesting for its golden to survive.
+  const fixture = fixturesById.get("candidate-normal-threshold-hit");
+  const observations = [
+    observationFromFixture(fixture, { observationId: "obs-nostage-a", sessionId: "session-nostage-a" }),
+    observationFromFixture(fixture, { observationId: "obs-nostage-b", sessionId: "session-nostage-b" })
+  ];
+  for (const observation of observations) {
+    assert.equal(Object.hasOwn(observation.capture, "staged"), false);
+  }
+
+  const promotion = promoteSs2CandidateToGolden(
+    fixture,
+    observations,
+    captureManifestFor(observations)
+  );
+  assert.equal(promotion.staged, null);
+  assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
+  assert.equal(promotion.golden.classification, GoldenClassification.GOLDEN);
+  assert.equal(validateSs2OneVsOneFixture(promotion.golden), promotion.golden);
 });

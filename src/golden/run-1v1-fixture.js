@@ -52,6 +52,7 @@ const SCENARIO_KEYS = new Set([
   "fightMode",
   "hero",
   "result",
+  "spellId",
   "transient",
   "villain"
 ]);
@@ -400,8 +401,28 @@ export function assertSs2ScenarioShape(scenario, path = "scenario", ErrorClass =
     if (scenario.attackerSide !== "hero" && scenario.attackerSide !== "villain") {
       throw new GoldenFixtureValidationError(`${path}.attackerSide must be hero or villain.`);
     }
-    if (!Number.isSafeInteger(scenario.attackDirection)) {
+    // Exactly one action identity. `attackDirection` names the physical
+    // ingress's `attack_direction` (battle map lines 231-249, 313-316), whose
+    // dispatcher and death chain both read it. `spellId` names the caller's
+    // inventory id for the spell ingress (map lines 415-419); the map is
+    // explicit that "`magic_damage_character` has no direction chain" (map line
+    // 317), so a spell action has no attack direction to carry, and a physical
+    // action has no spell id. `spellId` is a new *optional* key: every fixture
+    // written against the earlier schema still validates unchanged, because it
+    // carries `attackDirection` and no `spellId`.
+    const hasAttackDirection = scenario.attackDirection !== undefined;
+    const hasSpellId = scenario.spellId !== undefined;
+    if (hasAttackDirection === hasSpellId) {
+      throw new GoldenFixtureValidationError(
+        `${path} must carry exactly one action identity: attackDirection for the physical ` +
+        "ingress or spellId for the spell ingress."
+      );
+    }
+    if (hasAttackDirection && !Number.isSafeInteger(scenario.attackDirection)) {
       throw new GoldenFixtureValidationError(`${path}.attackDirection must be an integer.`);
+    }
+    if (hasSpellId && !Number.isSafeInteger(scenario.spellId)) {
+      throw new GoldenFixtureValidationError(`${path}.spellId must be an integer inventory id.`);
     }
     if (
       scenario.fightMode !== undefined &&

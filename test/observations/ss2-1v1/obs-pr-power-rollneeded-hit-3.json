@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-observation",
+  "observationId": "obs-pr-power-rollneeded-hit-3",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "capture": {
+    "sessionId": "session-pr-power-rollneeded-hit-3",
+    "captureToolVersion": "ss2-capture/0.1.0",
+    "method": "injected-tape-runtime",
+    "observedAt": "2026-08-30T22:57:31Z",
+    "installHashVerifiedBefore": true,
+    "installHashVerifiedAfter": true,
+    "mutationGranularity": "property-watch"
+  },
+  "target": {
+    "fixtureId": "candidate-probe-power-rollneeded-hit"
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "result": null,
+    "hero": {
+      "attack": 1,
+      "defence": 1,
+      "strength": 10,
+      "charisma": 1,
+      "magicka": 1,
+      "min_damage": 21,
+      "max_damage": 23,
+      "hitpoints": 30,
+      "hitpointsmax": 30,
+      "staminaleft": 105,
+      "staminamax": 110,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "gladiator_dir": "right"
+    },
+    "villain": {
+      "attack": 0,
+      "defence": 0,
+      "strength": 0,
+      "charisma": 0,
+      "magicka": 0,
+      "min_damage": 1,
+      "max_damage": 3,
+      "hitpoints": 10,
+      "hitpointsmax": 10,
+      "staminaleft": 95,
+      "staminamax": 100,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "gladiator_dir": "left"
+    },
+    "attackDirection": 9,
+    "fightMode": "misc"
+  },
+  "samples": [
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 63,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    },
+    {
+      "label": "power-critical-roll",
+      "source": "randomBetween",
+      "min": 5,
+      "max": 20,
+      "value": 7,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 42,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 12,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    },
+    {
+      "label": "knockback-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 4,
+      "value": 1,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100,
+      "callSite": "overlay:862/frame:52/DoAction@0x240c7f",
+      "injected": true
+    }
+  ],
+  "mutationTrace": [
+    {
+      "sequence": 1,
+      "path": "/villain/hitpoints",
+      "before": 10,
+      "after": -13,
+      "reason": "damagecharacter"
+    },
+    {
+      "sequence": 2,
+      "path": "/villain/hitpoints",
+      "before": -13,
+      "after": 0,
+      "reason": "damagecharacter"
+    },
+    {
+      "sequence": 3,
+      "path": "/result",
+      "before": null,
+      "after": {
+        "status": "pending-animation",
+        "completionToken": "ss2-1v1:hero:villain:combat_won",
+        "winnerSide": "hero",
+        "loserSide": "villain",
+        "reason": "elimination",
+        "howDied": "slain",
+        "overlayLabel": "combatwon",
+        "arenaLabel": "combat_won"
+      },
+      "reason": "result-bridge"
+    }
+  ],
+  "events": [
+    {
+      "type": "defender-hurt",
+      "method": "normal"
+    },
+    {
+      "type": "death",
+      "side": "villain"
+    },
+    {
+      "type": "overlay-label",
+      "label": "combatwon"
+    }
+  ],
+  "resultEvent": {
+    "type": "battle-result-pending",
+    "status": "pending-animation",
+    "completionToken": "ss2-1v1:hero:villain:combat_won",
+    "winnerSide": "hero",
+    "loserSide": "villain",
+    "reason": "elimination",
+    "howDied": "slain",
+    "overlayLabel": "combatwon",
+    "arenaLabel": "combat_won"
+  },
+  "finalState": {
+    "result": {
+      "status": "pending-animation",
+      "completionToken": "ss2-1v1:hero:villain:combat_won",
+      "winnerSide": "hero",
+      "loserSide": "villain",
+      "reason": "elimination",
+      "howDied": "slain",
+      "overlayLabel": "combatwon",
+      "arenaLabel": "combat_won"
+    },
+    "hero": {
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "boot": 0,
+      "breastplate": 0,
+      "burning": false,
+      "frozen": false,
+      "gauntlet": 0,
+      "greaves": 0,
+      "helmet": 0,
+      "hitpoints": 30,
+      "life_stolen": false,
+      "poison": false,
+      "shield": 0,
+      "shinguard": 0,
+      "shoulderguard": 0,
+      "staminaleft": 105,
+      "taunted1": false,
+      "taunted2": false
+    },
+    "villain": {
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "boot": 0,
+      "breastplate": 0,
+      "burning": false,
+      "frozen": false,
+      "gauntlet": 0,
+      "greaves": 0,
+      "helmet": 0,
+      "hitpoints": 0,
+      "life_stolen": false,
+      "poison": false,
+      "shield": 0,
+      "shinguard": 0,
+      "shoulderguard": 0,
+      "staminaleft": 95,
+      "taunted1": false,
+      "taunted2": false
+    }
+  },
+  "digest": "23a152769e3a65594b21ba705701882c9eff61acee75e372812c2066db22ccfb"
+}

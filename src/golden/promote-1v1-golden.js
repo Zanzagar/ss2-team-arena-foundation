@@ -2,10 +2,18 @@
  * Promotion gate from static candidate fixtures to runtime-observed goldens.
  *
  * A candidate is promoted only when at least two matching observations from
- * at least two independent capture sessions exist, every observation is
- * covered by a validated capture manifest, and each observation's digest
- * verifies. Any divergent observation blocks promotion and yields a
- * divergence report that must be preserved instead of discarded.
+ * at least two independent capture sessions exist, no two of them share a
+ * player-minted `capture.launchNonce`, they agree about whether the wrapper
+ * staged the scenario, every observation is covered by a validated capture
+ * manifest, and each observation's digest verifies. Any divergent observation
+ * blocks promotion and yields a divergence report that must be preserved
+ * instead of discarded.
+ *
+ * A golden promoted from wrapper-staged evidence carries that fact in
+ * `provenance.staged`, so the fixture says so on its own face rather than
+ * leaving a reader to follow observation ids back to their records. See
+ * `assertGoldenCanRecordStaging` below for the one schema change that is
+ * currently outstanding on this.
  */
 
 import {
@@ -267,6 +275,30 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
 
   const observationIds = new Set();
   const sessionIds = new Set();
+  // launchNonce -> the first observation that claimed it. The nonce is minted
+  // inside the player, from values the launcher does not supply, so two records
+  // agreeing on one came from a single launch however different their
+  // operator-chosen sessionIds look. Legacy records carry no nonce (the field
+  // was validated and discarded before it was carried into the record), and
+  // they must still promote — so this gate binds only observations that
+  // actually carry one, and says nothing about the ones that do not.
+  const nonceOwners = new Map();
+  // The staging claim -> the first observation that made it. The key is the
+  // declaration string, or `null` for "the wrapper staged nothing", which is
+  // what every legacy record says by carrying no field at all.
+  //
+  // This check is LOAD-BEARING, not a restatement of the scenario comparison.
+  // Nothing else in the pipeline looks at it: `matchSs2ObservationToFixture`
+  // compares scenario/samples/mutations/events/result/finalState and never
+  // reads the `capture` block, and `projectSs2ObservationForComparison`
+  // excludes that block outright. So two observations can agree on every
+  // compared channel — identical scenario values, tape, mutation trace and
+  // final state — while one of them had those values written in by the wrapper
+  // and the other got them from the game's own progression. The comparison sees
+  // equal values; it cannot see unequal authorship. Offered as evidence for one
+  // fixture they would produce a golden whose `staged` claim is true of half
+  // its evidence, which is worse than either claim alone.
+  const stagingClaims = new Map();
   const divergences = [];
   const matches = [];
   // Gate failures — the manifest included — are deferred until every
@@ -302,6 +334,23 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     }
     observationIds.add(observation.observationId);
     sessionIds.add(observation.capture.sessionId);
+    const launchNonce = observation.capture.launchNonce;
+    if (launchNonce !== undefined) {
+      const owner = nonceOwners.get(launchNonce);
+      if (owner !== undefined) {
+        defer(new PromotionError(
+          `Observations ${owner} and ${observation.observationId} share launchNonce ${launchNonce}; ` +
+          "the nonce is minted once per player launch, so they are one session's evidence offered " +
+          "twice, not two independent observations."
+        ));
+      } else {
+        nonceOwners.set(launchNonce, observation.observationId);
+      }
+    }
+    const stagingClaim = Object.hasOwn(observation.capture, "staged")
+      ? observation.capture.staged
+      : null;
+    if (!stagingClaims.has(stagingClaim)) stagingClaims.set(stagingClaim, observation.observationId);
     if (manifestSha256 !== null) {
       if (observation.capture.captureToolVersion !== manifest.captureToolVersion) {
         defer(new PromotionError(
@@ -330,6 +379,17 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
       matches.push({ observationId: observation.observationId, digest: observation.digest });
     }
   }
+  if (stagingClaims.size > 1) {
+    const describe = ([claim, observationId]) =>
+      `${observationId} ${claim === null ? "staged nothing" : `staged ${JSON.stringify(claim)}`}`;
+    defer(new PromotionError(
+      `The observations offered for ${candidate.fixtureId} disagree about staging: ` +
+      `${[...stagingClaims.entries()].map(describe).join("; ")}. A scenario the wrapper wrote and the ` +
+      "same scenario the game produced unaided are different kinds of evidence, and one golden cannot " +
+      "record both. Promote each set separately, or re-capture so every observation stages alike."
+    ));
+  }
+
   if (divergences.length > 0) {
     throw new PromotionBlockedError(
       `${divergences.length} observation(s) diverge from ${candidate.fixtureId}; ` +
@@ -349,6 +409,9 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     .sort((left, right) => Date.parse(left) - Date.parse(right))
     .at(-1);
 
+  // One agreed claim, checked above.
+  const staged = [...stagingClaims.keys()][0] ?? null;
+
   const golden = cloneJson(candidate);
   golden.fixtureId = goldenFixtureIdFor(candidate.fixtureId);
   golden.classification = GoldenClassification.GOLDEN;
@@ -361,8 +424,55 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     repetitions: observations.length,
     observationIds: observations.map((observation) => observation.observationId),
     observationDigests: observations.map((observation) => observation.digest),
-    captureManifestSha256: manifestSha256
+    captureManifestSha256: manifestSha256,
+    // Present only when the evidence was wrapper-staged. Omitted otherwise, so
+    // every golden promoted from game-produced evidence — all 22 in the
+    // repository — is byte-identical to what this gate produced before the
+    // field existed. Absence is also the honest claim rather than a
+    // compatibility dodge: no `staged` key means no wrapper wrote this
+    // scenario.
+    ...(staged === null ? {} : { staged })
   };
-  validateSs2OneVsOneFixture(golden);
-  return { golden, captureManifestSha256: manifestSha256, matches };
+  assertGoldenCanRecordStaging(golden, staged);
+  return { golden, captureManifestSha256: manifestSha256, matches, staged };
+}
+
+/**
+ * A golden must say on its own face that its scenario was wrapper-staged.
+ *
+ * The alternative designs were considered and rejected. Leaving the fact only
+ * in the cited observation records makes a reader chase ids through
+ * `test/observations/` to learn something that changes how the fixture should
+ * be read — the project's own rule is that evidence a reviewer holding the
+ * repository cannot check is evidence that is not there. Refusing staged
+ * evidence outright would be worse still: staging is the only route to the
+ * `candidate-armoured-*` per-piece values and to a reproducible hero entering
+ * the tournament rank-1 bout, and the ingest pipeline was built expecting
+ * staged scenarios. So the golden records it, in one optional provenance field
+ * whose absence carries the same meaning it does on a record.
+ *
+ * The field is currently REFUSED by the shared fixture schema:
+ * `GOLDEN_PROVENANCE_KEYS` in src/golden/run-1v1-fixture.js is a closed set and
+ * does not contain `staged`. That file is owned by another track, so this gate
+ * fails loudly with the exact change required rather than quietly dropping the
+ * field — a golden that silently looked game-produced is precisely the outcome
+ * this whole field exists to prevent. Unstaged promotions are untouched by any
+ * of this: they add no key, so they never reach the refusal.
+ */
+function assertGoldenCanRecordStaging(golden, staged) {
+  try {
+    validateSs2OneVsOneFixture(golden);
+  } catch (error) {
+    if (staged === null) throw error;
+    throw new PromotionError(
+      `The observations for ${golden.fixtureId} were wrapper-staged (${JSON.stringify(staged)}), so the ` +
+      "golden must record that in provenance.staged — a promoted fixture has to state on its own face " +
+      "that its scenario was written in rather than produced by the game. The shared fixture schema " +
+      "does not admit the field yet: add \"staged\" to GOLDEN_PROVENANCE_KEYS in " +
+      "src/golden/run-1v1-fixture.js and validate it with parseSs2StagedDeclaration from " +
+      "src/golden/observation.js. Until then a staged capture can be ingested, matched and inspected, " +
+      "but not promoted. Underlying schema error: " + error.message,
+      { cause: error }
+    );
+  }
 }
