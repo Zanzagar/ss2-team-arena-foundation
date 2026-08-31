@@ -46,7 +46,14 @@ machine-readable version of this table, and a test asserts the two agree.
 | SS2 | `_root.game.hero` / `_root.game.villain` | battle-map, "Combatant state objects" | never read, never written (that is `src/adapter/`'s job) |
 | SS2 | `_root.arena.gladiators.hero` / `.villain` | battle-map, "Battle entry and timeline ownership" | never read, never written |
 | ours | `ss2TeamArena:battle:<recordId>` | — | one immutable settled-battle record, canonical JSON text |
-| ours | `ss2TeamArena:quarantine:<recordId>:<n>` | — | the raw text of a record that failed its integrity check |
+| ours | `ss2TeamArena:quarantine:<recordId>:<n>` | — | a record that failed its integrity check, preserved as evidence |
+
+Both paths in `describeVanillaBoundary()` are *built* by calling `campaignKey()`
+and substituting placeholders for its segments, rather than written out beside
+it. They had already drifted once — the quarantine path was documented with a
+dot where the minter produces a colon — and the test whose job was preventing
+that checked only the prefix. It now fills the documented template and compares
+it to a key the store really minted.
 
 ### How the boundary is enforced, in three layers
 
@@ -64,11 +71,11 @@ machine-readable version of this table, and a test asserts the two agree.
    the prefix at a single three-line choke point (`assertCampaignKey`) through
    which every read, write and delete passes. Vanilla's own save keys contain
    no colon, so a minted key cannot collide with one even by accident.
-3. **Every payload is screened by name.** `assertNoVanillaFieldNames()` walks
-   the whole record and refuses it if any object key anywhere is a name the
-   vanilla surface uses. The catalogue comes from
-   `src/adapter/vanilla-fields.js` (the battle map's per-combatant groups, the
-   unnamed timed `spell_*` fields, the clip-resident facing) plus the
+3. **Every payload is screened by name, on the way in.**
+   `assertNoVanillaFieldNames()` walks the whole record and refuses it if any
+   object key anywhere is a name the vanilla surface uses. The catalogue comes
+   from `src/adapter/vanilla-fields.js` (the battle map's per-combatant groups,
+   the unnamed timed `spell_*` fields, the clip-resident facing) plus the
    route map's save-container and progression names
    (`goldpieces`, `battlesfought`, `battleswon`, `battleslost`, `score`,
    `character_xp`, `experiencelast`, `heroDNA`, `characterDNA`,
@@ -76,13 +83,50 @@ machine-readable version of this table, and a test asserts the two agree.
    `ss2_data`, and `characterN`). Because the catalogue is imported rather
    than copied, the screen grows as the map is extended.
 
-For the storage host, `createNamespacedBackend(container)` is the coexistence
-mechanism, and its safety is structural rather than checked: the constructor
+### The screen runs on the write path only, and that is load-bearing
+
+`sealCampaignRecord()` screens every record this layer mints and `store.write()`
+screens again at the write. `validateCampaignRecord()` does **not**, and neither
+does the re-seal inside a migration.
+
+That is not an oversight; it is the fix for a defect an audit demonstrated end
+to end. The screen used to run inside `validateCampaignRecord`, which runs on
+every **read**, against a live import of a catalogue this layer does not own —
+a catalogue the paragraph above explicitly invites people to grow. `store.js`
+funnels every read error that is not a schema-version refusal into
+quarantine-then-delete. So adding one additive line to
+`src/adapter/vanilla-fields.js` — the name `name`, say, which is an object key
+in both `teams[]` and `outcomes[]` of every record ever written — turned every
+stored record corrupt, quarantined it, removed the live key, and reported the
+campaign as empty. There is no restore API. It also contradicted `errors.js`,
+which says `VanillaBoundaryError` is "never recoverable and never degraded".
+
+Stored data must not be perishable against a moving catalogue. The screen
+guards the direction the boundary exists to guard — records going *out* of this
+layer — and the schema, which is exact-key at every level, is what guards
+records coming back in.
+
+### The storage host: give this layer a container of its own
+
+`createNamespacedBackend(container)` is the coexistence mechanism, and it makes
+two separate guarantees.
+
+Within the container, safety is structural rather than checked: the constructor
 resolves `container[CAMPAIGN_NAMESPACE]` **once** and the returned backend
 closes over that bucket alone. It keeps no reference to the container, so after
 construction there is no expression in the backend that could reach a sibling
-key. A vanilla field living next to the bucket is not merely left alone; it is
+key. A field living next to the bucket is not merely left alone; it is
 unreachable.
+
+The choice of container is now structural too. **A container carrying vanilla
+field names as its own keys is refused**, with `VanillaBoundaryError`, unless
+the caller passes `{ allowVanillaSiblings: true }`. "Records alongside, never
+inside" used to be advice — this JSDoc named `so_local.data` as its example
+host — and advice does not survive a caller in a hurry. Growing a campaign
+history inside `ss2_data` means sharing the vanilla store's flush and its quota,
+and `refresh_gladiators` flushes that store unconditionally and has a reset
+branch that blanks every character slot when the gladiator count reads back
+`undefined`/`0`/`NaN`. The intended host is a `SharedObject` this project owns.
 
 ### The screen's most useful refusal
 
@@ -107,6 +151,15 @@ the golden pipeline's, and a test pins that.
 | `teams[]` | `teamId`, `name`, and `slots[]` of `{seatId, slotIndex, combatantId, aiFilled}` | the roster, including **which slots were AI-filled**. |
 | `seats[]` | `{seatId, controllerKind, controllerId, controllerLabel}` | controller identity, in its own block, exactly as `toControllerState()` keeps it out of `toTeamWireState()`. |
 | `outcomes[]` | `combatantId`, `name`, `teamId`, `seatId`, `slotIndex`, `aiFilled`, `survived`, `health`, `maxHealth`, `statuses`, `defeatedAtSequence` | the per-combatant result, with the resolver's stamped event sequence at which each fallen combatant was defeated. |
+
+`defeatedAtSequence` is checked in **both** directions: a survivor must not carry
+one, and a casualty must. Only the first was checked, and the unchecked direction
+is the one that loses evidence — a dropped `combatant-defeated` event recorded as
+`null` and validated, so the record could not tell "defeated at sequence 6" from
+"we lost the event". One battle is refused as a consequence: a combatant that
+entered already at zero health was never defeated *by this battle*, so there is
+no sequence to record and `buildCampaignRecord()` says so by name rather than
+writing a null.
 | `provenance.ruleSet` | `id`, `contractVersion`, `verification`, `runtimeVerified`, `goldenFixtureIds`, `buildSha256`, `note` | **which maths produced this battle.** |
 | `provenance.battle` | `stateVersion`, `seed`, `rngCursor`, `turnNumber`, `initiative`, `combatStateHash` | enough to tie the record to a replay. The hash is the controller-independent one, so a host and a client that disagree about who drove a seat still record the same value. |
 | `provenance.writer` | `id`, `version` | which build of this layer wrote it. |
@@ -186,10 +239,12 @@ Three further rules:
 
 ## Storage
 
-The I/O seam is four synchronous, string-valued methods:
+The I/O seam is four required synchronous, string-valued methods and one
+optional fifth:
 
 ```js
-{ read(key) -> string|null, write(key, text) -> void, remove(key) -> void, keys() -> string[] }
+{ read(key) -> string|null, write(key, text) -> void, remove(key) -> void, keys() -> string[],
+  flush?() -> boolean }
 ```
 
 Synchronous and string-valued because the AVM1 SharedObject surface is both, and
@@ -199,6 +254,42 @@ store would make settlement async, which the once-only latch in
 behind this interface. Two backends ship: `createMemoryBackend()` (the tests run
 entirely on it, so no filesystem is needed) and `createNamespacedBackend()`
 described above.
+
+### Committing, and admitting when a commit was refused
+
+`flush()` is **optional rather than required**, deliberately. Requiring it would
+break every backend that has no such concept — a `Map`, a plain object, an
+in-process buffer — and push each of them into stubbing a method whose `true`
+would be a lie. What the seam actually lacked was not a mandatory method but an
+*answer*: an AVM1 `SharedObject.flush()` returns `false` or `"pending"` rather
+than throwing when the 100 KB local-storage quota is exceeded, and the layer had
+no way to ask and no way to hear. `store.write()` reported `status: "written"`
+regardless.
+
+So: declare `flush()` and the store calls it after each write, treats anything
+other than `true` (a thrown error included) as a refusal, **rolls its own key
+back**, and throws `CampaignStorageError`. Omit it and nothing changes; the
+write result then reports `flushed: null`, which says the question could not be
+asked rather than guessing the answer.
+
+### The byte budget
+
+`createCampaignStore({ byteBudget })` caps how many bytes this layer occupies —
+keys included, default **64 KB** — and refuses the write that would cross it,
+before writing anything. Pass `null` to disable it deliberately.
+
+The numbers behind the default: one 2v2 record is about 2.4 KB of canonical
+JSON, the eventual host is a Flash local store whose default quota is 100 KB per
+origin, and `ss2_data` already lives in that quota (679 bytes, per `HANDOFF.md`).
+Roughly forty records exhaust it. A campaign history is unbounded by nature —
+one record per settled battle, forever — and there is deliberately no `remove()`
+on the public surface, so nothing prunes it. Silently filling a shared quota is
+how a flush starts failing, and `refresh_gladiators`' reset branch is what
+failing flushes lead to. A refused write the host can see and report is a much
+better failure than a full disk nobody notices.
+
+Pruning remains a host decision. What this layer owes the host is a bounded
+footprint and a loud refusal, not a delete button.
 
 ### Why a record can only ever damage itself
 
@@ -214,37 +305,81 @@ token. So:
   record, and can never touch a record that was already good.
 
 Writes are read back and compared immediately. That proves the backend accepted
-the value; it cannot prove the host flushed it to disk, which is exactly why the
-digest exists.
+the value. Whether the *host* committed it is a separate question: `flush()`
+asks it when the backend can answer, and the digest catches a torn commit on the
+next read when it cannot.
 
 ### Recovery
 
 | On read | Result |
 | --- | --- |
-| key absent | `missing` — no campaign data for that battle |
+| the key is not present in the backend | `missing` — no campaign data for that battle |
+| the key is present but holds `null` | `corrupt` — a torn write, not an absence |
 | value is not a string, or does not parse | `corrupt` |
 | schema newer than this build | `unsupported`, left untouched |
 | digest mismatch, or the record fails validation | `corrupt` |
 | record id disagrees with its key | `corrupt` |
 | otherwise | `ok`, with a deep-frozen record |
 
+The first two rows used to be one. The seam's `read()` answers `string|null`, so
+a stored `null` and an absent key are indistinguishable through `read()` alone —
+and they are not the same answer. Absent means "no campaign data"; a stored
+`null` is a torn write, it is not a string, and the row below says a value that
+is not a string is corrupt. Reporting it as `missing` put it in the same
+category as an empty store and let the next write clobber it. `keys()` is the
+only way to tell the two apart, so the store consults it — but only on the path
+where `read()` came back null, so an ordinary hit still costs one `read()`.
+`store.has()` answers the same presence question, so a torn entry reads as
+taken.
+
 `readRecord()` and `readAll()` never throw for a damaged, absent, or
 future-schema record — they throw only for programmer error (a key outside the
 namespace, a broken backend). `readAll()` returns the good records alongside the
-corrupt ones: one torn record must not cost a campaign its whole history.
+corrupt ones: one torn record must not cost a campaign its whole history. That
+claim depended on `parseCampaignKey()` and `campaignKey()` agreeing on what a
+key segment is, and they did not: parse accepted segments the minter would have
+refused, so a single malformed key in the namespace made `readAll()` throw and
+cost the campaign every good record. Parse now applies the minter's own token
+pattern, and a string this layer could not have minted is simply not ours.
 
 Corrupt entries are **quarantined**: copied to
 `ss2TeamArena:quarantine:<recordId>:<n>` and then removed from the live key, so
 the evidence is preserved rather than discarded — the same instinct as the
-divergence reports in `src/golden/promote-1v1-golden.js`. The copy happens
-first; if it fails, the original is left exactly where it was and the read still
-degrades. A failed quarantine never deletes and never turns a bad read into a
-thrown error. Quarantining can be switched off per store or per read.
+divergence reports in `src/golden/promote-1v1-golden.js`.
+
+What is preserved:
+
+- a **text** value is preserved verbatim, byte for byte;
+- a **non-text** value is preserved as a JSON envelope
+  `{ nonString: true, type, value, text }`, carrying the value's contents
+  wherever JSON can hold them and a `String()` rendering as a labelled fallback
+  when it cannot (a circular object, say).
+
+The second bullet used to read `JSON.stringify({ nonString: String(rawValue) })`,
+which preserved every object as the literal `[object Object]` and then deleted
+the original — the quarantine destroyed exactly the evidence it exists to
+preserve. The test that covered it asserted only that a quarantine key was
+returned, never what it held.
+
+The copy happens first; if it fails, the original is left exactly where it was
+and the read still degrades. If the *delete* after a successful copy fails, the
+copy is rolled back, so a failed quarantine really does leave the store as it
+found it. And an identical copy already in quarantine is reused rather than
+added to: on a medium that accepts writes but refuses removes, every read of the
+same damaged record used to append another copy of the same bytes, up to a
+thousand, after which `store.write()` threw for that battle permanently. A
+failed quarantine never deletes and never turns a bad read into a thrown error.
+Quarantining can be switched off per store or per read.
 
 Writing a good record over a corrupt copy of the same record is a **repair**:
-the corrupt bytes are quarantined and the write proceeds.
+the corrupt bytes are quarantined and the write proceeds. If the quarantine
+fails, the write still proceeds and reports `quarantineFailed` — symmetrically
+with the read path, which has always degraded rather than thrown. Preserving
+evidence is best-effort; storing a verified record over a copy of itself that no
+longer verifies is not.
 
-Nothing in any recovery path consults, reads, or repairs anything vanilla.
+Nothing in any recovery path consults, reads, or repairs anything vanilla — and
+nothing in any recovery path consults the vanilla field-name catalogue either.
 
 ## Once-only
 
@@ -264,23 +399,34 @@ Two independent guarantees, deliberately overlapping:
 ### Wiring
 
 ```js
-const store = createCampaignStore({ backend: createNamespacedBackend(saveContainer) });
+// modContainer is a container this project owns — e.g. the `data` of a
+// SharedObject named for this mod. Not so_local.data: passing the vanilla
+// save's own container is refused.
+const store = createCampaignStore({ backend: createNamespacedBackend(modContainer) });
 const recorder = createCampaignRecorder({ store, battleId: "camp-1" });
 const battle = createTeamBattle({ teams, rules, onCampaignSettled: recorder.hook });
 recorder.attach(battle);
 // … play …
-recorder.lastResult; // { status: "written" | "duplicate" | "repaired", … }
-recorder.errors;     // storage failures, collected rather than thrown
+recorder.lastResult; // { status: "written" | "duplicate" | "repaired", flushed, … }
+recorder.errors;     // save failures, collected rather than thrown
 ```
 
 `attach` is a second step because `onCampaignSettled` has to be supplied in the
 blueprint, before `createTeamBattle` has returned anything to attach to.
 
-The hook does not throw. By the time it runs the battle is over and the campaign
-has already been told; a storage failure at that point is a save problem, not a
-battle problem, and letting it propagate would turn "the disk is full" into "the
-arena crashed". Failures are collected on `recorder.errors`, or rethrown if the
-recorder was built with `throwOnFailure: true`.
+The hook does not throw **for a save failure**. By the time it runs the battle is
+over and the campaign has already been told; a storage failure at that point is a
+save problem, not a battle problem, and letting it propagate would turn "the disk
+is full" into "the arena crashed". Failures are collected on `recorder.errors`,
+or rethrown if the recorder was built with `throwOnFailure: true`.
+
+That leniency is scoped to the two failures it is an answer to —
+`CampaignStorageError` and `CampaignRecordError` (which `CampaignSchemaVersionError`
+extends) — and to nothing else. It used to be a blanket `catch`, which also
+swallowed `VanillaBoundaryError`: a boundary violation would have been filed on
+`errors` as though it were a full disk, in direct contradiction of `errors.js`,
+which says that error "is never recoverable and never degraded" and that the
+correct response to one is to fix the caller. It propagates.
 
 ## What this layer does not do
 
@@ -299,16 +445,34 @@ recorder was built with `throwOnFailure: true`.
   is a schema-3 migration.
 - **No deletion.** The store has no public `remove`. Pruning a campaign history
   is a host decision, and this layer should not be the thing that makes it easy.
+  What it does owe the host is a bounded footprint, which is the byte budget's
+  job, and a refusal it can see rather than a quota it silently exhausts.
 
 ## Tests
 
-`test/campaign-persistence.test.js`, 48 tests, filesystem-free. They cover the
+`test/campaign-persistence.test.js`, 68 tests, filesystem-free. They cover the
 schema and its round trip, the AI-fill/AI-controller distinction, the
-seat/combatant split, the provenance gate in both directions, exact-key
-validation, digest tamper detection, both migration directions (a schema-1
-record migrating, and a future-schema record refused with both versions named),
-the once-only settlement producing exactly one record, every corruption and
-recovery path, and — the boundary test the constraint asks for — that no vanilla
-field name from the whole catalogue is ever written by this layer, that a record
-reaching for one is refused, and that a save container full of vanilla fields is
-byte-identical after a full write/read/quarantine cycle.
+seat/combatant split, the provenance gate in both directions (with the build
+hash pinned by **value**, not by shape — a shape check passes for `"0".repeat(64)`),
+exact-key validation, digest tamper detection, the battle-provenance projection
+value by value, statuses carried through from a rule set that actually applies
+them, both migration directions (a schema-1 record migrating, and a future-schema
+record refused with both versions named), the once-only settlement producing
+exactly one record, and every corruption and recovery path — including a stored
+`null`, a non-text value whose contents must survive quarantine, a malformed key
+in our own namespace, and a medium that refuses removes.
+
+The boundary tests the constraint asks for: that no vanilla field name from the
+whole catalogue is ever written by this layer; that a record reaching for one is
+refused at both authoring gates; that a stored record does **not** perish when
+the catalogue grows; and that `createNamespacedBackend()` refuses the vanilla
+save outright.
+
+One test in this file was rewritten rather than added to, and the reason is worth
+recording. "The namespaced backend leaves every vanilla sibling byte-identical"
+deleted our own namespace from its copy of the container and then asserted
+equality — it compared the container to itself minus the only thing that
+changed. The assertion was true; the claim a reader took from it was not, and it
+is why the uncapped growth went unnoticed through review. It now measures the
+serialized size of the **whole** container before and after and requires every
+byte of the growth to be accounted for.

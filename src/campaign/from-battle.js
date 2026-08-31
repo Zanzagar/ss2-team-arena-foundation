@@ -54,6 +54,49 @@ function defeatSequences(events) {
 }
 
 /**
+ * The writer block names the build of this layer that produced the record, so
+ * a bad one has to be refused before it is spread into the draft.
+ */
+function assertWriter(writer) {
+  if (!writer || typeof writer !== "object" || Array.isArray(writer)) {
+    throw new CampaignRecordError(
+      "writer must be an object of the form { id, version } naming the build of this layer."
+    );
+  }
+  for (const field of ["id", "version"]) {
+    const value = writer[field];
+    if (typeof value !== "string" || value.length === 0 || value.length > 64) {
+      throw new CampaignRecordError(`writer.${field} must be a short non-empty string.`);
+    }
+  }
+  return writer;
+}
+
+/**
+ * The defeat sequence for one combatant, refusing rather than recording null.
+ *
+ * A casualty carries the sequence the resolver stamped on its
+ * `combatant-defeated` event. There is one case where no such event exists: a
+ * combatant that entered the battle already at zero health, so the battle
+ * never defeated it. That is not an outcome this record can describe — the
+ * record's `defeatedAtSequence` means "the point in *this battle* at which the
+ * combatant fell" — so it is refused by name here rather than flattened to a
+ * null that validates and hides a dropped event.
+ */
+function defeatSequenceFor(combatant, sequences) {
+  if (combatant.alive) return null;
+  const sequence = sequences.get(combatant.id);
+  if (sequence === undefined) {
+    throw new CampaignRecordError(
+      `Combatant ${combatant.id} is down but the battle logged no combatant-defeated event for it, so ` +
+      "there is no defeat sequence to record. A combatant that entered the battle already at zero health " +
+      "was never defeated by it, and this layer will not invent a sequence for one."
+    );
+  }
+  return sequence;
+}
+
+/**
  * Build a sealed, validated campaign record for a settled battle.
  *
  * @param {object} battle a battle from `createTeamBattle()` that has settled
@@ -66,6 +109,11 @@ export function buildCampaignRecord(battle, { battleId, recordedAt, writer = DEF
   if (!battle || typeof battle !== "object" || !Array.isArray(battle.teams)) {
     throw new CampaignRecordError("A campaign record needs a team battle from createTeamBattle().");
   }
+  // Checked here rather than left to the seal. `writer` is spread field by
+  // field into the draft, so a bad one arrives at validation as two
+  // `undefined`s and surfaces as "provenance.writer.id is not JSON-safe" — a
+  // message about JSON that says nothing about the argument that was wrong.
+  assertWriter(writer);
   if (!isCampaignSettled(battle)) {
     throw new CampaignRecordError(
       "The battle has not settled. A campaign record is written once, after a whole team is eliminated " +
@@ -131,7 +179,7 @@ export function buildCampaignRecord(battle, { battleId, recordedAt, writer = DEF
       health: combatant.health,
       maxHealth: combatant.maxHealth,
       statuses: [...combatant.status],
-      defeatedAtSequence: combatant.alive ? null : (sequences.get(combatant.id) ?? null)
+      defeatedAtSequence: defeatSequenceFor(combatant, sequences)
     })),
     provenance: {
       ruleSet: {

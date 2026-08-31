@@ -18,10 +18,29 @@
  * arena crashed". So the hook collects failures on the recorder instead, and
  * the caller inspects `errors` (or passes `throwOnFailure: true` when it would
  * rather hear about it immediately).
+ *
+ * That leniency is scoped to the two failures it is an answer to —
+ * `CampaignStorageError` and `CampaignRecordError` — and to nothing else. A
+ * `VanillaBoundaryError` is a bug report, not a save problem, and propagates.
  */
 
-import { CampaignError } from "./errors.js";
+import { CampaignError, CampaignRecordError, CampaignStorageError } from "./errors.js";
 import { buildCampaignRecord } from "./from-battle.js";
+
+/**
+ * The two failures the hook is allowed to swallow.
+ *
+ * Both mean "this battle could not be saved": the backend refused, or the
+ * record did not validate. Neither is a reason to crash an arena that has
+ * already finished. Everything else — a `VanillaBoundaryError` above all,
+ * which `errors.js` defines as a bug report rather than a runtime condition
+ * and says must never be caught — propagates.
+ */
+const COLLECTED_FAILURES = Object.freeze([CampaignStorageError, CampaignRecordError]);
+
+function isCollectable(error) {
+  return COLLECTED_FAILURES.some((type) => error instanceof type);
+}
 
 /**
  * Build and store the record for a settled battle. Idempotent.
@@ -118,6 +137,12 @@ class CampaignRecorder {
     try {
       this.record();
     } catch (error) {
+      // Narrow on purpose. The blanket catch that used to be here also
+      // swallowed `VanillaBoundaryError`, which `errors.js` says is "never
+      // recoverable and never degraded" — a boundary violation would have been
+      // filed on `errors` as though it were a full disk and the run would have
+      // continued.
+      if (!isCollectable(error)) throw error;
       this.#errors.push(error);
       if (this.#throwOnFailure) throw error;
     }

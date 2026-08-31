@@ -159,6 +159,19 @@ export function vanillaFieldNamesIn(value, path = "record") {
 }
 
 /**
+ * The vanilla field names a host container carries as its *own* top-level
+ * keys — the shape of a live `so_local.data`.
+ *
+ * Shallow on purpose: this answers "is this container the vanilla save?", not
+ * "does this payload mention a vanilla field?". `vanillaFieldNamesIn()` is the
+ * deep screen and answers the second question.
+ */
+export function vanillaFieldNamesOn(container) {
+  if (container === null || typeof container !== "object" || Array.isArray(container)) return [];
+  return Object.keys(container).filter((key) => isVanillaFieldName(key));
+}
+
+/**
  * The screen every write passes through. Throws rather than stripping: a
  * record that reached for a vanilla field name is a design mistake upstream,
  * and silently editing it would hide the mistake instead of stopping it.
@@ -221,13 +234,46 @@ export function assertCampaignKey(key) {
   return key;
 }
 
-/** The kind and segments of a minted key, or `null` if it is not one of ours. */
+/**
+ * The kind and segments of a minted key, or `null` if it is not one of ours.
+ *
+ * The segment check is the load-bearing half and is deliberately the *same*
+ * pattern `campaignKey()` mints against. Without it this function accepts
+ * strings `campaignKey()` could never have produced — `ss2TeamArena:battle:`
+ * parses to a single empty segment — and every caller that re-mints a key from
+ * a parsed segment then throws. `store.readAll()` did exactly that: one
+ * malformed key in the namespace cost the campaign every good record.
+ * Parse and mint must agree on what a segment is, or the round trip is a lie.
+ */
 export function parseCampaignKey(key) {
   if (!isCampaignKey(key)) return null;
   const [namespace, kind, ...parts] = key.split(CAMPAIGN_KEY_SEPARATOR);
   if (namespace !== CAMPAIGN_NAMESPACE || !KEY_KINDS.has(kind) || parts.length === 0) return null;
+  if (parts.some((part) => !KEY_PART_PATTERN.test(part))) return null;
   return Object.freeze({ kind, parts: Object.freeze(parts) });
 }
+
+/**
+ * A documentation path for one key kind, built by minting a real key and
+ * replacing its segments with `<placeholder>` markers.
+ *
+ * Built rather than written out so the separator between a record id and a
+ * quarantine copy number cannot drift from the one `campaignKey()` actually
+ * mints — it had drifted to a dot, and a test that checked only the prefix let
+ * it through.
+ */
+function campaignKeyTemplate(kind, ...segmentNames) {
+  return campaignKey(kind, ...segmentNames)
+    .split(CAMPAIGN_KEY_SEPARATOR)
+    .map((segment, index) => (index >= 2 ? `<${segment}>` : segment))
+    .join(CAMPAIGN_KEY_SEPARATOR);
+}
+
+/** The documented shape of a stored battle key: `ss2TeamArena:battle:<recordId>`. */
+export const BATTLE_KEY_TEMPLATE = campaignKeyTemplate(CampaignKeyKind.BATTLE, "recordId");
+
+/** The documented shape of a quarantine key: `ss2TeamArena:quarantine:<recordId>:<n>`. */
+export const QUARANTINE_KEY_TEMPLATE = campaignKeyTemplate(CampaignKeyKind.QUARANTINE, "recordId", "n");
 
 /**
  * The documented boundary, in machine-readable form, so the prose in
@@ -239,13 +285,15 @@ export function describeVanillaBoundary() {
     namespace: CAMPAIGN_NAMESPACE,
     ours: Object.freeze([
       Object.freeze({
-        path: `${CAMPAIGN_NAMESPACE}:${CampaignKeyKind.BATTLE}:<recordId>`,
+        path: BATTLE_KEY_TEMPLATE,
         holds: "one immutable settled team-battle record, as canonical JSON text",
         writtenBy: "src/campaign/store.js"
       }),
       Object.freeze({
-        path: `${CAMPAIGN_NAMESPACE}:${CampaignKeyKind.QUARANTINE}:<recordId>.<n>`,
-        holds: "the raw text of a record that failed its integrity check, preserved as evidence",
+        path: QUARANTINE_KEY_TEMPLATE,
+        holds:
+          "a record that failed its integrity check, preserved as evidence: the raw text when the stored " +
+          "value was text, or a JSON envelope carrying the value's type and contents when it was not",
         writtenBy: "src/campaign/store.js"
       })
     ]),
@@ -272,7 +320,9 @@ export function describeVanillaBoundary() {
     rules: Object.freeze([
       "No function in src/campaign/ accepts, reads, or writes a vanilla object.",
       "Every storage key is minted by campaignKey() and re-checked by assertCampaignKey().",
-      "Every payload is screened by assertNoVanillaFieldNames() before it is written.",
+      "Every payload is screened by assertNoVanillaFieldNames() on the authoring path, before it is written.",
+      "The screen never runs on the read path: stored records must not perish when the catalogue grows.",
+      "createNamespacedBackend() refuses a container holding vanilla field names unless the caller opts in.",
       "A corrupt or absent campaign record degrades to no campaign data; nothing vanilla is consulted to repair it.",
       "A record from a future schema version is refused and left untouched, never rewritten or quarantined."
     ])

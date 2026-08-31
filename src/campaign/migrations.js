@@ -219,7 +219,13 @@ export function migrateCampaignRecord(raw, { migratedAt = new Date().toISOString
   };
   let record;
   try {
-    record = sealCampaignRecord(draft);
+    // No vanilla field-name screen. A migration re-seals bytes that came *out
+    // of storage*, so screening here would put the adapter's catalogue back on
+    // the read path and make a stored schema-1 record perish the moment the
+    // catalogue grew to cover a name the record already uses. The screen
+    // belongs on the authoring path; see `record.js`'s note in
+    // `validateCampaignRecord`.
+    record = sealCampaignRecord(draft, { screenVanillaNames: false });
   } catch (error) {
     throw new CampaignMigrationError(
       `Migrating schema ${sourceSchemaVersion} to ${CAMPAIGN_RECORD_SCHEMA_VERSION} produced an ` +

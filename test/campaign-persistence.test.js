@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 
 import { knownVanillaFields } from "../src/adapter/vanilla-fields.js";
 import { canonicalJsonStringify as goldenCanonicalJsonStringify } from "../src/golden/observation.js";
+import { SS2_BUILD_SHA256 } from "../src/golden/run-1v1-fixture.js";
 import {
   BATTLE_RESULT_ACK_TYPE,
   acknowledgeResultAnimation,
   advanceAiTurns,
   applyAction,
   campaignSettlement,
+  combatStateHash,
   createTeamBattle,
   currentCombatant,
   defineTeamRuleSet,
@@ -22,6 +24,7 @@ import {
   RuleSetVerification
 } from "../src/team/index.js";
 import {
+  BATTLE_KEY_TEMPLATE,
   CAMPAIGN_MIGRATIONS,
   CAMPAIGN_NAMESPACE,
   CAMPAIGN_RECORD_KIND,
@@ -31,13 +34,17 @@ import {
   CampaignRecordIntegrityError,
   CampaignSchemaVersionError,
   CampaignStorageError,
+  DEFAULT_CAMPAIGN_BYTE_BUDGET,
   MINIMUM_SUPPORTED_SCHEMA_VERSION,
+  QUARANTINE_KEY_TEMPLATE,
   ReadStatus,
   RecordedRuleSetVerification,
   VANILLA_SAVE_CONTAINER_FIELDS,
   VanillaBoundaryError,
   WriteStatus,
   assertCampaignKey,
+  assertJsonSafe,
+  assertNoVanillaFieldNames,
   buildCampaignRecord,
   campaignKey,
   campaignRecordIdFor,
@@ -50,11 +57,16 @@ import {
   describeCampaignMigrations,
   describeCampaignRecord,
   describeVanillaBoundary,
+  isCampaignRecord,
   isVanillaFieldName,
   migrateCampaignRecord,
+  parseCampaignKey,
+  recordSettledBattle,
+  schemaVersionOf,
   sealCampaignRecord,
   validateCampaignRecord,
-  vanillaFieldNamesIn
+  vanillaFieldNamesIn,
+  vanillaFieldNamesOn
 } from "../src/campaign/index.js";
 
 /* ------------------------------------------------------------------ */
@@ -75,7 +87,7 @@ const brute = (id, agility, overrides = {}) => ({
   stats: { strength: 10, agility, attack: 40, defense: 0, vitality: 0, stamina: 5, magicka: 0 },
   loadout: { meleeDamage: 40, rangedDamage: 1, canUseRanged: false },
   maxHealth: 50,
-  health: 50
+  health: overrides.health ?? 50
 });
 
 const twoVsTwo = (overrides = {}) => ({
@@ -159,7 +171,7 @@ const pretendVerifiedRules = defineTeamRuleSet({
     kind: "licensed-observation",
     runtimeVerified: true,
     note: "Test double standing in for a promoted rule set. Not a verification claim.",
-    buildSha256: "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA",
+    buildSha256: SS2_BUILD_SHA256,
     goldenFixtureIds: ["golden-prisoner-normal-kill-dir6"]
   },
   actionTypes: ["strike"],
@@ -171,6 +183,41 @@ const pretendVerifiedRules = defineTeamRuleSet({
   }),
   chooseAiAction: (view, actorId, options) => options[0]
 });
+
+/**
+ * A rule set that applies status effects, so `outcomes[].statuses` is exercised
+ * with something in it.
+ *
+ * Every fixture above leaves every status list empty, which meant
+ * `from-battle.js` could have written `statuses: []` unconditionally and the
+ * whole suite would still have passed — and `record.js`'s length cap,
+ * non-empty-string check and duplicate check were never reached by any test.
+ * `scorch` marks the target and the actor, so a settled battle ends with
+ * several different non-empty lists.
+ */
+const scorchingRules = defineTeamRuleSet({
+  id: "test-double-scorching",
+  verification: RuleSetVerification.PLACEHOLDER,
+  provenance: {
+    runtimeVerified: false,
+    note: "Test double that applies status effects. Invented; nothing here is measured SS2 behaviour."
+  },
+  actionTypes: ["scorch"],
+  maximumHealth: (combatant) => combatant.maxHealth ?? 50,
+  legalActions: (view) => view.foes.map((foe) => ({ type: "scorch", targetId: foe.id })),
+  resolveAction: (request) => ({
+    effects: [
+      { kind: "status", targetId: request.target.id, status: "burning" },
+      { kind: "status", targetId: request.actor.id, status: "overheated" },
+      { kind: "damage", targetId: request.target.id, amount: 25 }
+    ],
+    events: [{ type: "scorch", actorId: request.actor.id, targetId: request.target.id }]
+  }),
+  chooseAiAction: (view, actorId, options) => options[0]
+});
+
+/** A container this project owns: the intended host, with no vanilla siblings. */
+const modContainer = (extra = {}) => ({ modVersion: "1", ...extra });
 
 /* ------------------------------------------------------------------ */
 /* The record schema                                                   */
@@ -247,6 +294,119 @@ test("per-combatant outcomes mirror the resolver's final state", () => {
   }
 });
 
+test("a casualty must carry the sequence at which it was defeated", () => {
+  const record = sampleRecord();
+  const casualty = record.outcomes.find((outcome) => !outcome.survived);
+  assert.ok(Number.isSafeInteger(casualty.defeatedAtSequence) && casualty.defeatedAtSequence > 0);
+
+  // Only one direction of this rule was checked, and it was the direction that
+  // cannot lose evidence. A dropped `combatant-defeated` event recorded as
+  // `null` and validated, so the record could not tell "defeated at sequence 6"
+  // from "we lost the event".
+  const dropped = mutable(record);
+  dropped.outcomes.find((outcome) => !outcome.survived).defeatedAtSequence = null;
+  assert.throws(() => reseal(dropped), /carries no defeat sequence/);
+
+  const zero = mutable(record);
+  zero.outcomes.find((outcome) => !outcome.survived).defeatedAtSequence = 0;
+  assert.throws(() => reseal(zero), /must be a positive integer/);
+
+  // The other direction still holds, and so does the draw case, where every
+  // combatant is a casualty.
+  const survivorStamped = mutable(record);
+  survivorStamped.outcomes.find((outcome) => outcome.survived).defeatedAtSequence = 3;
+  assert.throws(() => reseal(survivorStamped), /survived but carries a defeat sequence/);
+});
+
+test("a combatant that entered the battle already down is refused by name, not flattened to null", () => {
+  // The one battle in which a casualty legitimately has no defeat event: it was
+  // never defeated *by this battle*. `defeatedAtSequence` means "the point in
+  // this battle at which the combatant fell", so there is nothing honest to
+  // write, and inventing one or recording null are both worse than refusing.
+  const battle = runToSettlement(createTeamBattle({
+    seed: 7,
+    teams: [
+      { id: "alpha", name: "Alpha", slots: 2, combatants: [brute("a1", 9), brute("a2", 8)] },
+      {
+        id: "beta",
+        name: "Beta",
+        slots: 2,
+        combatants: [brute("b1", 3, { health: 0 }), brute("b2", 2, { health: 0 })]
+      }
+    ]
+  }));
+  assert.ok(battle.result, "the battle is decided — beta entered eliminated");
+  assert.throws(
+    () => buildCampaignRecord(battle, { battleId: "camp-walkover", recordedAt: AT }),
+    (error) => {
+      assert.ok(error instanceof CampaignRecordError);
+      assert.match(error.message, /b1 is down but the battle logged no combatant-defeated event/);
+      return true;
+    }
+  );
+});
+
+test("statuses are carried through from the resolver, and the list is bounded, non-empty and unique", () => {
+  const record = buildCampaignRecord(
+    settledBattle({ ...twoVsTwo(), rules: scorchingRules }),
+    { battleId: "camp-scorched", recordedAt: AT }
+  );
+  // Every other fixture in this file leaves every status list empty, so
+  // `from-battle.js` could have written `statuses: []` unconditionally and the
+  // suite would still have passed.
+  const byId = new Map(record.outcomes.map((outcome) => [outcome.combatantId, outcome.statuses]));
+  assert.ok([...byId.values()].every((statuses) => statuses.length > 0), "every combatant was marked");
+  assert.ok(new Set([...byId.values()].map((statuses) => statuses.join(","))).size > 1, "and not identically");
+  assert.deepEqual(byId.get("b1"), ["burning"], "the first target burns and never acts");
+  const battle = settledBattle({ ...twoVsTwo(), rules: scorchingRules });
+  for (const combatant of battle.teams.flatMap((team) => team.combatants)) {
+    assert.deepEqual(
+      record.outcomes.find((outcome) => outcome.combatantId === combatant.id).statuses,
+      combatant.status,
+      `${combatant.id} statuses mirror the resolver`
+    );
+  }
+
+  const withStatus = (statuses) => {
+    const draft = mutable(record);
+    draft.outcomes[0].statuses = statuses;
+    return () => reseal(draft);
+  };
+  assert.throws(withStatus(["burning", "burning"]), /repeats a status/);
+  assert.throws(withStatus(["burning", ""]), /array of non-empty strings/);
+  assert.throws(withStatus(["burning", 7]), /array of non-empty strings/);
+  assert.throws(withStatus("burning"), /array of non-empty strings/);
+  assert.throws(
+    withStatus(Array.from({ length: 33 }, (unused, index) => `status-${index}`)),
+    /array of non-empty strings/
+  );
+  assert.doesNotThrow(withStatus(Array.from({ length: 32 }, (unused, index) => `status-${index}`)));
+});
+
+test("the writer block is checked where it is supplied, not where it fails to serialise", () => {
+  const battle = settledBattle();
+  // A bad `writer` used to be spread field by field into the draft and surface
+  // as "provenance.writer.id is not JSON-safe" — a message about JSON that
+  // names neither the argument nor what was wrong with it.
+  for (const writer of ["nope", 7, null, [], {}, { id: "x" }, { id: "x", version: "" }, { id: 1, version: "1" }]) {
+    assert.throws(
+      () => buildCampaignRecord(battle, { battleId: "camp-1", recordedAt: AT, writer }),
+      (error) => {
+        assert.ok(error instanceof CampaignRecordError);
+        assert.match(error.message, /^writer(\.\w+)? must be/);
+        return true;
+      },
+      JSON.stringify(writer) ?? String(writer)
+    );
+  }
+  const named = buildCampaignRecord(battle, {
+    battleId: "camp-1",
+    recordedAt: AT,
+    writer: { id: "host-shell", version: "4" }
+  });
+  assert.deepEqual(named.provenance.writer, { id: "host-shell", version: "4" });
+});
+
 test("the record says which rule set produced it, and that today's rule set is a placeholder", () => {
   const record = sampleRecord();
   assert.deepEqual(record.provenance.ruleSet, {
@@ -295,8 +455,18 @@ test("a record built on a runtime-verified rule set carries its build hash and g
   );
   assert.equal(record.provenance.ruleSet.verification, RecordedRuleSetVerification.RUNTIME_VERIFIED);
   assert.equal(record.provenance.ruleSet.runtimeVerified, true);
-  assert.match(record.provenance.ruleSet.buildSha256, /^[A-Fa-f0-9]{64}$/);
+  // The VALUE, not the shape. A shape check (`/^[A-Fa-f0-9]{64}$/`) passes for
+  // `"0".repeat(64)`, so a rule set pinning a hash of nothing and citing a
+  // fixture that does not exist produced a record saying `runtimeVerified: true`
+  // and the assertion held. The build this project measures is one build.
+  assert.equal(
+    record.provenance.ruleSet.buildSha256,
+    "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  );
+  assert.equal(record.provenance.ruleSet.buildSha256, SS2_BUILD_SHA256, "and it is the repository's own pin");
   assert.deepEqual(record.provenance.ruleSet.goldenFixtureIds, ["golden-prisoner-normal-kill-dir6"]);
+  // Whether a cited fixture id RESOLVES is the promotion gate's question, not
+  // this layer's; the record only carries the citation.
 });
 
 test("the completion token is recomputed from the outcome, so an edited result is refused", () => {
@@ -561,6 +731,75 @@ test("a storage failure at settlement is collected, not thrown out of the battle
   assert.equal(isCampaignSettled(battle), true, "the battle still settled exactly once");
 });
 
+test("the hook swallows save failures and nothing else — a boundary violation propagates", () => {
+  // `errors.js`: a VanillaBoundaryError "is never recoverable and never
+  // degraded", and "if it is ever thrown in production the correct response is
+  // to fix the caller, not to catch it". The hook's blanket catch filed it on
+  // `errors` alongside a full disk and let the run continue.
+  const boundaryStore = {
+    write() {
+      throw new VanillaBoundaryError("ss2_data is outside the namespace");
+    }
+  };
+  const recorder = createCampaignRecorder({ store: boundaryStore, battleId: "camp-1", recordedAt: AT });
+  const battle = createTeamBattle({ ...twoVsTwo(), onCampaignSettled: recorder.hook });
+  recorder.attach(battle);
+  assert.throws(() => runToSettlement(battle), VanillaBoundaryError);
+  assert.deepEqual(recorder.errors, [], "it was not collected");
+
+  // A record failure is a save problem and is still collected.
+  const recordFailing = createCampaignRecorder({
+    store: { write() { throw new CampaignRecordError("the record did not validate"); } },
+    battleId: "camp-2",
+    recordedAt: AT
+  });
+  const second = createTeamBattle({ ...twoVsTwo(), onCampaignSettled: recordFailing.hook });
+  recordFailing.attach(second);
+  assert.doesNotThrow(() => runToSettlement(second));
+  assert.equal(recordFailing.errors.length, 1);
+  assert.ok(recordFailing.errors[0] instanceof CampaignRecordError);
+});
+
+test("throwOnFailure turns a collected save failure back into a thrown one", () => {
+  const recorder = createCampaignRecorder({
+    store: { write() { throw new CampaignStorageError("the disk is full"); } },
+    battleId: "camp-1",
+    recordedAt: AT,
+    throwOnFailure: true
+  });
+  const battle = createTeamBattle({ ...twoVsTwo(), onCampaignSettled: recorder.hook });
+  recorder.attach(battle);
+  assert.throws(() => runToSettlement(battle), /disk is full/);
+  assert.equal(recorder.errors.length, 1, "and it is recorded either way");
+  assert.equal(recorder.results.length, 0);
+  assert.equal(recorder.lastResult, null);
+});
+
+test("recordSettledBattle is the one-shot form, and it needs a store", () => {
+  const store = createCampaignStore({ backend: createMemoryBackend() });
+  const battle = settledBattle();
+  const { result, record } = recordSettledBattle(store, battle, { battleId: "camp-1", recordedAt: AT });
+  assert.equal(result.status, WriteStatus.WRITTEN);
+  assert.equal(result.recordId, record.recordId);
+  assert.equal(store.has(record.recordId), true);
+  assert.equal(store.has("tbr-0123456789abcdef01234567"), false);
+
+  // Idempotent for the same reason the hook is: the id is the settlement.
+  assert.equal(
+    recordSettledBattle(store, battle, { battleId: "camp-1", recordedAt: AT }).result.status,
+    WriteStatus.DUPLICATE
+  );
+  assert.equal(store.recordIds().length, 1);
+
+  for (const bad of [null, undefined, {}, { write: "no" }]) {
+    assert.throws(() => recordSettledBattle(bad, battle, { battleId: "camp-1" }), /needs a campaign store/);
+  }
+  const recorder = createCampaignRecorder({ store, battleId: "camp-1" });
+  assert.throws(() => recorder.record(), /No battle is attached/);
+  assert.throws(() => createCampaignRecorder({ store }), /needs a battleId/);
+  assert.throws(() => createCampaignRecorder({ battleId: "camp-1" }), /needs a campaign store/);
+});
+
 /* ------------------------------------------------------------------ */
 /* Versioning and migration                                            */
 /* ------------------------------------------------------------------ */
@@ -767,6 +1006,65 @@ test("the screen has teeth: a record reaching for a vanilla field name is refuse
   // field names, which is why a battle record is not a character sheet.
   stats.outcomes[0].strength = 10;
   assert.throws(() => reseal(stats), VanillaBoundaryError);
+
+  // Both authoring gates, named: the seal and the store's write.
+  const store = createCampaignStore({ backend: createMemoryBackend() });
+  const smuggled = mutable(record);
+  smuggled.outcomes[0].goldpieces = 500;
+  assert.throws(() => store.write(smuggled), VanillaBoundaryError);
+  assert.throws(() => assertNoVanillaFieldNames({ hero: { hitpoints: 1 } }), VanillaBoundaryError);
+  assert.deepEqual(
+    vanillaFieldNamesIn({ outer: { goldpieces: 1, fine: [{ herolevel: 2 }] } }).map((entry) => entry.path),
+    ["record.outer.goldpieces", "record.outer.fine[0].herolevel"]
+  );
+});
+
+test("the screen guards authoring only: a stored record does not perish when the catalogue grows", () => {
+  // The defect this test exists for. `assertNoVanillaFieldNames` used to run
+  // inside `validateCampaignRecord`, which runs on every READ, against a live
+  // import of `src/adapter/vanilla-fields.js` — a file that invites growth
+  // ("the catalogue grows as the map is extended"). `store.js` funnels every
+  // error that is not a schema-version refusal into quarantine-then-delete, so
+  // adding one already-used name to that catalogue turned every stored record
+  // corrupt, quarantined it, removed the live key, and reported the campaign
+  // as empty. There is no restore API. It also contradicted `errors.js`, which
+  // says a VanillaBoundaryError is "never recoverable and never degraded".
+  const record = sampleRecord();
+
+  // `name` is an object key in two blocks of every record this layer writes.
+  // It is the concrete candidate: one additive line and it is a vanilla name.
+  assert.equal(isVanillaFieldName("name"), false, "not in the catalogue today");
+  assert.ok(canonicalJsonStringify(record).includes('"name":'), "but every record uses it as a key");
+
+  // Reading must therefore not consult the catalogue at all. Validation refuses
+  // a stray vanilla-named key as what it is — a schema violation — rather than
+  // as a boundary violation, which is how the screen used to announce itself.
+  assert.throws(() => validateCampaignRecord({ goldpieces: 1200 }), (error) => {
+    assert.ok(error instanceof CampaignRecordError, "a read-path refusal is a record error");
+    assert.equal(error instanceof VanillaBoundaryError, false, "the screen no longer runs on the read path");
+    assert.match(error.message, /unexpected or missing fields/);
+    return true;
+  });
+
+  // A stored record — current schema and migrated schema-1 alike — reads back
+  // intact, is not quarantined, and is not removed.
+  const backend = createMemoryBackend();
+  const store = createCampaignStore({ backend });
+  store.write(record);
+  const legacy = demoteToSchema1(sampleRecord({ battleId: "camp-legacy" }));
+  backend.write(campaignKey("battle", legacy.recordId), canonicalJsonStringify(legacy));
+
+  const all = store.readAll();
+  assert.equal(all.records.length, 2);
+  assert.deepEqual(all.corrupt, []);
+  assert.deepEqual(store.quarantinedKeys(), []);
+  assert.equal(backend.read(campaignKey("battle", record.recordId)), canonicalJsonStringify(record));
+
+  // And the guarantee is not bought by weakening the write: sealing still
+  // screens, so a record cannot be authored with a vanilla name in it.
+  const draft = mutable(record);
+  draft.outcomes[0].max_gladiators = 4;
+  assert.throws(() => reseal(draft), VanillaBoundaryError);
 });
 
 test("every key is minted inside the namespace, and a foreign key cannot be addressed", () => {
@@ -784,14 +1082,56 @@ test("every key is minted inside the namespace, and a foreign key cannot be addr
     VanillaBoundaryError);
 });
 
-test("the namespaced backend leaves every vanilla sibling byte-identical", () => {
-  const container = {
-    character1: { herolevel: 3, goldpieces: 1200, experience: 900, battleswon: 4 },
+test("the namespaced backend refuses a container that is the vanilla save", () => {
+  // The refusal the coexistence story always needed and never had. The
+  // previous test here asserted that vanilla siblings survive a write cycle —
+  // which is true, and is not the risk. The risk is being handed the vanilla
+  // container in the first place: `so_local.data` is flushed unconditionally
+  // by `refresh_gladiators`, shares one storage quota, and has a reset branch
+  // that blanks every character slot.
+  const vanillaSave = {
+    character1: { herolevel: 3, goldpieces: 1200, battleswon: 4 },
     character2: { herolevel: 1, goldpieces: 0 },
     max_gladiators: 4,
     char_to_load: 1
   };
-  const before = JSON.parse(JSON.stringify(container));
+  assert.throws(() => createNamespacedBackend(vanillaSave), (error) => {
+    assert.ok(error instanceof VanillaBoundaryError);
+    assert.match(error.message, /vanilla save field name/);
+    return true;
+  });
+  assert.equal(
+    Object.hasOwn(vanillaSave, CAMPAIGN_NAMESPACE),
+    false,
+    "a refused container is not even given a bucket"
+  );
+  assert.deepEqual(
+    vanillaFieldNamesOn(vanillaSave).sort(),
+    ["char_to_load", "character1", "character2", "max_gladiators"]
+  );
+
+  // One vanilla name is enough; the whole container is suspect.
+  for (const name of ["ss2_data", "goldpieces", "character12", "hitpoints"]) {
+    assert.throws(() => createNamespacedBackend({ [name]: 1 }), VanillaBoundaryError, name);
+  }
+
+  // And the opt-in is explicit, per call, and named for what it costs.
+  const shared = { max_gladiators: 4 };
+  assert.doesNotThrow(() => createNamespacedBackend(shared, { allowVanillaSiblings: true }));
+  assert.equal(shared.max_gladiators, 4);
+});
+
+test("a store over a container of our own grows only by our own bytes", () => {
+  // The size of the WHOLE container, before and after. The previous version of
+  // this test deleted our namespace from the copy and then asserted equality,
+  // so it compared the container to itself minus the only thing that changed:
+  // an uncapped write into a shared host would have passed it. Here the growth
+  // is measured and has to be entirely, and only, ours.
+  const container = modContainer({ lastPlayed: "2026-08-30", roster: ["a", "b"] });
+  const siblings = JSON.parse(JSON.stringify(container));
+  const before = JSON.stringify(container);
+  const beforeBytes = Buffer.byteLength(before, "utf8");
+
   const store = createCampaignStore({ backend: createNamespacedBackend(container) });
   const record = sampleRecord();
   store.write(record);
@@ -799,11 +1139,24 @@ test("the namespaced backend leaves every vanilla sibling byte-identical", () =>
   store.readRecord(record.recordId);
   store.readAll();
 
-  const after = JSON.parse(JSON.stringify(container));
-  delete after[CAMPAIGN_NAMESPACE];
-  assert.deepEqual(after, before, "the vanilla side of the save is untouched");
+  const afterBytes = Buffer.byteLength(JSON.stringify(container), "utf8");
+  const ourBytes = Buffer.byteLength(JSON.stringify(container[CAMPAIGN_NAMESPACE]), "utf8");
+  assert.ok(afterBytes > beforeBytes, "the container did grow — a store that stores costs bytes");
+  // `{"ss2TeamArena":<ours>}` is the whole delta: two bytes of quotes, the
+  // namespace name, a colon, and a comma separating it from what was there.
+  assert.equal(
+    afterBytes - beforeBytes,
+    ourBytes + CAMPAIGN_NAMESPACE.length + 4,
+    "every byte the container gained is a byte of ours"
+  );
+  assert.ok(ourBytes > 2000, "and a single 2v2 record is thousands of them, which is why there is a budget");
+
+  for (const key of Object.keys(container)) {
+    if (key === CAMPAIGN_NAMESPACE) continue;
+    assert.deepEqual(container[key], siblings[key], `${key} was modified`);
+  }
   assert.deepEqual(
-    Object.keys(container).filter((key) => !Object.hasOwn(before, key)),
+    Object.keys(container).filter((key) => !Object.hasOwn(siblings, key)),
     [CAMPAIGN_NAMESPACE],
     "exactly one new key, and it is ours"
   );
@@ -816,12 +1169,114 @@ test("the namespaced backend leaves every vanilla sibling byte-identical", () =>
 test("the namespaced backend refuses to replace a namespace value it did not write", () => {
   assert.throws(() => createNamespacedBackend({ [CAMPAIGN_NAMESPACE]: "already here" }), VanillaBoundaryError);
   assert.throws(() => createNamespacedBackend(null), CampaignStorageError);
+  assert.throws(() => createNamespacedBackend([]), CampaignStorageError);
   const reused = { [CAMPAIGN_NAMESPACE]: { existing: "kept" } };
   createNamespacedBackend(reused);
   assert.equal(reused[CAMPAIGN_NAMESPACE].existing, "kept");
 });
 
-test("the documented boundary is complete and matches the namespace the code mints", () => {
+test("the store occupies a bounded number of bytes and refuses the write that would cross it", () => {
+  const record = sampleRecord();
+  const text = canonicalJsonStringify(record);
+  const key = campaignKey("battle", record.recordId);
+  const entryBytes = Buffer.byteLength(text, "utf8") + Buffer.byteLength(key, "utf8");
+
+  // A campaign history is unbounded by nature and the eventual host's quota is
+  // not: Flash's default is 100 KB per origin, shared with the vanilla save.
+  assert.ok(entryBytes * 45 > 102400, "≈40 records is a 100 KB quota, so an uncapped history reaches it");
+  assert.equal(DEFAULT_CAMPAIGN_BYTE_BUDGET, 64 * 1024);
+
+  const backend = createMemoryBackend();
+  const tight = createCampaignStore({ backend, byteBudget: entryBytes - 1 });
+  assert.throws(() => tight.write(record), (error) => {
+    assert.ok(error instanceof CampaignStorageError);
+    assert.match(error.message, /byte budget/);
+    return true;
+  });
+  assert.deepEqual(backend.keys(), [], "and nothing was written");
+
+  const exact = createCampaignStore({ backend: createMemoryBackend(), byteBudget: entryBytes });
+  assert.equal(exact.write(record).status, WriteStatus.WRITTEN, "the budget is inclusive");
+
+  // A second, different record does not fit under a one-record budget.
+  const second = sampleRecord({ battleId: "camp-2" });
+  assert.throws(() => exact.write(second), CampaignStorageError);
+  assert.equal(exact.recordIds().length, 1, "the record already stored is untouched");
+  assert.equal(exact.readRecord(record.recordId).status, ReadStatus.OK);
+
+  // Opting out is possible and deliberate; a bad budget is refused outright.
+  assert.doesNotThrow(() =>
+    createCampaignStore({ backend: createMemoryBackend(), byteBudget: null }).write(record));
+  for (const bad of [0, -1, 1.5, "1024"]) {
+    assert.throws(() => createCampaignStore({ backend: createMemoryBackend(), byteBudget: bad }),
+      CampaignStorageError, String(bad));
+  }
+});
+
+test("a backend that can be asked to commit is asked, and a refused commit is not reported as a written record", () => {
+  const record = sampleRecord();
+  const key = campaignKey("battle", record.recordId);
+
+  const flushes = [];
+  const inner = createMemoryBackend();
+  const committing = {
+    read: (k) => inner.read(k),
+    write: (k, t) => inner.write(k, t),
+    remove: (k) => inner.remove(k),
+    keys: () => inner.keys(),
+    flush() {
+      flushes.push(inner.keys().length);
+      return true;
+    }
+  };
+  const result = createCampaignStore({ backend: committing }).write(record);
+  assert.equal(result.status, WriteStatus.WRITTEN);
+  assert.equal(result.flushed, true, "the commit was requested and granted");
+  assert.equal(flushes.length, 1);
+
+  // AVM1's SharedObject.flush() returns false (or "pending") on a quota
+  // failure rather than throwing, and the old seam had no way to hear it: the
+  // store reported `status: "written"` for a record the host never committed.
+  const quotaBound = createMemoryBackend();
+  const refusing = {
+    read: (k) => quotaBound.read(k),
+    write: (k, t) => quotaBound.write(k, t),
+    remove: (k) => quotaBound.remove(k),
+    keys: () => quotaBound.keys(),
+    flush: () => false
+  };
+  const store = createCampaignStore({ backend: refusing });
+  assert.throws(() => store.write(record), (error) => {
+    assert.ok(error instanceof CampaignStorageError);
+    assert.match(error.message, /refused to commit/);
+    return true;
+  });
+  assert.equal(quotaBound.read(key), null, "and the uncommitted record was rolled back, not left behind");
+
+  // A backend that throws from flush() is a refusal too, not a crash path.
+  const throwing = createMemoryBackend();
+  const store2 = createCampaignStore({
+    backend: {
+      read: (k) => throwing.read(k),
+      write: (k, t) => throwing.write(k, t),
+      remove: (k) => throwing.remove(k),
+      keys: () => throwing.keys(),
+      flush() { throw new Error("SharedObject: quota exceeded"); }
+    }
+  });
+  assert.throws(() => store2.write(record), /refused to commit/);
+  assert.equal(throwing.read(key), null);
+
+  // flush is optional, so a backend without it still works and says so.
+  const plain = createCampaignStore({ backend: createMemoryBackend() }).write(record);
+  assert.equal(plain.flushed, null, "the question could not be asked, and is not answered with a guess");
+  assert.throws(
+    () => createCampaignStore({ backend: { ...createMemoryBackend(), flush: "yes" } }),
+    CampaignStorageError
+  );
+});
+
+test("the documented boundary is complete and matches the keys the code actually mints", () => {
   const boundary = describeVanillaBoundary();
   assert.equal(boundary.namespace, CAMPAIGN_NAMESPACE);
   assert.ok(boundary.ours.length >= 2);
@@ -837,6 +1292,34 @@ test("the documented boundary is complete and matches the namespace the code min
     assert.ok(entry.citation.length > 0);
     assert.ok(entry.note.length > 0);
   }
+
+  // The prefix check above is what the whole test used to be, and a prefix
+  // check cannot see the separator: the documented quarantine path said
+  // `<recordId>.<n>` with a dot while the minter produced a colon, and the
+  // test whose stated job was preventing exactly that drift passed anyway.
+  // Build the documented paths from real minted keys instead.
+  const recordId = "tbr-0123456789abcdef01234567";
+  const documented = new Map(boundary.ours.map((entry) => [entry.path, entry]));
+  assert.ok(documented.has(BATTLE_KEY_TEMPLATE) && documented.has(QUARANTINE_KEY_TEMPLATE));
+
+  const fill = (template, values) =>
+    template.replace(/<([^>]+)>/g, (whole, name) => {
+      assert.ok(Object.hasOwn(values, name), `the template names an unexpected segment ${name}`);
+      return values[name];
+    });
+  assert.equal(fill(BATTLE_KEY_TEMPLATE, { recordId }), campaignKey("battle", recordId));
+  assert.equal(
+    fill(QUARANTINE_KEY_TEMPLATE, { recordId, n: "3" }),
+    campaignKey("quarantine", recordId, "3")
+  );
+
+  // And a quarantine key the store really minted matches the documented shape.
+  const backend = createMemoryBackend();
+  const store = createCampaignStore({ backend });
+  const record = sampleRecord();
+  backend.write(campaignKey("battle", record.recordId), "{torn");
+  const minted = store.readRecord(record.recordId).quarantinedTo;
+  assert.equal(minted, fill(QUARANTINE_KEY_TEMPLATE, { recordId: record.recordId, n: "1" }));
 });
 
 test("this layer imports the vanilla catalogue as evidence and nothing that can write a vanilla field", () => {
@@ -914,6 +1397,140 @@ test("a bit-flipped record, a non-string value, and a misfiled record all degrad
     assert.match(result.reason, expected, label);
     assert.ok(result.quarantinedTo, label);
   }
+});
+
+test("a stored null is a torn write, not an absence: it degrades to corrupt and is preserved", () => {
+  const backend = createMemoryBackend();
+  const store = createCampaignStore({ backend });
+  const record = sampleRecord();
+  const key = campaignKey("battle", record.recordId);
+  backend.write(key, null);
+
+  // The seam's read() answers `string|null`, so a stored null and an absent key
+  // look identical through it — and the store used to report the first as the
+  // second. That is the corrupt-reads-as-empty case: the recovery table says a
+  // value that is not a string is corrupt, and a null is not a string.
+  assert.equal(store.has(record.recordId), true, "the key is taken");
+  const result = store.readRecord(record.recordId);
+  assert.equal(result.status, ReadStatus.CORRUPT);
+  assert.match(result.reason, /null, not text/);
+  assert.ok(result.quarantinedTo);
+  assert.equal(JSON.parse(store.readQuarantined(result.quarantinedTo)).type, "null");
+  assert.equal(store.readRecord(record.recordId).status, ReadStatus.MISSING, "and now it really is absent");
+
+  // With quarantine off it is still corrupt, and still not silently clobbered.
+  const kept = createMemoryBackend();
+  const noQuarantine = createCampaignStore({ backend: kept, quarantine: false });
+  kept.write(key, null);
+  assert.equal(noQuarantine.readRecord(record.recordId).status, ReadStatus.CORRUPT);
+  assert.equal(kept.keys().includes(key), true, "nothing was moved");
+
+  // And a write over one is a repair that keeps the evidence, not a plain write.
+  const written = noQuarantine.write(record);
+  assert.equal(written.status, WriteStatus.REPAIRED);
+  assert.ok(written.quarantinedTo);
+  assert.equal(store.has("tbr-0123456789abcdef01234567"), false, "an untaken key is still untaken");
+});
+
+test("quarantine preserves the contents of a non-text value, not the words [object Object]", () => {
+  const record = sampleRecord();
+  const key = campaignKey("battle", record.recordId);
+  const cases = [
+    ["object", { partial: "record", outcomes: [1, 2], nested: { deep: true } }],
+    ["array", [1, "two", null]],
+    ["number", 42],
+    ["boolean", false]
+  ];
+  for (const [label, value] of cases) {
+    const backend = createMemoryBackend();
+    const store = createCampaignStore({ backend });
+    backend.write(key, value);
+    const result = store.readRecord(record.recordId);
+    assert.equal(result.status, ReadStatus.CORRUPT, label);
+    // The whole reason quarantine exists is that the original is then deleted.
+    // Preserving `String(value)` deleted the evidence and kept a label for it.
+    const preserved = JSON.parse(store.readQuarantined(result.quarantinedTo));
+    assert.equal(preserved.nonString, true, label);
+    assert.equal(preserved.type, label, label);
+    assert.deepEqual(preserved.value, value, `${label} lost its contents`);
+    assert.equal(backend.read(key), null, `${label} was not moved`);
+  }
+
+  // A value JSON cannot hold still leaves something better than nothing.
+  const backend = createMemoryBackend();
+  const store = createCampaignStore({ backend });
+  const circular = { name: "loop" };
+  circular.self = circular;
+  backend.write(key, circular);
+  const preserved = JSON.parse(store.readQuarantined(store.readRecord(record.recordId).quarantinedTo));
+  assert.equal(preserved.value, null);
+  assert.equal(preserved.text, "[object Object]", "the fallback is still recorded, and labelled as one");
+});
+
+test("one malformed key in our own namespace does not cost readAll every good record", () => {
+  const backend = createMemoryBackend();
+  const store = createCampaignStore({ backend });
+  const good = sampleRecord({ battleId: "camp-1" });
+  store.write(good);
+
+  // `campaignKey()` token-checks every segment; `parseCampaignKey()` did not,
+  // so it happily reported a single empty segment for this key, `recordIds()`
+  // returned "" as a record id, and `readRecord` threw re-minting it —
+  // contradicting "never throws for a damaged, absent, or future-schema
+  // record" and losing the whole history to one bad key.
+  for (const malformed of [
+    `${CAMPAIGN_NAMESPACE}:battle:`,
+    `${CAMPAIGN_NAMESPACE}:battle:not a token`,
+    `${CAMPAIGN_NAMESPACE}:quarantine:`,
+    `${CAMPAIGN_NAMESPACE}:battle:${"x".repeat(200)}`,
+    `${CAMPAIGN_NAMESPACE}:battle:-leading-dash`
+  ]) {
+    assert.equal(parseCampaignKey(malformed), null, `${malformed} is not a key this layer could mint`);
+    backend.write(malformed, "junk");
+  }
+
+  const all = store.readAll();
+  assert.equal(all.records.length, 1);
+  assert.equal(all.records[0].recordId, good.recordId);
+  assert.deepEqual(all.corrupt, []);
+  assert.deepEqual(store.recordIds(), [good.recordId]);
+  assert.deepEqual(store.quarantinedKeys(), [], "and nothing foreign was adopted or moved");
+});
+
+test("a medium that refuses removes does not grow a new quarantine copy on every read", () => {
+  const values = new Map();
+  const backend = {
+    read: (key) => (values.has(key) ? values.get(key) : null),
+    write: (key, text) => values.set(key, text),
+    remove() {
+      throw new CampaignStorageError("read-only medium");
+    },
+    keys: () => [...values.keys()]
+  };
+  const store = createCampaignStore({ backend });
+  const record = sampleRecord();
+  const key = campaignKey("battle", record.recordId);
+  values.set(key, "{bad");
+
+  // Copy-then-delete caught as a unit meant the copy stayed and the delete
+  // failed, so every read appended another identical copy — to the 1000-copy
+  // cap, after which `store.write()` threw for that battle forever.
+  for (let read = 0; read < 25; read += 1) {
+    const result = store.readRecord(record.recordId);
+    assert.equal(result.status, ReadStatus.CORRUPT);
+    assert.match(result.quarantineFailed, /read-only medium/);
+  }
+  assert.equal(store.quarantinedKeys().length, 1, "one copy of one damaged record, however often it is read");
+  assert.equal(backend.read(key), "{bad", "and the original is still where it was");
+
+  // The asymmetry the read path hid: a failed quarantine degraded on read but
+  // propagated out of write(). Both report it now; neither throws.
+  const written = store.write(record);
+  assert.equal(written.status, WriteStatus.REPAIRED);
+  assert.equal(written.written, true);
+  assert.match(written.quarantineFailed, /read-only medium/);
+  assert.equal(written.quarantinedTo, null);
+  assert.equal(store.readRecord(record.recordId).status, ReadStatus.OK, "the good record landed anyway");
 });
 
 test("one torn record does not cost the campaign the rest of its history", () => {
@@ -1017,4 +1634,124 @@ test("a backend whose keys() misbehaves is refused rather than half-read", () =>
     backend: { read: () => null, write() {}, remove() {}, keys: () => "nope" }
   });
   assert.throws(() => store.recordIds(), CampaignStorageError);
+  assert.throws(() => store.has("tbr-0123456789abcdef01234567"), CampaignStorageError);
+});
+
+/* ------------------------------------------------------------------ */
+/* The pieces the suite never reached                                  */
+/* ------------------------------------------------------------------ */
+
+test("the battle provenance is a real projection of the battle, value by value", () => {
+  const battle = settledBattle();
+  const record = buildCampaignRecord(battle, { battleId: "camp-1", recordedAt: AT });
+  const provenance = record.provenance.battle;
+  assert.equal(provenance.stateVersion, battle.version);
+  assert.equal(provenance.seed, 7);
+  assert.equal(provenance.rngCursor, battle.rngCursor);
+  assert.equal(provenance.turnNumber, battle.turnNumber);
+  assert.deepEqual(provenance.initiative, battle.initiative);
+  assert.equal(provenance.combatStateHash, combatStateHash(battle));
+  assert.match(provenance.combatStateHash, /^[a-f0-9]{8}$/);
+
+  // The hash is the controller-independent one, so a host and a client that
+  // disagree about who drove a seat still record the same value.
+  const reassigned = settledBattle();
+  reassignController(reassigned, "alpha:slot-1", "peer-9");
+  assert.equal(combatStateHash(reassigned), provenance.combatStateHash);
+
+  const bad = {
+    stateVersion: [0, -1, 1.5, "1"],
+    rngCursor: [-1, 1.5, "0"],
+    turnNumber: [0, -1],
+    seed: [-1, 2.5],
+    combatStateHash: ["", "zzzzzzzz", "abc", "a".repeat(9)],
+    initiative: [[], ["a1"], ["a1", "a1", "a2", "beta-fill-2"], ["a1", "a2", "b1", "nobody"]]
+  };
+  for (const [field, values] of Object.entries(bad)) {
+    for (const value of values) {
+      const draft = mutable(record);
+      draft.provenance.battle[field] = value;
+      assert.throws(() => reseal(draft), CampaignRecordError, `${field} = ${JSON.stringify(value)}`);
+    }
+  }
+});
+
+test("assertJsonSafe refuses what canonical JSON cannot round-trip", () => {
+  assert.doesNotThrow(() => assertJsonSafe({ a: [1, "two", null, true], b: { c: -0.5 } }));
+
+  const circular = { name: "loop" };
+  circular.self = circular;
+  assert.throws(() => assertJsonSafe(circular), /circular reference/);
+  const sharedLeaf = { leaf: true };
+  assert.doesNotThrow(
+    () => assertJsonSafe({ first: sharedLeaf, second: sharedLeaf }),
+    "a repeated sibling is not a cycle"
+  );
+
+  for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+    assert.throws(() => assertJsonSafe({ value }), /non-finite number/);
+  }
+  const sparse = [1];
+  sparse[3] = 4;
+  assert.throws(() => assertJsonSafe({ sparse }), /sparse array/);
+  assert.throws(() => assertJsonSafe({ f: () => 1 }), /not JSON-safe/);
+  assert.throws(() => assertJsonSafe({ u: undefined }), /not JSON-safe/);
+  assert.throws(() => assertJsonSafe({ big: 1n }), /not JSON-safe/);
+  assert.throws(() => assertJsonSafe({ when: new Date(0) }), /non-plain object/);
+  assert.throws(() => assertJsonSafe({ set: new Set([1]) }), /non-plain object/);
+  assert.equal(assertJsonSafe({ ok: 1 }, "path").ok, 1, "it returns the value it accepted");
+  assert.throws(() => assertJsonSafe({ f: () => 1 }, "draft"), /draft\.f is not JSON-safe/);
+});
+
+test("isCampaignRecord answers the validator's question without throwing", () => {
+  const record = sampleRecord();
+  assert.equal(isCampaignRecord(record), true);
+  assert.equal(isCampaignRecord(JSON.parse(canonicalJsonStringify(record))), true);
+  for (const candidate of [null, undefined, {}, [], "record", 7, demoteToSchema1(record)]) {
+    assert.equal(isCampaignRecord(candidate), false, JSON.stringify(candidate) ?? String(candidate));
+  }
+  const tampered = mutable(record);
+  tampered.provenance.battle.turnNumber += 1;
+  assert.equal(isCampaignRecord(tampered), false, "a digest mismatch is not a record");
+});
+
+test("parseCampaignKey accepts exactly what campaignKey mints, and nothing else", () => {
+  const recordId = "tbr-0123456789abcdef01234567";
+  assert.deepEqual(parseCampaignKey(campaignKey("battle", recordId)), { kind: "battle", parts: [recordId] });
+  assert.deepEqual(
+    parseCampaignKey(campaignKey("quarantine", recordId, "7")),
+    { kind: "quarantine", parts: [recordId, "7"] }
+  );
+  for (const foreign of [
+    "character1",
+    "max_gladiators",
+    "ss2_data",
+    "",
+    CAMPAIGN_NAMESPACE,
+    `${CAMPAIGN_NAMESPACE}:`,
+    `${CAMPAIGN_NAMESPACE}:gold:${recordId}`,
+    `${CAMPAIGN_NAMESPACE}:battle`,
+    `${CAMPAIGN_NAMESPACE}:battle:`,
+    `${CAMPAIGN_NAMESPACE}:battle: `,
+    `other:battle:${recordId}`,
+    null,
+    7
+  ]) {
+    assert.equal(parseCampaignKey(foreign), null, String(foreign));
+  }
+  // The round trip that matters: anything parse accepts, mint can produce.
+  const parsed = parseCampaignKey(campaignKey("quarantine", recordId, "7"));
+  assert.equal(campaignKey(parsed.kind, ...parsed.parts), campaignKey("quarantine", recordId, "7"));
+});
+
+test("schemaVersionOf reads the declared version and refuses anything that is not one", () => {
+  assert.equal(schemaVersionOf(sampleRecord()), CAMPAIGN_RECORD_SCHEMA_VERSION);
+  assert.equal(schemaVersionOf(demoteToSchema1(sampleRecord())), 1);
+  assert.equal(schemaVersionOf({ schemaVersion: 99 }), 99, "it reads, it does not judge");
+  for (const bad of [null, undefined, [], "record", 7]) {
+    assert.throws(() => schemaVersionOf(bad), /must be a plain object/, String(bad));
+  }
+  for (const bad of [0, -1, 1.5, "2", null, undefined, Number.NaN]) {
+    assert.throws(() => schemaVersionOf({ schemaVersion: bad }), /must be a positive integer/, String(bad));
+  }
 });

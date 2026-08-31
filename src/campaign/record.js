@@ -475,11 +475,25 @@ function assertOutcomesBlock(outcomes, teams, settlement) {
     if (outcome.survived !== outcome.health > 0) {
       throw new CampaignRecordError(`${path}.survived disagrees with the recorded health.`);
     }
-    if (outcome.defeatedAtSequence !== null) {
-      assertPositiveInteger(outcome.defeatedAtSequence, `${path}.defeatedAtSequence`);
-      if (outcome.survived) {
+    // Both directions, because only one of them was checked and the unchecked
+    // direction is the one that loses evidence: a survivor must not carry a
+    // defeat sequence, *and* a casualty must carry one. Without the second
+    // rule a dropped `combatant-defeated` event records as `null` and
+    // validates, so the record cannot tell "defeated at sequence 6" from
+    // "we lost the event".
+    if (outcome.survived) {
+      if (outcome.defeatedAtSequence !== null) {
         throw new CampaignRecordError(`${path} survived but carries a defeat sequence.`);
       }
+    } else {
+      if (outcome.defeatedAtSequence === null) {
+        throw new CampaignRecordError(
+          `${path} did not survive but carries no defeat sequence. Every casualty is stamped by the ` +
+          "resolver's combatant-defeated event; a null here means the event was lost, not that the " +
+          "combatant fell silently."
+        );
+      }
+      assertPositiveInteger(outcome.defeatedAtSequence, `${path}.defeatedAtSequence`);
     }
     if (
       !Array.isArray(outcome.statuses) ||
@@ -645,12 +659,21 @@ function assertWriterBlock(writer) {
  */
 export function validateCampaignRecord(record) {
   if (!isPlainObject(record)) throw new CampaignRecordError("A campaign record must be a plain object.");
-  // The boundary screen runs first, before the shape check, because it is the
-  // most important rule in the layer: a record reaching for a vanilla field
-  // name should say so, not report a stray key. It runs inside validation
-  // rather than only at the write, so such a record cannot be produced,
-  // stored, read back, or migrated into existence.
-  assertNoVanillaFieldNames(record, "record");
+  // The vanilla field-name screen is deliberately NOT here. It used to be, and
+  // that made every stored record perishable against a catalogue this layer
+  // does not own: `src/adapter/vanilla-fields.js` invites growth ("the
+  // catalogue grows as the map is extended"), validation runs on every read,
+  // and `store.js` quarantines and then deletes the live key for any error
+  // that is not a schema-version refusal. Adding one already-used name — for
+  // instance `name`, an object key in both `teams[]` and `outcomes[]` — would
+  // therefore have turned an entire stored campaign corrupt, quarantined it,
+  // removed it, and reported the campaign as empty, with no restore API.
+  //
+  // The screen guards *authoring*, which is the direction it exists to guard:
+  // `sealCampaignRecord()` runs it on every record this layer mints, and
+  // `store.write()` runs it again at the write. Stored bytes are read back
+  // against the schema alone, and the schema is exact-key, so a record cannot
+  // silently acquire a field of any name.
   assertExactKeys(record, RECORD_TOP_LEVEL_KEYS, "record");
   if (record.schemaVersion !== CAMPAIGN_RECORD_SCHEMA_VERSION) {
     throw new CampaignRecordError(
@@ -709,9 +732,19 @@ export function isCampaignRecord(candidate) {
  *
  * The only supported way to produce a storable record: the digest is computed
  * from the finished contents, never supplied.
+ *
+ * This is the authoring gate, so this is where the vanilla field-name screen
+ * runs. `screenVanillaNames: false` is for one caller and one reason:
+ * `migrations.js` re-seals a record that came *out of storage*, and screening
+ * there would put the catalogue back on the read path and make stored schema-1
+ * records perishable in exactly the way `validateCampaignRecord` documents.
+ *
+ * @param {object} draft
+ * @param {{screenVanillaNames?: boolean}} [options]
  */
-export function sealCampaignRecord(draft) {
+export function sealCampaignRecord(draft, { screenVanillaNames = true } = {}) {
   if (!isPlainObject(draft)) throw new CampaignRecordError("A campaign record draft must be a plain object.");
+  if (screenVanillaNames) assertNoVanillaFieldNames(draft, "record");
   const sealed = { ...draft, digest: computeCampaignRecordDigest(draft) };
   validateCampaignRecord(sealed);
   return deepFreeze(sealed);
