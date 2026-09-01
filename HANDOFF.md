@@ -8,7 +8,7 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-01 16:37 — the armoured family measured at n=38](docs/handoffs/2026-09-01-1637--armoured-family-measured-at-n38.md).**
+[2026-09-01 17:33 — the armoured family measured, and the schema question](docs/handoffs/2026-09-01-1733--armoured-family-measured-and-the-schema-question.md).**
 Start there. It RETRACTS the previous handoff's ranked item 1 — "run the armoured
 family under the arming gate" — by measurement: that gate would have armed **0
 times in 38**, its hero predicate CONTRADICTS all eight target fixtures, and a
