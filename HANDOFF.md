@@ -770,6 +770,40 @@ has per-fixture commands.
 The blocks below are in reverse order of discovery. Read this list first; the
 ones that change what the next session should DO are marked ►.
 
+► **40 DROPPED LAUNCH NONCES ARE RECOVERABLE FROM THE ARCHIVE, AND DOING IT
+  COSTS RE-PROMOTING 20 OF THE 22 GOLDENS.** Measured 2026-09-01 by
+  `node tools/recover-launch-nonces.mjs --archive <dir>` — REPORT ONLY, no write
+  path, and re-run it rather than trusting these numbers:
+
+  | | count |
+  | --- | --- |
+  | records whose archived trace carries a nonce the record lacks | **40** |
+  | already nonce-bearing (re-ingest is byte-identical) | 9 |
+  | genuinely pre-nonce — ingest REFUSES the trace | 18 |
+  | pre-nonce waiver, today -> if every recovery landed | **58 -> 18** |
+  | **goldens that would need re-promotion** | **20 of 22** |
+
+  Only `obs-pw10` and `obs-qk8` are cited by nothing and are therefore free.
+
+  **The reason this is not obviously worth doing.** A verifier this session
+  resealed `obs-par1`'s digest with (a) its true nonce, (b) a FABRICATED nonce,
+  (c) a nonce STOLEN from `obs-pq1` and (d) no nonce at all. **All four matched
+  with zero differences and passed `validateSs2Observation`**, because
+  `SS2_PAIRWISE_EXCLUDED_KEYS` excludes `capture` wholesale and the matcher never
+  reads it. So nothing downstream can tell a recovered nonce from an invented one,
+  and the only assurance available is that the operation REPRODUCES against the
+  archive — which is what the tool is shaped to give and why it prints its own
+  resolution rule and archive path.
+
+  **Two traps the tool encodes, both of which silently produce a wrong answer.**
+  Resolve a record to its trace by the record's OWN `capture.sessionId` +
+  `observationId`, NEVER by file name — three records are named after a different
+  id than they carry. And carry `installHashVerifiedAfter` FORWARD from the
+  committed record rather than asserting it fresh: a re-ingest today measures
+  nothing about a session that ran days ago, and asserting it would be exactly the
+  quiet conversion of measured evidence into asserted data this project exists to
+  refuse.
+
 ► **THE FRESH-NONCE RESIDUAL IS WORSE THAN RECORDED: it also unlocks the
   authored-from gate, and all four self-citing goldens are re-promotable from
   the very records they were transcribed from.** Found 2026-08-31 by an
