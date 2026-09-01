@@ -165,10 +165,10 @@ rather than anyone's report.
 
 | | |
 | --- | ---: |
-| Agents run | 608 |
-| Verdicts returned | 410 |
-| Claims broken or dented | 104 |
-| Commits | 15 |
+| Agents run | 671 |
+| Verdicts returned | 458 |
+| Claims broken or dented | 114 |
+| Commits | 17 |
 
 **What that bought.** One checker, pointed at an unrelated claim, noticed the
 project's master notes **contradict themselves 140 lines apart** about which

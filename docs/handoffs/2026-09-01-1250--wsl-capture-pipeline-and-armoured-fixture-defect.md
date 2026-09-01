@@ -4,7 +4,7 @@ written:      2026-09-01 12:50 -0400
 sessionStart: 2026-09-01 00:30 -0400
 sessionId:    515e2223-2bd5-49c7-9246-554a40e00772
 agentRuns:    wf_8d57104d-417 (nonce recovery) — COMPLETED **VERIFIED**: 6/6 questions, 209/209 verifiers, 0 errors
-              wf_e72fa4b5-b31 (armoured/tournament) — UNVERIFIED-PARTIAL: 6/6 questions, 83 verifiers died on a usage limit
+              wf_e72fa4b5-b31 (armoured/tournament) — UNVERIFIED-PARTIAL: 6/6 questions, 247 verdicts, 86 verifiers died on a usage limit
               Digests of every returned agent: .audit-harvest/ (gitignored, 2.1 MB)
 branch:       arena/champion-capture
 commits:      194587f..<tip>   # run `git log --oneline -1`; unpushed with `git log --oneline @{u}..HEAD`
@@ -21,7 +21,7 @@ claims. **Nothing below rests on an unreplicated agent report** — every
 load-bearing number was re-derived by the main session directly.
 
 **Every returned agent is digested in `.audit-harvest/` (gitignored).** Read that
-before re-running anything; it holds ~330 verdicts and 12 investigator reports.
+before re-running anything; it holds 458 verdicts and 12 investigator reports across 671 agents.
 
 ## Where things stand
 
