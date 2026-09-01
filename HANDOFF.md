@@ -844,6 +844,29 @@ Two caveats a future reader should not have to rediscover:
   `run-campaign.ps1 -Concurrency 3`. They carry distinct minted nonces, so they
   are distinct player launches; they are not distinct sittings.
 
+**HOW THIS SECTION CAME TO BE WRITTEN, because it bears on how far to trust it.**
+Two sessions ran in parallel on 2026-08-31 and BOTH stretched past their remit
+without noticing at the time. The Windows session was scoped to migration setup
+and ran an adversarial raw-trace investigation of the corpus; this session was
+scoped to the re-promotion and edited this head five times, the last two
+reactively in response to cross-session messages rather than as planned work.
+Neither is wrong in what it produced — the trace pass answered a question
+nothing else could, and the corrections here were real contradictions — but a
+reader assessing this file should know that a large share of it was written in
+one night, partly reactively, by two agents correcting each other. "Only this
+machine holds the data" is not the same as "this session should run it", and
+that distinction is the one both of us missed.
+
+**One execution-surface fact, because it is easy to collapse.**
+`.claude/workflows/question-fanout-audit.js` is still UNEXERCISED as a file: the
+question-fanout SHAPE ran on 2026-08-31 — six question-diverse investigators,
+six write-nothing verifiers on one named claim each, 12 briefed and 12 returned,
+five BROKEN verdicts that changed the work — but the script was authored inline
+and the committed file has never been invoked. The technique is validated; the
+FILE's own correctness is not. Provisioned is not exercised, which is the same
+distinction that once left three of four workflow components installed and
+never fired.
+
 Three defects were found by the verifiers and fixed in the same commit, each of
 which would have made this change a net loss:
 
