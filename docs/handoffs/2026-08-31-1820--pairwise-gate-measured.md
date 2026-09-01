@@ -141,12 +141,34 @@ was needed — `VirtualMachinePlatform` was already enabled.
 - Launchers `opus5` / `fable5` are in `~/.bashrc` (Opus 5 / Fable 5, ultracode,
   bypass permissions), and `~/.claude/settings.json` was MERGED, not overwritten.
 
-**THE WINDOWS TREE STILL EXISTS AND IS STILL ON ONEDRIVE.** It was not relocated
-to `C:\ss2-capture` — that needs a quiet moment because two worktrees share one
-`.git` (so `git worktree repair`, never a plain move) and agent processes hold it
-open. **The capture pipeline stays there permanently**: Ruffle is a Windows
-binary, the save and snapshots live under `%LOCALAPPDATA%`, and the capture
-scripts are PowerShell. The end state is HYBRID, not a move.
+**THE WINDOWS TREE IS NOW AT `C:\ss2-capture` — relocated 21:15, off OneDrive.**
+That is the Windows tree to work in. **The capture pipeline lives there
+permanently**: Ruffle is a Windows binary, the save and snapshots live under
+`%LOCALAPPDATA%`, and the capture scripts are PowerShell. The end state is
+HYBRID, not a move.
+
+How it was done, because the method matters if it is ever repeated:
+
+- **Copied, not moved** (`robocopy /E`, 225 MB, 0 failures). A move would have
+  failed against open handles, and a copy leaves a working fallback if anything
+  is wrong. The old OneDrive tree is a COLD BACKUP carrying a
+  `_RETIRED-DO-NOT-WORK-HERE.txt` marker; it is a complete valid clone, so it can
+  be deleted later — deliberately, not by accident.
+- **`git worktree repair` re-bound the linked worktree.** `ss2-progression-design`
+  had `gitdir:` pointing into the OneDrive tree; it now points at
+  `C:\ss2-capture\.git\worktrees\`. Never fix this by hand-editing the file.
+- **A pre-existing ownership problem surfaced and was fixed.** The design
+  worktree is owned by `Atman\CodexSandboxOffline`, and the global
+  `safe.directory` exception only ever covered the MAIN tree — so that worktree
+  had been unusable to `corey` all along and nobody had noticed. Exceptions now
+  exist for it and for `C:\ss2-capture`.
+- **Verified in the new location: 622 passed / 0 skipped / 0 failed**, the
+  capture-bearing profile, which proves the 238-entry `captures/` archive
+  survived the copy. Both worktrees report clean.
+
+Note the runtime contrast, all three measured today: **11.9s** in WSL on ext4,
+**~25s** in the old OneDrive tree, **30.3s** in `C:\ss2-capture`. NTFS is not the
+bottleneck OneDrive was, but ext4 is still the place to run tests.
 
 **Sequential, never parallel.** Do not work the OneDrive tree and the WSL clone in
 the same period — Windows git has `core.autocrlf=true` at system scope and WSL has
