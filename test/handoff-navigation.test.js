@@ -35,7 +35,30 @@ const HANDOFFS_DIR = path.join(REPO_ROOT, "docs", "handoffs");
 const MAP_HEADING = "## What to read, and what you may skip";
 const ARCHIVE_LINE = "## THE ARCHIVE LINE";
 
-const handoffText = await readFile(HANDOFF_PATH, "utf8");
+/**
+ * Read a document with its line endings normalised to LF.
+ *
+ * THIS TEST FAILED IN EVERY WINDOWS CHECKOUT AND PASSED IN WSL. Windows git has
+ * `core.autocrlf=true` at system scope, so these files check out CRLF there;
+ * `headingOffset` looked for `\n<heading>\n` and the heading line really ends
+ * `...skip\r`, so it reported "## What to read, and what you may skip is
+ * missing from HANDOFF.md" while that heading sat at line 31.
+ *
+ * The repository already documents the two environments disagreeing about line
+ * endings as a hazard — and neither the author of this file nor its reviewer
+ * thought to apply that to the file itself. A guard that cannot run in one of
+ * the project's two working trees is worse than no guard THERE: the Windows
+ * tree is where captures run, and a suite that is red for an environmental
+ * reason is a suite whose next genuine failure gets ignored.
+ *
+ * Normalised at READ time rather than by making each parse tolerant, so no
+ * future parser added below has to remember. And `\r` belongs on the
+ * formatting side of the line this file already draws — collapse what the
+ * medium inserted, never normalise away a truncation like an ellipsis.
+ */
+const readText = async (filePath) => (await readFile(filePath, "utf8")).replace(/\r\n/g, "\n");
+
+const handoffText = await readText(HANDOFF_PATH);
 
 /** Every markdown heading in a document, without its leading hashes. */
 function headingsIn(text) {
@@ -121,9 +144,31 @@ test("every committed handoff has a row in the handoffs index", async () => {
   // the index's newest row was the second-newest handoff. Derived from a
   // directory listing rather than a count, so a handoff added without a row
   // fails by name.
-  const index = await readFile(path.join(HANDOFFS_DIR, "README.md"), "utf8");
+  const index = await readText(path.join(HANDOFFS_DIR, "README.md"));
   const missing = (await committedHandoffs()).filter((name) => !index.includes(name));
   assert.deepEqual(missing, [], "handoffs with no row in docs/handoffs/README.md");
+});
+
+test("the doc parse survives a CRLF checkout, which is what Windows produces", async () => {
+  // Reproduces the Windows condition from a LF tree, so this stays covered on
+  // the machine that cannot produce it naturally. Without the normalisation in
+  // `readText`, `headingOffset` returns -1 here and both assertions below fail
+  // with "is missing from HANDOFF.md" while the heading is present.
+  const lf = (await readFile(HANDOFF_PATH, "utf8")).replace(/\r\n/g, "\n");
+  const crlf = lf.replace(/\n/g, "\r\n");
+  assert.ok(crlf.includes("\r\n"), "the CRLF fixture was not actually converted");
+  assert.notEqual(crlf, lf, "HANDOFF.md is already CRLF on disk; this test proves nothing");
+
+  const normalised = crlf.replace(/\r\n/g, "\n");
+  assert.equal(normalised, lf, "normalising a CRLF copy must reproduce the LF text exactly");
+  assert.notEqual(
+    headingOffset(normalised, MAP_HEADING),
+    -1,
+    "the reading map heading is unfindable after a CRLF round trip"
+  );
+  // And the raw CRLF text is genuinely hostile, so the assertion above is not
+  // passing for free.
+  assert.equal(headingOffset(crlf, MAP_HEADING), -1, "CRLF text no longer breaks the raw lookup");
 });
 
 test("the living head's reading map is present, and above the archive line", () => {
@@ -153,7 +198,7 @@ test("every section the reading map names resolves to a real heading", async () 
   const known = headingsIn(handoffText);
   for (const name of await readdir(HANDOFFS_DIR)) {
     if (!name.endsWith(".md")) continue;
-    for (const heading of headingsIn(await readFile(path.join(HANDOFFS_DIR, name), "utf8"))) {
+    for (const heading of headingsIn(await readText(path.join(HANDOFFS_DIR, name)))) {
       known.add(heading);
     }
   }
