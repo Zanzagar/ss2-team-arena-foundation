@@ -117,9 +117,13 @@ universal.
     existence separately; an unplugged drive is a latency, not a loss.**
 
     **Current state, 2026-09-01 evening, verified rather than asserted:**
-    `D:\ss2-backups\captures-2026-09-01` now holds all **1,603 files /
-    20,008,972 bytes**, hashed file-by-file on `D:` and compared line-for-line
-    against `captures/ARCHIVE-MANIFEST.sha256` — **1,603 of 1,603 match**.
+    `D:\ss2-backups\captures-2026-09-01` now holds all **1,588 files /
+    18,194,754 bytes**, hashed file-by-file on `D:` and compared line-for-line
+    against `captures/ARCHIVE-MANIFEST.sha256` — **1,588 of 1,588 match**.
+    (It was 1,603 / 20,008,972 until 15 UI screenshots were moved out of the
+    evidence archive to `C:\ss2-capture\ui-shots\` the same evening, with the
+    manifest and the mirror both regenerated and re-verified afterwards. The
+    drop is a relocation, not a loss — see `captures/README.md`.)
     `ss2-capture-snapshots-2026-09-01` (225 files) and
     `ruffle-SharedObjects-2026-09-01` (6 files, the whole Ruffle profile
     including `openh264-2.4.1-win64.dll`, which a WSL-driven capture needs
@@ -711,6 +715,20 @@ real test"; this was it, and it needed five things nothing had written down.
   30`" rule above governs the VEHICLE-VALIDATION step that `AGENTS.md` requires
   after a wrapper edit — not `launch-capture.ps1`, `run-arena.ps1`,
   `run-campaign.ps1` or `run-capture.ps1`, none of which accept it.
+
+- ► **`powershell.exe` DRIVEN FROM WSL INHERITS A WORKING DIRECTORY INSIDE THE
+  REPO, so a malformed destination WRITES INTO THE REPO. Found the hard way
+  2026-09-01, by me, in this file's own session.** A stray
+  `Copy-Item 'C:\...\captures\README.md' -Destination $null` — left in a command
+  by mistake — resolved `$null` to the shell's CWD and **overwrote the
+  repository's root `README.md`** with `captures/README.md`. It was caught by
+  reading `git status` before committing, and restored with
+  `git checkout -- README.md`; nothing reached a commit. **Give every
+  `Copy-Item`/`Move-Item`/`Set-Content` an absolute `-Destination`, and read
+  `git status` before every commit rather than trusting the paths you passed to
+  `git add`.** This is the same lesson as the `git add -A` incident from a
+  different direction: in a tree where agents write, the working tree is the
+  thing to check, not your intent.
 
 - **The WSL repo cannot launch Ruffle at all.** `launch-capture.ps1:156`
   resolves `ruffle.exe` under `$projectRoot/.tools`, which exists only in the
