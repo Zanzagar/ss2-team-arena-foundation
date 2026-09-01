@@ -27,6 +27,14 @@ export const meta = {
 //                                      //   burning 240-second `find` timeouts. Environment facts are not
 //                                      //   premises to be broken; withholding them does not decorrelate
 //                                      //   anything, it just blinds the checker.
+//                                      //   HAZARD, named by an independent Codex review: this is an
+//                                      //   UNRESTRICTED string labelled "facts", inserted verbatim
+//                                      //   into every verifier prompt, so it CAN smuggle a premise
+//                                      //   ("the value is definitely 110") past the split it exists
+//                                      //   to protect. The split is a convention, not an enforcement.
+//                                      //   Keep this field to paths, commands and read-only
+//                                      //   boundaries; anything a verifier could be asked to BREAK
+//                                      //   belongs in groundBrief, where verifiers never see it.
 //   entryPointQuestion?: string,       // end-to-end check via the REAL entry point (strongly recommended)
 // }
 

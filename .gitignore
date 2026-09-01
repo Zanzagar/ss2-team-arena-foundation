@@ -8,3 +8,10 @@ local-mod-work/*
 captures/*
 !captures/README.md
 .audit-harvest/
+
+# Raw instrumentation traces belong in the external archive, never in the repo.
+# A subagent script with an undefined path variable wrote 67 of them into
+# test/observations/ss2-1v1/undefined/ on 2026-09-01 and `git add -A` committed
+# them. Ignoring is the second line of defence; the first is the test in
+# test/ss2-capture-attestation.test.js that fails if any are tracked.
+test/observations/**/*.jsonl

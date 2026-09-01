@@ -196,6 +196,29 @@ async function main() {
     console.log(`  ${row.observationId.padEnd(38)} ${row.recoveredNonce}${cited}`);
   }
 
+  // THE REAL GATE REFUSES TWO OBSERVATIONS SHARING A NONCE
+  // (promote-1v1-golden.js), and this report is worthless if it says
+  // WOULD-RECOVER for a set the gate would then reject. Codex demonstrated the
+  // gap on 2026-09-01 by giving two records the same recovered token: both still
+  // satisfied the old predicate here, and real promotion refused them. The
+  // archive happens to be clean, which is exactly why the check has to be
+  // explicit rather than assumed.
+  const seenNonce = new Map();
+  const collisions = [];
+  for (const row of [...rows.filter((r) => r.hadNonce), ...recover]) {
+    const token = row.recoveredNonce ?? row.hadNonce;
+    if (typeof token !== "string") continue;
+    if (seenNonce.has(token)) collisions.push({ token, ids: [seenNonce.get(token), row.observationId] });
+    else seenNonce.set(token, row.observationId);
+  }
+  console.log(`\nDistinct tokens across recovered + already-committed: ${seenNonce.size}`);
+  if (collisions.length > 0) {
+    console.log("SHARED NONCE — the promotion gate would REFUSE these, so this report is not actionable:");
+    for (const c of collisions) console.log(`  ${c.token}: ${c.ids.join(" and ")}`);
+  } else {
+    console.log("No shared token; every recovery is distinct, which is what the promotion gate requires.");
+  }
+
   const affectedGoldens = new Set(recover.flatMap((r) => r.citedBy));
   console.log(`\nWaiver today: ${SS2_PRE_NONCE_OBSERVATION_DIGESTS.size}`);
   console.log(`Waiver if every recovery landed: ${SS2_PRE_NONCE_OBSERVATION_DIGESTS.size - recover.length}`);

@@ -15,7 +15,7 @@ supersedes:   none
 # Handoff — the capture pipeline runs from WSL, and the armoured family is blocked by its own fixtures
 
 **WAVE 1 IS VERIFIED — 209 of 209 verifiers returned, zero errors. WAVE 2 IS
-UNVERIFIED-PARTIAL — 83 of its verifiers died on a usage limit.** By this
+UNVERIFIED-PARTIAL — 86 of its verifiers died on a usage limit.** By this
 repository's own standing rule the second is not complete, and its findings are
 claims. **Nothing below rests on an unreplicated agent report** — every
 load-bearing number was re-derived by the main session directly.
@@ -62,7 +62,8 @@ before re-running anything; it holds 458 verdicts and 12 investigator reports ac
 
 2. **THEN decide whether the scenario schema needs to change at all.** Measured across all 82 fixtures: 82 of 82 pin the
    villain's `staminaleft`, **0 of 82 pin `speed`**, and all 22 promoted goldens
-   share ONE villain profile with every stat zero. For that opponent the
+   share ONE identical villain block whose attack/defence/strength/charisma/magicka
+   are zero. For that opponent the
    `movement_speed` clamp floor of 4 makes the missing `speed` pin harmless — which
    is the entire reason prisoner and probe promoted and nothing else has. Against a
    `randomise_gladiator` draw the pin is live, and `speed` is not even observable

@@ -279,14 +279,19 @@ function projectFields(fields, requiredKeys, context, lineNumber) {
  *   it, because a capture run was writing to the archive at the time. The
  *   archive is outside the repo and grows; a number about it is a number that
  *   rots. Re-derive at the moment you need it:
- *   count the archive's `.jsonl` files carrying `"overdraw"` against the total,
- *   with `find <archive> -name '.jsonl' -print` and a grep — spelled out rather
- *   than pasted as a glob, because a glob containing a star-slash inside this
- *   very comment block closes it and breaks the module. That is not a
- *   hypothetical: it happened while writing this note.
- *   What is stable, and is the fact this option actually rests on: `overdraw`
- *   and `launchNonce` are always BOTH present or BOTH absent — 0 files of 221
- *   disagreed — so this waives a coupled pair, never a lone field. The live
+ *   count the archive's JSONL files carrying `"overdraw"` against the total —
+ *   `find <archive> -name` with a star-dot-jsonl pattern, piped to grep. Written
+ *   in prose because a glob containing a star-slash inside this comment block
+ *   closes it and breaks the module; that is not hypothetical, it happened while
+ *   writing this note, and the first prose version then dropped the star and
+ *   named a pattern matching nothing. Codex caught that.
+ *   What is stable is a fact about the ARCHIVE, not about this parser: every
+ *   archived trace carries `overdraw` and `launchNonce` together or carries
+ *   neither — 153 both, 68 neither, 0 mismatched at last count. **The parser
+ *   does NOT enforce that pairing**: the two checks are independent, so with
+ *   this hatch enabled a trace missing only one of them still ingests. An
+ *   earlier version of this note claimed the option "waives a coupled pair,
+ *   never a lone field", which described the data and not the code. The live
  *   capture path — `tools/capture-session.mjs` and
  *   `tools/runtime-capture/campaign.mjs` — must never pass it, and does not: a
  *   record ingested under this option carries no `capture.overdraw`, so it

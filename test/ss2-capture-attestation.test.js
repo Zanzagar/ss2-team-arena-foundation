@@ -579,6 +579,38 @@ test("promotion accepts distinct nonces, and refuses a nonce-free record it cann
  */
 const PRE_NONCE_CEILING = 58;
 
+test("no raw instrumentation trace is committed under the observation corpus", async () => {
+  // THE ARCHIVE IS EXTERNAL ON PURPOSE, and that is a load-bearing property
+  // rather than tidiness: the raw traces are the only artifact that can
+  // distinguish two independent captures from a copy, so a committed copy
+  // quietly changes what a clone can settle about its own evidence.
+  //
+  // This exists because it happened. On 2026-09-01 a subagent script with an
+  // undefined path variable wrote 67 traces into
+  // test/observations/ss2-1v1/undefined/arch/, and one `git add -A` committed
+  // and pushed every one. Nothing refused it: .gitignore covered `captures/`
+  // only, and no test looked. An independent Codex review found it; the suite
+  // did not.
+  //
+  // Derived from a directory walk rather than a count, so a stray fails by NAME
+  // and the next reader knows which file to delete and what to go and fix.
+  const strays = [];
+  const walk = async (dir, prefix) => {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) await walk(path.join(dir, entry.name), rel);
+      else if (entry.name.endsWith(".jsonl")) strays.push(rel);
+    }
+  };
+  await walk(OBSERVATION_DIR, "");
+  assert.deepEqual(
+    strays,
+    [],
+    "raw .jsonl traces are committed under test/observations/ss2-1v1/. They belong only in " +
+    "the external archive; delete them, and find what wrote them there."
+  );
+});
+
 test("the pre-nonce waiver may only ever shrink", () => {
   assert.ok(
     SS2_PRE_NONCE_OBSERVATION_DIGESTS.size <= PRE_NONCE_CEILING,
