@@ -5,7 +5,7 @@ sessionStart: 2026-08-31 17:30 -0400
 sessionId:    a87c4347-3cea-4308-8683-3f1282ef7009
 agentRuns:    wf_0192d778-833 (4 ground lenses + 2 independent implementations + 3 adversarial verifiers)
 branch:       arena/champion-capture
-commits:      1353c15..<tip>   # 9 commits; run `git log --oneline -1`. LAST TWO NOT PUSHED
+commits:      1353c15..<tip>   # run `git log --oneline -1`; check pushed state with `git log --oneline @{u}..HEAD`
 suite:        622 passed / 0 failed / 0 skipped
 supersedes:   none
 ---
@@ -23,7 +23,7 @@ See [`README.md`](README.md) for what a handoff is and is not.
 - **622 / 0 / 0** capture-bearing, **622 tests / 621 passed / 1 skipped** in a
   detached worktree. Both re-measured, not derived. Confirm the tip with
   `git log --oneline -1`.
-- `gh` is still not installed. `git ls-remote github "refs/pull/*/head"`.
+- `gh` is NOT installed on Windows (use `git ls-remote github "refs/pull/*/head"` there). It IS installed and authenticated in WSL as of 21:00 — see the WSL section below.
 
 ## What landed
 
@@ -76,11 +76,12 @@ the only controlled study of Codex reviewing Claude found harm where reviewer
 output was auto-adopted. **Do not run `/codex:setup --enable-review-gate`.**
 AGENTS.md now says so, so this stops being re-flagged.
 
-**Two things await Corey directly, not the next agent:** running
-`claude-harness/install.ps1` (an installer that writes skills and settings on his
-machine — a peer agent's "Corey approved this" is not his approval), and a
-**restart**, because this process started before the user PATH edit and never
-inherited it. The `codex` shim itself is fixed and verified.
+~~**Two things await Corey directly:** running `claude-harness/install.ps1`, and a
+**restart** for the PATH edit.~~ **BOTH SUPERSEDED at 21:00.** `install.ps1` must
+NOT be run — the Windows-native install is orphaned now that agent work lives in
+WSL, where `./install.sh` ran instead and symlinked 12 skills. The restart is moot
+for the same reason. The Windows `codex` shim is still fixed, verified, and still
+relevant to Windows-native sessions.
 
 ## Added 20:10 — WSL migration, Phase 0 status
 
