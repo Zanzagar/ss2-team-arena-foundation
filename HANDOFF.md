@@ -465,11 +465,36 @@ diff at both efforts and compare findings.** Until that exists, this is settled.
   ever comes from an explicit `--write` (`:491`). I had doubted this; it holds.
 - **It does not use `codex exec`** — it drives Codex's app-server protocol
   through a broker and returns STRUCTURED findings against a committed
-  `schemas/review-output.schema.json`. **Open question, unanswered here:**
-  whether that path preserves the per-command stdout transcript. The raw CLI
-  emits every shell command Codex ran and its output, which is what let this
-  session AUDIT the review's claims rather than trust them. If the plugin drops
-  that, the CLI escape hatch is load-bearing rather than habit.
+  `schemas/review-output.schema.json`.
+
+**ANSWERED 2026-09-01, AND IT SETTLES WHICH PATH TO USE WHEN: THE PLUGIN
+PRESERVES NO PER-COMMAND TRANSCRIPT AND WRITES NO ROLLOUT RECORD AT ALL.**
+Established two independent ways. The peer session measured the OUTCOME on its
+box after a `/codex:review` smoke test: only truncated command previews in the
+live log, only the structured final message in the result, and the review threads
+left nothing in `~/.codex` — no `rollout-*.jsonl`, nothing in
+`archived_sessions`, no grep hit for the thread ids. This session measured the
+MECHANISM from the installed source here: `lib/job-control.mjs:137-144` reads
+`"running command:"` / `"command completed:"` lines **only to pick a progress
+label** (`verifying` / `reviewing` / `investigating`) and then discards the
+text; `writeJobFile` persists a job payload, not a transcript; and
+`lib/app-server.mjs` has no rollout or persistence path at all. Same answer from
+opposite directions.
+
+**Two consequences, and the second is a hole in this file's own instructions.**
+
+1. **The raw-CLI escape hatch is LOAD-BEARING, not habit.** The CLI emits every
+   shell command Codex ran and its output, which is exactly what let this session
+   AUDIT the review's seven findings rather than trust them — and two of the
+   seven were defects in my own work that I would otherwise have had to take on
+   faith. **For any review whose findings will be acted on, use the CLI.**
+2. **"Verify by the rollout record" is EXECUTABLE ON THE CLI PATH ONLY.** That
+   instruction appears below and is correct there; against a plugin review there
+   is no rollout record to read, so the model and effort a plugin review actually
+   used are **not verifiable after the fact by any means found so far**. That is
+   the real reason both machines' `config.toml` must stay honest and identical:
+   for plugin reviews, config is not merely the default — it is the ONLY record
+   of what ran.
 
 **THE PLUGIN IS NOW INSTALLED ON THIS BOX (2026-09-01): `codex@openai-codex`
 v1.0.6, user scope, enabled.** Installed non-interactively — `/plugin ...` is a
