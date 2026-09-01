@@ -416,6 +416,100 @@ are the original level-1 gladiator.
 **`zainger-repaired` is a WIPED save under a reassuring name.** `save-state.ps1`
 now refuses to restore it without `-Force`.
 
+### Codex: which machine owns which config, and what is actually installed
+
+**BOTH `.codex/config.toml` files that matter are on THIS box.** Corrected
+2026-09-01 by the peer session `Codex workflow operations`, which is on a
+DIFFERENT physical machine (Corey's primary WSL box). This machine is the
+migrated capture machine — WSL agents plus a Windows-native capture side — so
+"the Windows config" is ours, not theirs. I had assumed the opposite and relayed
+it to them; they sent it straight back.
+
+| Config | Model / effort | Owner |
+| --- | --- | --- |
+| `~/.codex/config.toml` (this box, WSL) | `gpt-5.6-sol` / **`xhigh`** | ours — briefly raised to `ultra` 2026-09-01 and REVERTED the same day, see below; backup of the ultra state at `~/.codex/config.toml.bak-20260901` |
+| `/mnt/c/Users/corey/.codex/config.toml` (this box, Windows) | `gpt-5.6-sol` / **`ultra`**, plus `service_tier = "priority"` | ours — ALREADY aligned, no change made |
+| the peer machine's | `gpt-5.6-sol` / `xhigh` | theirs; divergence is deliberate and in front of Corey |
+
+`codex` is NOT on the Windows PATH here, which fits the migration guide's
+position that agents run in WSL and the Windows side is capture-only. The
+Windows file is full of `\\?\C:` paths and bundled-plugin entries; **do not
+"align" it further without a reason** — it is a different install, not a copy.
+
+**`xhigh` IS THE CONFIGURATION WITH A TRACK RECORD; `ultra` IS A PREFERENCE.**
+Decided 2026-09-01 on evidence, after raising it to `ultra` and reverting within
+the hour. The Codex review that found the 67 wrongly committed traces — the
+defect 758 of this session's own verification agents walked past — ran at
+**`xhigh`**, 220,010 tokens, ~13 minutes. Every `ultra` run on this box was a
+trivial probe (17,044 tokens, "reply with EFFORT-OK"). **There is no measurement
+here in which `ultra` outperforms anything.** Swapping a proven setting for an
+unproven one because more effort ought to be better is the reasoning this
+project exists to refuse, and it was refused here against my own earlier
+position.
+
+**If anyone wants `ultra` back, measure it: run the same review over the same
+diff at both efforts and compare findings.** Until that exists, this is settled.
+
+**PREFER THE PLUGIN, KEEP THE CLI AS THE ESCAPE HATCH.** Source of
+`openai/codex-plugin-cc` read at HEAD 2026-09-01 (32.6k stars, actively pushed):
+
+- **It CANNOT express `ultra`.** `scripts/codex-companion.mjs`'s
+  `normalizeReasoningEffort()` throws on anything outside
+  `none|minimal|low|medium|high|xhigh`. Insisting on `ultra` means permanently
+  staying off the maintained path.
+- **Its review path passes `model` but NOT `effort`** (`~line 409-414`), so a
+  plugin review INHERITS `config.toml`. That is why both machines' config must
+  stay honest and identical — through the plugin, effort is not per-run.
+- **Its read-only IS a real sandbox, not a prompt instruction** — `sandbox:
+  "read-only"` is hardcoded at `companion.mjs:411`, and `workspace-write` only
+  ever comes from an explicit `--write` (`:491`). I had doubted this; it holds.
+- **It does not use `codex exec`** — it drives Codex's app-server protocol
+  through a broker and returns STRUCTURED findings against a committed
+  `schemas/review-output.schema.json`. **Open question, unanswered here:**
+  whether that path preserves the per-command stdout transcript. The raw CLI
+  emits every shell command Codex ran and its output, which is what let this
+  session AUDIT the review's claims rather than trust them. If the plugin drops
+  that, the CLI escape hatch is load-bearing rather than habit.
+
+**THE PLUGIN SHIPS THE GATE THIS PROJECT DISABLED.** `prompts/stop-review-gate.md`
+and `scripts/stop-review-gate-hook.mjs` are in the package. **Do NOT run
+`/codex:setup --enable-review-gate`** — AGENTS.md's reason stands: the only
+controlled study of Codex reviewing Claude found harm precisely when reviewer
+output was auto-adopted.
+
+**FOR THE RAW-CLI PATH ONLY, pin the model and effort at the invocation.** Both
+machines now treat this as standard. I ran this session's review without pinning
+either and inherited `xhigh` without knowing; it was a good setting by luck, and
+I could not have said what ran until I read the rollout record afterwards. Use:
+
+```
+codex exec -m gpt-5.6-sol -c model_reasoning_effort=ultra -s read-only \
+  --skip-git-repo-check - < prompt.txt
+```
+
+**Verify by the ROLLOUT RECORD, never the exit code.** Acceptance is not
+application: `~/.codex/sessions/<date>/rollout-*.jsonl` carries the resolved
+`"effort"` and `"model"`. A flag the CLI tolerates but ignores exits 0.
+
+**Budget for `ultra`.** A trivial one-line prompt exceeded a 240 s timeout. A
+real review of this session's diff took ~13 minutes, 5.57 M total tokens (5.3 M
+cached input), 34.5 k output of which 20.4 k reasoning. And `codex exec` buffers
+ALL stdout until it finishes, so a run in progress is indistinguishable from a
+wedged one — check the process, not the output file.
+
+**WHAT IS INSTALLED, AND WHERE — I OVERSTATED THIS ONCE.** On this box there is
+NO Claude/Codex integration: `mcpServers` is empty, no codex plugin is
+installed, and `/codex:adversarial-review` is unavailable, so reviews here run
+as a plain npm CLI subprocess
+(`~/.nvm/.../@openai/codex/bin/codex.js`). I wrote that the documented slash
+command "is not registered anywhere". **That was true of this machine only.**
+The peer reports that on ITS box the `codex@openai-codex` plugin
+(`openai/codex-plugin-cc`) registers `/codex:review` and
+`/codex:adversarial-review`, smoke-tested 2026-08-31. Reported, not verified
+from here — this session cannot see that machine's plugin state. So the
+migration handoff's "never exercised" claim holds for THIS box and should not be
+generalised.
+
 ### Driving the capture pipeline FROM WSL (measured 2026-09-01, first run since the relocation)
 
 **The vehicle gate PASSES from WSL** — `validate-vehicle.ps1` round-tripped
