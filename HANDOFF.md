@@ -405,6 +405,93 @@ are the original level-1 gladiator.
 **`zainger-repaired` is a WIPED save under a reassuring name.** `save-state.ps1`
 now refuses to restore it without `-Force`.
 
+### Driving the capture pipeline FROM WSL (measured 2026-09-01, first run since the relocation)
+
+**The vehicle gate PASSES from WSL** — `validate-vehicle.ps1` round-tripped
+wrapper → Ruffle → delog → ingest → verify, and the save tripwire read all three
+`.sol` files unchanged. The migration handoff called the next capture run "the
+real test"; this was it, and it needed five things nothing had written down.
+
+- **`powershell.exe -NoProfile -ExecutionPolicy Bypass`.** The Windows execution
+  policy blocks every `.ps1` here. Without `-ExecutionPolicy Bypass` the scripts
+  do not run at all.
+- **`$env:LOCALAPPDATA` must be set to `C:\ss2la`** (see the junction below).
+  Every earlier capture ran INSIDE the Claude Windows app, whose MSIX container
+  virtualises `%LOCALAPPDATA%`. So the licensed save universe, the 74 snapshots
+  and `ss2-capture-isolated` all live under
+  `C:\Users\corey\AppData\Local\packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\`,
+  NOT under the `%LOCALAPPDATA%` an outside process sees. A WSL-driven session is
+  outside the container and silently addresses an EMPTY store otherwise.
+- **`C:\ss2la` is a directory junction to that LocalCache path**, created
+  2026-09-01. It exists because the literal path is 75 characters and
+  `save-state.ps1` blows MAX_PATH on the store's own nesting: a `snapshot` run
+  through the literal path FAILED HALF-WAY and left a partial snapshot that
+  `Remove-Item` could not delete either — and a partial snapshot is
+  indistinguishable from a real one in `save-state.ps1 list`. Inside the
+  container the same code is fine, because the app sees the short
+  `C:\Users\corey\AppData\Local` and the redirect happens below the filesystem
+  API. **Use the junction; do not pass the literal LocalCache path.**
+- **Ruffle IGNORES `%LOCALAPPDATA%`.** It resolves its own profile through the
+  Windows Known Folder API, which only the container virtualises, so an
+  unpackaged Ruffle starts from an EMPTY profile at
+  `C:\Users\corey\AppData\Local\ruffle`. It then stalls fetching OpenH264 and
+  never loads the movie: the run dies at `Opening file:…` with no `avm_trace`
+  lines and the gate reports "No capture-trace lines found", which reads like a
+  wrapper defect and is not one. Seed the profile by copying
+  `…\LocalCache\Local\ruffle\video\openh264-2.4.1-win64.dll` into
+  `C:\Users\corey\AppData\Local\ruffle\video\`. Done 2026-09-01.
+- **A cold profile needs `-RunSeconds 30`;** the 12-second default is not enough
+  and fails the same indistinguishable way.
+- **From WSL, a campaign needs `-Concurrency 2` or more.** At `-Concurrency 1`
+  `run-campaign.ps1` passes no `-SaveDirectory`, so Ruffle falls back to its own
+  profile store — which, unpackaged, is the empty one. `N>1` forces a
+  per-session store seeded from the real save, which is what makes it work.
+
+### The live save has moved past the prisoner, and 22 goldens depend on that bout
+
+The saved gladiator (John Ringler) has progressed beyond the dungeon prisoner
+fight. Two live rounds run 2026-09-01 with `-Navigate prisoner` each emitted a
+`meta` line and nothing else: Ruffle launched, the wrapper traced, and the
+navigator never reached a bout. **Every prisoner and probe family — all 22
+promoted goldens — is therefore uncapturable from the LIVE save**, and
+reproducing or extending any of them means restoring an early snapshot first
+(`verified-good-1701` or `pre-arena-path`).
+
+That makes the snapshot store load-bearing evidence infrastructure rather than a
+safety net, and it is the one copy: it sits inside the MSIX container, and the
+`D:\ss2-backups` mirror is on an external drive that is usually unplugged.
+
+**`jr-live-0901` is the live John Ringler save, snapshotted 2026-09-01** (3 files
+verified identical) before any restore was attempted. Restore overwrites the live
+save, so take a snapshot BEFORE a restore, not only before a capture.
+
+### Throughput is memory-bound, and the per-round hash is 93% waste
+
+Measured 2026-09-01 on this machine (15.3 GB RAM, 8 physical cores, RTX 4060):
+
+| | measured |
+| --- | --- |
+| Available memory (free + standby) | **76 MB** |
+| One Ruffle instance | 373 MB working set / 449 MB commit |
+| `verify-install`, 1 run | 5.5 s |
+| `verify-install`, 4 concurrent | 6.1 s |
+| SS2-only hash, 4 concurrent | **0.43 s** |
+
+So concurrency is capped by RAM at about 2 today, not by CPU, which is mostly
+idle. Closing Firefox/Spotify/Dropbox/ChatGPT frees ~1.8 GB (≈4–5 instances);
+capping WSL2 in `%USERPROFILE%\.wslconfig` frees up to ~3 GB more (≈8, matching
+the physical cores) but needs `wsl --shutdown`.
+
+**The larger lever costs no memory.** `verify-install` hashes 102 MB per round
+and 95 MB of it is the AVM2 launcher SWF — which `98482b6` established the
+capture route never loads, and which that commit deliberately left as an open
+design decision ("SS2 mismatch should stop a session; launcher mismatch should
+warn"). Hashing only the 7.3 MB SS2 SWF turns ~6 s of every batch into ~0.4 s.
+Note what was NOT true: concurrent hashing does not contend badly on disk — 4
+concurrent full runs cost only +0.6 s over one, because the page cache absorbs
+them. The win is deleting redundant work, not relieving contention.
+
+
 ---
 
 ## Non-negotiable rules (each learned the hard way)
