@@ -3,7 +3,9 @@
 **1 September 2026 · branch `arena/champion-capture`**
 
 A session spent proving that a modern combat engine matches a 2005 Flash game —
-and the four times the evidence turned around and corrected me.
+and the repeated, useful experience of the evidence turning around and correcting
+me. Both verification waves finished clean; the defect that mattered most was
+found by an outside reviewer that all 758 of them missed.
 
 ---
 
@@ -165,10 +167,10 @@ rather than anyone's report.
 
 | | |
 | --- | ---: |
-| Agents run | 671 |
-| Verdicts returned | 458 |
-| Claims broken or dented | 114 |
-| Commits | 17 |
+| Agents run | 758 |
+| Verdicts returned | 545 |
+| Claims broken or dented | 136 |
+| Commits | 21 |
 
 **What that bought.** One checker, pointed at an unrelated claim, noticed the
 project's master notes **contradict themselves 140 lines apart** about which
@@ -186,6 +188,39 @@ briefing, which invalidated the cache and queued about 180 already-successful
 agents to re-run in order to repair roughly 8 bad verdicts. The owner caught it
 before it got expensive. The lesson is not "verify more" — it is *check what a fix
 costs before you run it.*
+
+---
+
+## 06 · One reviewer who does not share our habits — FOUND WHAT 758 AGENTS MISSED
+
+With both waves finished clean (209/209 and 230/230 checkers, zero errors), the
+last step was a read-only review by a *different* AI system. The project keeps it
+on the theory that it fails differently from the tools that wrote the code.
+
+It found, in one pass, what 758 agents walked past: **67 raw recording files
+committed to the repository and pushed.** A helper script had an unset variable
+and wrote its working files into the project instead of scratch space, and one
+careless `git add -A` swept them in.
+
+Not a leak — the contents are measurements, not game code, and I checked before
+reacting. But those recordings are deliberately kept *outside* the repository,
+because that is what makes it true that a fresh copy cannot quietly verify its own
+evidence against itself. A committed copy erases that property silently.
+
+It also caught the retracted "110" still stated as fact in **three other places**,
+including the first thing a new reader sees — retracted in one spot, left standing
+everywhere else, in the same session where I wrote that failure up as a lesson.
+Plus four more: a tool that skipped the check the real system performs, a shell
+pattern with a typo matching nothing, a claim about the data dressed as a claim
+about the code, and an overstatement about which numbers were zero.
+
+All fixed, with two new guards where none existed — one deliberately broken and
+re-fixed to prove it catches the case. Every finding was re-derived before being
+acted on; none applied on the reviewer's say-so.
+
+**The lesson is not "run more checkers."** 758 checkers from one family shared a
+blind spot and one outsider did not. Diversity of method beat volume of effort,
+and it was not close.
 
 ---
 
