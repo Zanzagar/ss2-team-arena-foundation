@@ -271,9 +271,22 @@ function projectFields(fields, requiredKeys, context, lineNumber) {
  *   the trace carries the wrapper's `null` placeholder.
  * - `allowMissingOverdraw` — accept an `injected-tape-runtime` trace whose end
  *   line has no `overdraw`. This exists for exactly one purpose: the archived
- *   raw traces under the ignored `captures/` directory predate the field (113
- *   of 177 carry it; the rest do not), and regenerating divergence reports from
- *   them must not be blocked by evidence they could not have recorded. The live
+ *   raw traces under the ignored `captures/` directory predate the field, and
+ *   regenerating divergence reports from them must not be blocked by evidence
+ *   they could not have recorded. **The ratio is deliberately NOT quoted here.**
+ *   It said "113 of 177" and was stale by 2026-09-01, when the same count read
+ *   153 of 221 — and it moved again by three files DURING the audit that caught
+ *   it, because a capture run was writing to the archive at the time. The
+ *   archive is outside the repo and grows; a number about it is a number that
+ *   rots. Re-derive at the moment you need it:
+ *   count the archive's `.jsonl` files carrying `"overdraw"` against the total,
+ *   with `find <archive> -name '.jsonl' -print` and a grep — spelled out rather
+ *   than pasted as a glob, because a glob containing a star-slash inside this
+ *   very comment block closes it and breaks the module. That is not a
+ *   hypothetical: it happened while writing this note.
+ *   What is stable, and is the fact this option actually rests on: `overdraw`
+ *   and `launchNonce` are always BOTH present or BOTH absent — 0 files of 221
+ *   disagreed — so this waives a coupled pair, never a lone field. The live
  *   capture path — `tools/capture-session.mjs` and
  *   `tools/runtime-capture/campaign.mjs` — must never pass it, and does not: a
  *   record ingested under this option carries no `capture.overdraw`, so it

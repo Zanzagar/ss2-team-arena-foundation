@@ -245,10 +245,14 @@ test("an injected-tape trace with no over-draw count is refused, naming the one 
 });
 
 test("the escape hatch admits an archived pre-overdraw trace, which then claims nothing", () => {
-  // The reason this option exists: 113 of the 177 archived .jsonl traces under
-  // the ignored captures/ directory carry `overdraw`; the rest predate the
-  // field, and regenerating divergence reports from them must not be blocked by
-  // evidence they could not have recorded.
+  // The reason this option exists: some archived .jsonl traces under the
+  // ignored captures/ directory predate `overdraw`, and regenerating divergence
+  // reports from them must not be blocked by evidence they could not have
+  // recorded. The ratio this comment used to quote ("113 of the 177") was stale
+  // by 2026-09-01 — the same count read 153 of 221, and moved by three files
+  // mid-audit because a capture was writing to the archive. The archive lives
+  // outside the repo and grows, so the number is not restated here; see the
+  // `allowMissingOverdraw` block in src/golden/capture-ingest.js.
   const bare = { t: "end", installHashVerifiedAfter: true };
   const record = injectedTapeRecord({
     observationId: "obs-archived",
