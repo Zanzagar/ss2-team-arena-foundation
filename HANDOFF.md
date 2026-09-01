@@ -107,6 +107,34 @@ universal.
     is not reachable from Linux") and line ~1524 ("not adjudicable from a WSL
     clone at all"); both are struck there too. Retract at every site.
 
+  ► **SUPERSEDED THE SAME EVENING, BY MY OWN OVER-READING — AND THE FIX IS
+    DONE. `D:` WAS UNPLUGGED, NOT GONE.** When the owner attached the drive,
+    `D:\ss2-backups` turned out to hold a real mirror from 2026-08-31:
+    **1,589 files / 19,904,374 bytes**, matching this file's recorded figure
+    exactly, plus mirrors of the snapshot store and the Ruffle profile. So the
+    bullet below is right that only ONE copy was REACHABLE, and it invites the
+    stronger reading that only one EXISTS. It did not. **State reachability and
+    existence separately; an unplugged drive is a latency, not a loss.**
+
+    **Current state, 2026-09-01 evening, verified rather than asserted:**
+    `D:\ss2-backups\captures-2026-09-01` now holds all **1,603 files /
+    20,008,972 bytes**, hashed file-by-file on `D:` and compared line-for-line
+    against `captures/ARCHIVE-MANIFEST.sha256` — **1,603 of 1,603 match**.
+    `ss2-capture-snapshots-2026-09-01` (225 files) and
+    `ruffle-SharedObjects-2026-09-01` (6 files, the whole Ruffle profile
+    including `openh264-2.4.1-win64.dll`, which a WSL-driven capture needs
+    seeded) are alongside it, matching the 08-31 naming convention.
+    **The manifest is now committed at `captures/ARCHIVE-MANIFEST.sha256`** —
+    the one file under `captures/` that is not gitignored — so any future copy
+    is checkable with `sha256sum -c`. Read `captures/README.md` for what it does
+    and does not prove: it is an integrity check, NOT a provenance claim, and a
+    copy hashes exactly like its original.
+
+    **What is genuinely gone is the OneDrive tree**, which now holds only
+    `ss2-team-arena-foundation.bundle` — a git bundle, which by construction
+    cannot carry gitignored traces. So it is two copies, not three, and the
+    second one is normally unplugged.
+
   ► **AND THE ARCHIVE HAS ONE REACHABLE COPY TODAY, NOT THREE.** The head says
     below that three exist (live tree, retired OneDrive tree, `D:`). Measured:
     `D:` is not attached (`/mnt/d` is an empty mount point), the OneDrive
