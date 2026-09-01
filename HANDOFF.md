@@ -471,11 +471,35 @@ diff at both efforts and compare findings.** Until that exists, this is settled.
   session AUDIT the review's claims rather than trust them. If the plugin drops
   that, the CLI escape hatch is load-bearing rather than habit.
 
-**THE PLUGIN SHIPS THE GATE THIS PROJECT DISABLED.** `prompts/stop-review-gate.md`
-and `scripts/stop-review-gate-hook.mjs` are in the package. **Do NOT run
-`/codex:setup --enable-review-gate`** — AGENTS.md's reason stands: the only
-controlled study of Codex reviewing Claude found harm precisely when reviewer
-output was auto-adopted.
+**THE PLUGIN IS NOW INSTALLED ON THIS BOX (2026-09-01): `codex@openai-codex`
+v1.0.6, user scope, enabled.** Installed non-interactively — `/plugin ...` is a
+built-in a session cannot invoke, but `claude plugin marketplace add
+openai/codex-plugin-cc` and `claude plugin install codex@openai-codex` are
+supported CLI subcommands and work fine. I first told the owner to run them
+himself; that was wrong, and the CLI surface is worth remembering.
+
+It registers `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`,
+`/codex:setup`, `/codex:status`, `/codex:result`, `/codex:cancel`,
+`/codex:transfer`, plus the `codex-rescue` subagent. **Commands load at session
+start**, so they are unavailable in the session that installs them.
+
+**THE PLUGIN SHIPS THE GATE THIS PROJECT DISABLED — AND IT REGISTERS THE HOOK,
+BUT DORMANT.** `plugins/codex/hooks/hooks.json` wires a `Stop` hook to
+`scripts/stop-review-gate-hook.mjs` with a **900-second timeout**, alongside
+`SessionStart`/`SessionEnd` lifecycle hooks. VERIFIED INERT rather than assumed:
+the hook's `main()` early-returns on `if (!config.stopReviewGate)`,
+`scripts/lib/state.mjs:23` defaults `stopReviewGate: false`, nothing on disk sets
+it, and `~/.claude/settings.json` has `hooks: none` and no gate keys. So the
+install did NOT arm it, and AGENTS.md's `reviewGateEnabled: false` remains the
+true state.
+
+**But the footgun is now reachable on this machine, where before it was not.**
+**Do NOT run `/codex:setup --enable-review-gate`** — AGENTS.md's reason stands:
+the only controlled study of Codex reviewing Claude found harm precisely when
+reviewer output was auto-adopted. Note `/codex:setup`'s own description offers to
+"optionally toggle the stop-time review gate", so the toggle is one command away
+and reads as routine setup. **If a future session finds `stopReviewGate` true,
+that is a regression to undo, not a preference someone expressed.**
 
 **FOR THE RAW-CLI PATH ONLY, pin the model and effort at the invocation.** Both
 machines now treat this as standard. I ran this session's review without pinning
