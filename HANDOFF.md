@@ -28,6 +28,40 @@ here, HOIST IT UP rather than correcting it in place.
 
 ---
 
+## What to read, and what you may skip
+
+**The living head is ~810 lines and a session should not have to read all of it
+to start.** This map is keyed on WHAT YOU ARE ABOUT TO DO, deliberately not on
+the numbered next-steps list — that list renumbers every session, and a map
+pinned to its numbers would rot within one. Added 2026-08-31 by the first WSL
+session, whose measured complaint was ~50 KB of reading before any work began.
+
+**Everyone reads:** § "READ THIS FIRST — corrections from the 2026-08-31 audit pass",
+and § "Non-negotiable rules (each learned the hard way)". Nothing else is
+universal.
+
+| If you are about to… | read | and you may skip |
+| --- | --- | --- |
+| promote, re-promote, or touch a golden's provenance | § "What the re-promotion did and did not establish", § "The pairwise gate: what the 2026-08-31 measurement settled" | the staging/wrapper sections |
+| author or re-derive a candidate fixture | § "Next steps, in order", § "The single most important correction" | everything about the promotion gate |
+| run a capture, or edit the wrapper | § "What is running, and how to run it", § "`validate-vehicle.ps1` proves less than its name suggests", § "AVM1 has ONE comparison opcode" | the whole of § "Open items" |
+| land a field exclusion (`staminaleft` or any other) | § "The pairwise gate: what the 2026-08-31 measurement settled" IN FULL, and § "Read this before you touch the staminaleft exclusion" in the 18:20 handoff | § "What changed at the level of what this project can do" |
+| change the campaign driver or the test suite | § "Open items" → "Found 2026-08-31, not yet closed" | the champion/DNA chronology |
+| work on the design track | `design/endless-progression` only — and see § "The design track is deliberately quarantined" first | ALL of this file, deliberately |
+
+**Two things no section title advertises, and both have cost a session:**
+
+- **An observation record's FILE NAME is not its `observationId`.**
+  `obs-20260830-auto1.json` carries `obs-diag`, `auto2` carries `obs-nav6`,
+  `auto3` carries `obs-gold3`. Key on the id inside the file, always. Keying on
+  the name silently no-ops rather than failing.
+- **`captures/` absent is a CAPABILITY boundary, not a test-count difference.**
+  The raw traces are the only artifact that can distinguish two independent
+  captures from a copy — the normalized records cannot, measured. They are
+  Windows-side and gitignored, so **a question that turns on record
+  independence cannot be settled from a WSL clone at all.** The 1-skipped test
+  profile is the visible symptom of this, not the substance of it.
+
 ## The design track is deliberately quarantined
 
 A separate track researches endless progression, on branch
