@@ -47,6 +47,7 @@ import {
 import {
   PromotionBlockedError,
   PromotionError,
+  computeSs2CaptureManifestDigest,
   promoteSs2CandidateToGolden
 } from "../src/golden/promote-1v1-golden.js";
 import {
@@ -651,29 +652,57 @@ test("a shared nonce never discards divergence evidence", () => {
 });
 
 /**
- * The committed golden-prisoner-normal-kill-dir6 cites `obs-diag`, which is the
- * record its candidate was transcribed from, so the gate now refuses that pair
- * (see "a candidate's own source record is refused as evidence" below). These
- * two end-to-end regressions therefore promote from an ELIGIBLE pair instead:
- * `obs-gold3` (the golden's other cited record) and `obs-camp2`, an independent
- * later capture of the same direction. Both were captured after the candidate
- * was authored, so neither could have been its source.
+ * The two end-to-end regressions below promote dir6 from an ELIGIBLE PAIR —
+ * `obs-gold3` and `obs-camp2` — rather than from the golden's full cited set.
+ * Neither is the record the candidate was transcribed from, and both are
+ * nonce-free and staging-free, which is what these two tests are about.
  *
- * The comparison drops only the four provenance fields that NAME the evidence.
- * Everything a promotion actually derives — scenario, samples, expected, build,
- * classification, fixtureId, kind, runtimeVerified, sourceRefs, repetitions —
- * must still come out byte-identical to the committed golden, which is what
- * makes this a regression rather than a restatement.
+ * WHAT IS COMPARED, and why it changed. This used to project four
+ * evidence-naming fields out of both goldens and deep-equal the rest, so
+ * `repetitions` was compared against the committed golden's. That worked only
+ * because the pair happened to be the same size as the committed golden's
+ * evidence. When dir6 was re-promoted onto nine records the two counts parted,
+ * and every obvious repair was a weakening: adding `repetitions` to the
+ * projection deletes the only check that a promotion counts its evidence at
+ * all; widening the pair to the golden's nine records forces the deletion of
+ * the per-record `launchNonce` assertion, because four of the nine carry one.
+ *
+ * So the comparison is split instead of relaxed, and it comes out stronger.
+ * The BODY — everything a promotion copies rather than derives — is deep-equal
+ * to the committed golden. The PROVENANCE is checked in full against what the
+ * offered evidence entails: not a subset compared to a golden that happens to
+ * agree, but every field derived from the two records in hand. A field that
+ * used to be compared by coincidence is now compared on purpose.
  */
-const EVIDENCE_NAMING_FIELDS = ["observationIds", "observationDigests", "observedAt", "captureManifestSha256"];
+const DIR6_ELIGIBLE_PAIR = ["obs-gold3", "obs-camp2"];
 
-function goldenApartFromItsEvidence(golden) {
+/** The fixture apart from its provenance: what promotion copies, not derives. */
+function goldenBody(golden) {
   const projected = cloneJson(golden);
-  for (const field of EVIDENCE_NAMING_FIELDS) delete projected.provenance[field];
+  delete projected.provenance;
   return projected;
 }
 
-const DIR6_ELIGIBLE_PAIR = ["obs-gold3", "obs-camp2"];
+/**
+ * Every provenance field a promotion from `observations` must produce, derived
+ * from the records and the candidate rather than read off the committed golden.
+ */
+function expectedProvenance(candidate, observations, manifest) {
+  return {
+    kind: "licensed-observation",
+    runtimeVerified: true,
+    sourceRefs: cloneJson(candidate.provenance.sourceRefs),
+    observedAt: observations
+      .map((observation) => observation.capture.observedAt)
+      .sort((left, right) => Date.parse(left) - Date.parse(right))
+      .at(-1),
+    captureToolVersion: manifest.captureToolVersion,
+    repetitions: observations.length,
+    observationIds: observations.map((observation) => observation.observationId),
+    observationDigests: observations.map((observation) => observation.digest),
+    captureManifestSha256: computeSs2CaptureManifestDigest(manifest)
+  };
+}
 
 test("the committed evidence still promotes untouched under the nonce gate", async () => {
   // The end-to-end regression that matters: real records, a real manifest, and
@@ -688,9 +717,14 @@ test("the committed evidence still promotes untouched under the nonce gate", asy
     return observation;
   });
 
-  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifestFor(observations));
+  const manifest = manifestFor(observations);
+  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
   assert.deepEqual(promotion.golden.provenance.observationIds, DIR6_ELIGIBLE_PAIR);
-  assert.deepEqual(goldenApartFromItsEvidence(promotion.golden), goldenApartFromItsEvidence(golden));
+  assert.deepEqual(goldenBody(promotion.golden), goldenBody(golden));
+  assert.deepEqual(promotion.golden.provenance, expectedProvenance(candidate, observations, manifest));
+  // The committed golden rests on more evidence than this pair, and says so.
+  assert.equal(golden.provenance.repetitions, golden.provenance.observationIds.length);
+  assert.ok(golden.provenance.repetitions >= promotion.golden.provenance.repetitions);
 });
 
 test("a candidate's own source record is refused as evidence, however well it matches", async () => {
@@ -1137,7 +1171,7 @@ test("the committed evidence promotes untouched under the staging gate", async (
   // The regression that matters most: real records, a real manifest, the real
   // candidate, none of which mention staging, producing the committed golden's
   // every derived field. The evidence pair is the eligible one — see
-  // goldenApartFromItsEvidence above for why and for what is compared.
+  // DIR6_ELIGIBLE_PAIR above for why, and for what is compared.
   const golden = await loadJson(path.join(GOLDEN_DIR, "golden-prisoner-normal-kill-dir6.json"));
   const candidate = await loadJson(path.join(FIXTURE_DIR, "candidate-prisoner-normal-kill-dir6.json"));
   const observations = DIR6_ELIGIBLE_PAIR.map((observationId) => {
@@ -1147,8 +1181,11 @@ test("the committed evidence promotes untouched under the staging gate", async (
     return observation;
   });
 
-  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifestFor(observations));
+  const manifest = manifestFor(observations);
+  const promotion = promoteSs2CandidateToGolden(candidate, observations, manifest);
   assert.equal(promotion.staged, null);
   assert.equal(Object.hasOwn(promotion.golden.provenance, "staged"), false);
-  assert.deepEqual(goldenApartFromItsEvidence(promotion.golden), goldenApartFromItsEvidence(golden));
+  assert.deepEqual(goldenBody(promotion.golden), goldenBody(golden));
+  assert.deepEqual(promotion.golden.provenance, expectedProvenance(candidate, observations, manifest));
+  assert.equal(Object.hasOwn(golden.provenance, "staged"), false, "the committed golden is unstaged too");
 });

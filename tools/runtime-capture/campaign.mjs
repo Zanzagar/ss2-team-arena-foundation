@@ -95,7 +95,8 @@ import {
   PromotionBlockedError,
   buildSs2DivergenceReport,
   goldenFixtureIdFor,
-  promoteSs2CandidateToGolden
+  promoteSs2CandidateToGolden,
+  ss2ObservationIsCandidatesOwnSource
 } from "../../src/golden/promote-1v1-golden.js";
 import { validateSs2OneVsOneFixture } from "../../src/golden/run-1v1-fixture.js";
 import { resolveSs2PhysicalAttackCandidate } from "../../src/golden/ss2-attack-candidate.js";
@@ -922,9 +923,42 @@ async function computeCoverage(family) {
   };
 
   const rows = members.map((member) => {
-    const matching = observations.filter(
-      (observation) => matchSs2ObservationToFixture(member.fixture, observation.value).match
+    // Everything the matcher accepts, and then the split the GATE will apply
+    // anyway. A record a candidate was transcribed from matches by
+    // construction — the fixture's scenario and tape were copied out of it —
+    // so `matchSs2ObservationToFixture` cannot report anything but a match and
+    // the match carries no information. `promoteSs2CandidateToGolden` refuses
+    // such a record; coverage used to count it regardless, and the two
+    // disagreeing was not harmless bookkeeping. `settle` promotes from
+    // `row.observations`, so counting an ineligible record meant handing the
+    // gate a set it would refuse — after having already written the capture
+    // manifest for it. Measured on this tree: deleting the four self-citing
+    // goldens and running `settle` left four NEW manifests attesting the
+    // tainted pairs, un-rolled-back, and `git checkout -- .` does not remove an
+    // untracked file. The suite was fully green over them.
+    //
+    // THIS REVERSES A DECISION THIS REPOSITORY MADE DELIBERATELY, and the
+    // argument it reverses is worth stating rather than deleting. It read:
+    // "coverage answers 'which records match this fixture', which is a
+    // different question from 'which records are evidence for it' ... a
+    // coverage row is a shortlist, and the gate is what decides." That is true
+    // of a REPORT and false of a WORK LIST, and this row is both — `plan`
+    // prints it and `settle` promotes from it. The shortlist reading is what
+    // let settle build an attestation for evidence it could never promote.
+    // What is kept from that argument is its real content: the distinction
+    // must stay VISIBLE. So the ineligible record is not dropped, it is moved
+    // to a field of its own and printed, and `plan --json` carries it.
+    const eligibility = Object.groupBy(
+      observations.filter(
+        (observation) => matchSs2ObservationToFixture(member.fixture, observation.value).match
+      ),
+      (observation) =>
+        ss2ObservationIsCandidatesOwnSource(member.fixture, observation.value)
+          ? "ineligible"
+          : "matching"
     );
+    const matching = eligibility.matching ?? [];
+    const ineligible = eligibility.ineligible ?? [];
     const sessions = new Set(matching.map((observation) => observation.value.capture.sessionId));
     const goldenId = goldenFixtureIdFor(member.fixture.fixtureId);
     const hasGolden = goldenIds.has(goldenId);
@@ -932,7 +966,10 @@ async function computeCoverage(family) {
       {
         fixture: member.fixture,
         action: member.action,
-        alreadyCaptured: hasGolden || matching.length > 0
+        // Counts the ineligible record. Whether a round has been burned on
+        // this fixture is a different question from whether that round is
+        // evidence for it, and the derived blockers answer the first one.
+        alreadyCaptured: hasGolden || matching.length + ineligible.length > 0
       },
       blockerContext
     );
@@ -949,6 +986,24 @@ async function computeCoverage(family) {
         observationId: observation.value.observationId,
         sessionId: observation.value.capture.sessionId,
         filePath: observation.filePath
+      })),
+      // Records that MATCH this candidate and are refused as evidence for it,
+      // with the reason. Never empty-by-omission: a row that dropped a record
+      // must not read like a row that never had one. Without this field the
+      // exclusion above is a silent cap, and the fixture it hides is real —
+      // `candidate-duel-firstblood-normal-kill`'s only matching record is its
+      // own source, so its row would otherwise be field-for-field identical to
+      // a fixture nobody has ever run. This file already forbids exactly that,
+      // for the divergence count, two fields below.
+      ineligibleObservations: ineligible.map((observation) => ({
+        observationId: observation.value.observationId,
+        sessionId: observation.value.capture.sessionId,
+        filePath: observation.filePath,
+        reason: "authored-from",
+        detail:
+          `${member.fixture.fixtureId} declares provenance.authoredFrom ` +
+          `${JSON.stringify(member.fixture.provenance.authoredFrom)}, so this record is the original ` +
+          "its scenario and tape were copied out of and cannot confirm it"
       })),
       sessionCount: sessions.size,
       promotable:
@@ -992,6 +1047,18 @@ function printCoverage(coverage) {
       `  ${row.fixtureId.padEnd(width)}  ${row.action.label}  ${state.padEnd(12)} ` +
       `obs ${row.observations.length} / sessions ${row.sessionCount}  [${cited}]`
     );
+    // ABOVE the `hasGolden` continue, deliberately. Blockers and notes below
+    // are suppressed for a promoted member, and a golden that CITES the record
+    // being refused is precisely the row a reader must not be able to miss —
+    // that is the state this exclusion was written for. Printing it here also
+    // keeps a row that dropped a record distinguishable from a row that never
+    // had one, which is the silent-cap failure this file forbids by name.
+    for (const excluded of row.ineligibleObservations) {
+      console.log(
+        `      refused as evidence (${excluded.reason}): ${excluded.observationId}` +
+        `@${excluded.sessionId} — ${excluded.detail}`
+      );
+    }
     if (row.hasGolden) continue;
     for (const blocker of row.blockers) console.log(`      blocked (${blocker.code}): ${blocker.detail}`);
     if (row.blockers.length === 0) {
@@ -1221,19 +1288,30 @@ async function commandSettle(options) {
     // is the session-independence attestation for a golden that already cites
     // its digest, so overwriting one destroys evidence.
     const manifestPath = path.join(MANIFEST_DIR, `${row.fixtureId.replace(/^candidate-/, "")}.json`);
-    try {
-      await writeJson(manifestPath, manifest, { overwrite: false });
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      throw new Error(
-        `${manifestPath} already exists; refusing to overwrite a capture manifest. ` +
-        "If a golden already cites its digest, overwriting it destroys that golden's attestation."
-      );
-    }
 
     try {
+      // PROMOTE FIRST, WRITE SECOND. The manifest used to be written here,
+      // before the gate had been asked anything, and a refused promotion left
+      // it on disk. That is not a tidiness problem: a capture manifest is a
+      // session-independence ATTESTATION, so a blocked run deposited a signed
+      // claim about evidence the repository had just refused. Measured on this
+      // tree before the fix — delete the four self-citing goldens, run settle,
+      // and four untracked manifests appear attesting exactly the tainted
+      // pairs; `git checkout -- .` restores the deleted files and leaves those
+      // four behind, `node --test` stays green over all of them, and the next
+      // settle dies on `already exists` demanding a hand `rm` inside the
+      // evidence directory. Nothing here is written until the gate has passed.
       const { golden, captureManifestSha256 } = promoteSs2CandidateToGolden(candidate, observations, manifest);
       const goldenPath = path.join(GOLDEN_DIR, `${golden.fixtureId}.json`);
+      try {
+        await writeJson(manifestPath, manifest, { overwrite: false });
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+        throw new Error(
+          `${manifestPath} already exists; refusing to overwrite a capture manifest. ` +
+          "If a golden already cites its digest, overwriting it destroys that golden's attestation."
+        );
+      }
       await writeJson(goldenPath, golden, { overwrite: false });
       console.log(`Promoted ${candidate.fixtureId} -> ${golden.fixtureId}`);
       console.log(`  repetitions: ${golden.provenance.repetitions}`);

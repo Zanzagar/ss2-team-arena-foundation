@@ -505,7 +505,14 @@ it on paper. But for four of them the **first** cited observation is the record
 the candidate was authored from, so that match was guaranteed before any capture
 ran. Candidate and observation land in the *same commit*, at the same file size:
 
-| Golden | Cited observations | Copied from | Landed together | Second observation |
+**This table is the state BEFORE the re-promotion, kept because it is the
+record of the defect.** All four have since been re-promoted from every other
+committed record that matches them, and none now cites the record in its
+"Copied from" column — see `docs/integration/ss2-golden-harness.md` for what
+each cites today. The candidates are unchanged and still declare
+`provenance.authoredFrom`; what moved is which observations the GOLDENS rest on.
+
+| Golden | Cited observations (retired) | Copied from | Landed together | Second observation |
 | --- | --- | --- | --- | --- |
 | `golden-prisoner-normal-kill` | `obs-20260830-t1`, `obs-camp3` | `obs-20260830-t1` | `135f2115`, 15:45 | 17:56 |
 | `golden-prisoner-normal-kill-dir8` | `obs-20260830-u1`, `obs-camp4` | `obs-20260830-u1` | `5f45627`, 16:00 | 17:56 |

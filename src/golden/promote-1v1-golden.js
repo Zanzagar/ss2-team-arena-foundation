@@ -260,6 +260,37 @@ export function validateSs2DivergenceReport(report) {
 }
 
 /**
+ * Is this observation the very record the candidate was transcribed from?
+ *
+ * Exported because TWO surfaces have to answer it identically and they live in
+ * different files: this gate, which refuses such a record as evidence, and
+ * `computeCoverage` in tools/runtime-capture/campaign.mjs, which must not offer
+ * one to the gate in the first place. When those two disagreed, `settle` built
+ * a capture manifest over evidence the gate then refused — and, because the
+ * manifest was written before the promotion was attempted, left that manifest
+ * on disk attesting the tainted pair.
+ *
+ * Duplicating the comparison in the driver was the obvious alternative and is
+ * the worse one. It is a string equality over two fields; a drift in either
+ * would silence the driver's exclusion in the PERMISSIVE direction, and nothing
+ * would fail. One exported predicate cannot drift from itself.
+ *
+ * Keyed on `observationId`, never on the record's FILE NAME. Three committed
+ * records disagree with their own file names — obs-20260830-auto1.json carries
+ * `obs-diag`, auto2 carries `obs-nav6`, auto3 carries `obs-gold3` — so a
+ * filename-keyed implementation silently no-ops for three of the five
+ * transcribed candidates, which is exactly the shape of bug this project keeps
+ * finding.
+ */
+export function ss2ObservationIsCandidatesOwnSource(candidate, observation) {
+  return (
+    candidate?.provenance?.kind === GoldenProvenance.TRANSCRIBED &&
+    observation?.observationId !== undefined &&
+    observation.observationId === candidate.provenance.authoredFrom
+  );
+}
+
+/**
  * Promote one candidate fixture to a runtime-observed golden fixture.
  *
  * Returns `{ golden, captureManifestSha256, matches }`. Throws
@@ -367,10 +398,7 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
     // transcribed candidate stays fully promotable from two other observations
     // — the numbers in it may well be right, and independent captures can still
     // establish that. What it may never do is count its own source.
-    if (
-      candidate.provenance.kind === GoldenProvenance.TRANSCRIBED &&
-      observation.observationId === candidate.provenance.authoredFrom
-    ) {
+    if (ss2ObservationIsCandidatesOwnSource(candidate, observation)) {
       defer(new PromotionError(
         `Observation ${observation.observationId} is the record ${candidate.fixtureId} was authored ` +
         "from (provenance.authoredFrom), so it cannot serve as evidence for it. The candidate's " +
@@ -492,17 +520,31 @@ export function promoteSs2CandidateToGolden(candidate, observations, manifest, o
   //   matcher projection. That retraction measured two surfaces the original
   //   claim never used. The count was right and only the conclusion was wrong.
   //
-  // BUT DO NOT READ "HAS TEETH" AS "THIS GATE IS PROTECTING THE CORPUS." It is
-  // not, and the reason is upstream of here. ZERO of the observation ids the
-  // 22 goldens cite carries a `capture.launchNonce`; each is waived only by
-  // having its exact digest listed in `pre-nonce-observations.js`; and every
-  // forgery re-digests, so each one drops out of the waiver and is refused by
+  // THIS LOOP IS NOW REACHABLE FROM COMMITTED EVIDENCE, AND IT WAS NOT BEFORE.
+  // Do not restate the paragraph this replaces without re-measuring it.
+  //
+  // What stood here, and was true when written: ZERO of the observation ids
+  // the 22 goldens cited carried a `capture.launchNonce`; each was waived only
+  // by having its exact digest listed in `pre-nonce-observations.js`; every
+  // forgery re-digests, so each dropped out of the waiver and was refused by
   // the nonce check above — which `defer`s and throws roughly forty lines
-  // BEFORE this loop is reached. Excising this loop entirely changes zero
-  // verdicts on committed evidence. It fires only for nonce-bearing records,
-  // of which the goldens cite none, and `test/capture-campaign.test.js` pins
-  // both halves: that the loop refuses a callSite forgery on nonce-bearing
-  // evidence, and that no promotion the goldens rest on ever reaches it.
+  // BEFORE this loop is reached. Excising the loop changed zero verdicts.
+  //
+  // Re-promoting the four self-citing normal-band goldens off their own
+  // transcription sources moved that. The goldens now cite 60 distinct
+  // records, NINE of which carry a nonce (obs-cachecold, obs-cachewarm,
+  // obs-iso2, obs-par1-3, obs-pq1-3), spread across four goldens. Forging one
+  // of those nine leaves the waiver irrelevant, so the refusal falls through
+  // to this loop. `test/capture-campaign.test.js` pins the prediction rather
+  // than either count: forging a nonce-free cited record must be refused by
+  // the NONCE gate, forging a nonce-bearing one by THIS loop, and both
+  // branches must be non-empty — if the pairwise count returns to zero the
+  // gate is unreachable again and this comment is wrong again.
+  //
+  // BUT STILL DO NOT READ "HAS TEETH" AS "THIS GATE IS PROTECTING THE CORPUS."
+  // Reachable is not the same as load-bearing: what reaches it are FORGERIES
+  // the tests construct, and on honest evidence the loop refuses nothing that
+  // already stands.
   //
   // AND THE TEETH ARE NARROWER THAN THE COUNT SUGGESTS. All 407 committed
   // samples carry ONE callSite literal, because the wrapper has one roll

@@ -981,14 +981,22 @@ being ignored, because silently swallowing an operator's flag is its own
 hazard.
 
 `build-manifest.mjs` copies every manifest field out of the validated
-observation records and originates only `createdAt`. Rebuilding the
-hand-written `test/manifests/prisoner-dir6.json` from its two observations
-reproduces its canonical digest
-(`889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c`), which
-is the digest `golden-prisoner-normal-kill-dir6` already cites. Both observation
-records behind it (`obs-diag`, `obs-gold3`) ARE committed under
-`test/observations/ss2-1v1/`, so that rebuild can be re-run from this repository
-— see [observation records](#observation-records).
+observation records and originates only `createdAt`. Rebuilding
+`test/manifests/prisoner-normal-kill-dir6.json` from the nine observations it
+attests reproduces its canonical digest
+(`c123b7b1b544aa7ef4b5f42c7594953e406c87be8154e80becf936b7f6e9833e`), which
+is the digest `golden-prisoner-normal-kill-dir6` cites. Every record behind it
+is committed under `test/observations/ss2-1v1/`, so that rebuild can be re-run
+from this repository — see [observation records](#observation-records).
+
+The hand-written `test/manifests/prisoner-dir6.json` this paragraph used to
+name, digest `889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c`
+over `obs-diag` + `obs-gold3`, was retired with the promotion that cited it:
+`obs-diag` is the record dir6's candidate was transcribed from and can no
+longer be evidence for it. Note also that `createdAt` is stamped from the wall
+clock when `settle` runs and is not derivable from the records, so a manifest
+digest is reproducible from this repository but not re-derivable without the
+manifest file itself.
 
 `-SkipPipeline` on `run-capture.ps1`/`launch-capture.ps1` leaves the raw log
 for the campaign driver. Without it the launcher verifies against the one

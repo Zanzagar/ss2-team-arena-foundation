@@ -101,10 +101,19 @@ The promoted set:
 
 | Golden | Direction | Observations |
 | --- | --- | --- |
-| `golden-prisoner-normal-kill` | 7 | `obs-20260830-t1`, `obs-camp3` |
-| `golden-prisoner-normal-kill-dir5` | 5 | `obs-nav6`, `obs-camp1` |
-| `golden-prisoner-normal-kill-dir6` | 6 | `obs-diag`, `obs-gold3` |
-| `golden-prisoner-normal-kill-dir8` | 8 | `obs-20260830-u1`, `obs-camp4` |
+| `golden-prisoner-normal-kill` | 7 | `obs-camp3`, `obs-fr1`, `obs-pq3` |
+| `golden-prisoner-normal-kill-dir5` | 5 | `obs-cachecold`, `obs-cachewarm`, `obs-camp1`, `obs-fps480`, `obs-wfctl` |
+| `golden-prisoner-normal-kill-dir6` | 6 | `obs-gold3`, `obs-camp2`, `obs-fps240`, `obs-fps960`, `obs-fr2`, `obs-par2`, `obs-par3`, `obs-pq1`, `obs-pq2` |
+| `golden-prisoner-normal-kill-dir8` | 8 | `obs-camp4`, `obs-fr3`, `obs-iso2`, `obs-par1` |
+
+**These four were re-promoted.** Each previously cited, as one of its two
+"independent" observations, the record its own candidate had been transcribed
+from — `obs-20260830-t1`, `obs-nav6`, `obs-diag` and `obs-20260830-u1`
+respectively. A copy cannot fail to match its original, so those citations were
+never evidence. The four now rest on every OTHER committed record that matches
+them, which is why their evidence counts differ. Their scenario, samples and
+expected blocks are byte-identical to what they were: this changed provenance,
+not measurement.
 
 All four are the same staged scenario — the tutorial prisoner fight in
 `misc` mode, a lethal `normal_attack` — differing only in the attack direction

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-capture-manifest",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "captureToolVersion": "ss2-capture/0.1.0",
+  "createdAt": "2026-09-01T02:28:39.982Z",
+  "sessions": [
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-camp1"
+      ],
+      "observedAt": "2026-08-30T21:40:29Z",
+      "sessionId": "session-camp1"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-fps480"
+      ],
+      "observedAt": "2026-08-30T22:39:42Z",
+      "sessionId": "session-fps480"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-wfctl"
+      ],
+      "observedAt": "2026-08-30T23:59:02Z",
+      "sessionId": "session-wfctl"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-cachecold"
+      ],
+      "observedAt": "2026-08-31T00:58:51Z",
+      "sessionId": "session-cachecold"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-cachewarm"
+      ],
+      "observedAt": "2026-08-31T00:59:04Z",
+      "sessionId": "session-cachewarm"
+    }
+  ]
+}

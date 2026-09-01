@@ -93,11 +93,13 @@ and a reader should know which:
   capture method and the session id remain operator strings in the meta line
   and the manifest, so nothing in the repository can distinguish an honestly
   captured session from a well-formed forgery; that assurance comes from the
-  operating procedure, not from a test. For the **22 goldens already promoted**
-  the claim holds in its original literal form as well: not one of them cites a
-  nonce-bearing observation, so their independence is exactly the two operator
-  strings (9 of the 67 committed records carry a nonce, and none is cited by a
-  golden).
+  operating procedure, not from a test. **This paragraph used to add that the
+  claim held in its original literal form for all 22 promoted goldens, because
+  not one cited a nonce-bearing observation. That stopped being true when the
+  four self-citing normal-band goldens were re-promoted:** all 9 nonce-bearing
+  records are now cited, across 4 of the 22 goldens, so those four rest partly
+  on an identity the operator did not choose. The other 18 still rest on two
+  operator strings and the enumerated pre-nonce waiver.
 - **That anything the adapter dispatches matches the build.** No capture has
   ever observed a clip label, a depth, a position, or a panel instance. Those
   are static-map readings at best; the multi-slot half of them is authored mod

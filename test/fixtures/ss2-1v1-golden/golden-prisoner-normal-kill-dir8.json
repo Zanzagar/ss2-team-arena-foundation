@@ -15,18 +15,22 @@
       "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
       "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter"
     ],
-    "observedAt": "2026-08-30T21:50:38Z",
+    "observedAt": "2026-08-31T01:06:42Z",
     "captureToolVersion": "ss2-capture/0.1.0",
-    "repetitions": 2,
+    "repetitions": 4,
     "observationIds": [
-      "obs-20260830-u1",
-      "obs-camp4"
+      "obs-camp4",
+      "obs-fr3",
+      "obs-iso2",
+      "obs-par1"
     ],
     "observationDigests": [
-      "f381023de3b8d54e6815933eb0843a1e9ff781c7f4ceb27c8d2e1ce1006f0112",
-      "3c41f3f5cbf92d5796d4e170331153b6111f01a62a86113f0694a38c2c09ad3e"
+      "3c41f3f5cbf92d5796d4e170331153b6111f01a62a86113f0694a38c2c09ad3e",
+      "1ee5157e722c3280910e98701cea28566b04316c4edc21ba4e7c246f701e62e4",
+      "62ae3a0681043f634f552009c1a5e20cd27c57345486586eb5c9ea912cb3a58a",
+      "854ceec94b40e554eded538ef62f6be701ed2e599bbcc5e994606174bdfeceef"
     ],
-    "captureManifestSha256": "67138f57d5331fdec336666cc731e544ac355368670f74113b1941e96ccca06e"
+    "captureManifestSha256": "27bd7e204dd7b0f890d0359be4b67b043d5504734fb71e508c8bf7c0df3edaee"
   },
   "scenario": {
     "attackerSide": "hero",

@@ -7,27 +7,37 @@
     "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
   },
   "captureToolVersion": "ss2-capture/0.1.0",
-  "createdAt": "2026-08-30T21:43:27.809Z",
+  "createdAt": "2026-09-01T02:28:40.157Z",
   "sessions": [
     {
       "installHashVerifiedAfter": true,
       "installHashVerifiedBefore": true,
       "method": "injected-tape-runtime",
       "observationIds": [
-        "obs-nav6"
+        "obs-camp3"
       ],
-      "observedAt": "2026-08-30T21:13:09Z",
-      "sessionId": "session-nav6"
+      "observedAt": "2026-08-30T21:49:29Z",
+      "sessionId": "session-camp3"
     },
     {
       "installHashVerifiedAfter": true,
       "installHashVerifiedBefore": true,
       "method": "injected-tape-runtime",
       "observationIds": [
-        "obs-camp1"
+        "obs-fr1"
       ],
-      "observedAt": "2026-08-30T21:40:29Z",
-      "sessionId": "session-camp1"
+      "observedAt": "2026-08-30T22:34:11Z",
+      "sessionId": "session-fr1"
+    },
+    {
+      "installHashVerifiedAfter": true,
+      "installHashVerifiedBefore": true,
+      "method": "injected-tape-runtime",
+      "observationIds": [
+        "obs-pq3"
+      ],
+      "observedAt": "2026-08-31T01:18:29Z",
+      "sessionId": "session-pq3"
     }
   ]
 }

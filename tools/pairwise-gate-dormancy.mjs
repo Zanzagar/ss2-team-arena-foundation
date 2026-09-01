@@ -57,16 +57,20 @@
  *   excludes deliberately, because two honest records MUST differ there.
  *
  * AND THE PART THAT MATTERS MORE THAN THE HEADLINE. "HAS TEETH" describes the
- * FUNCTION, not this corpus. On the promotion path the gate still refuses
- * nothing at all: zero of the observation ids cited by the promoted goldens
- * carries a `capture.launchNonce`, all of them are waived only by digest, and
- * every forgery re-digests — so the NONCE gate refuses each one about forty
- * lines before the pairwise loop is reached. Excising the pairwise loop
- * entirely changes zero verdicts on committed evidence. It fires only for
- * nonce-bearing records, which the goldens cite none of.
+ * FUNCTION, not this corpus. This tool does not run the promotion path at all,
+ * so it cannot answer whether the gate is REACHED — read its answer as a fact
+ * about the matcher and the projection, nothing more.
  *
- * So the old comment reached a true conclusion about this corpus through
- * reasoning that is now false, and the two must be corrected separately.
+ * WHAT THIS HEADER USED TO ADD, AND WHY IT IS RETRACTED. It said the gate
+ * still refused nothing on the promotion path, because zero of the observation
+ * ids cited by the promoted goldens carried a `capture.launchNonce`, so the
+ * NONCE gate refused every forgery about forty lines earlier and excising the
+ * pairwise loop changed zero verdicts. That was measured and true of the
+ * corpus as it then stood. Re-promoting the four self-citing normal-band
+ * goldens off their transcription sources changed it: 9 nonce-bearing records
+ * are now cited, across 4 goldens, and a forgery on one of those reaches the
+ * pairwise loop. `test/capture-campaign.test.js` measures which gate refuses
+ * which forgery, record by record; take the answer from there, not from here.
  *
  * The real functions are imported from src/golden/observation.js and called
  * unmodified. A measurement of a reimplemented matcher would measure the
@@ -687,14 +691,16 @@ const DOES_NOT_PROVE = [
   "validateSs2Observation + matchSs2ObservationToFixture + ss2ObservationsMatch. On the real " +
   `promotion path the answer is different and worse: ${noncelessRecords} of the ${records.length} ` +
   "records carry no capture.launchNonce and are waived only by having their exact digest listed in " +
-  "src/golden/pre-nonce-observations.js — and ZERO of the observation ids cited by the promoted " +
-  "goldens carries one. Every forgery re-digests, so every forged copy leaves the waiver set and is " +
-  "refused by the NONCE gate, which is thrown roughly forty lines BEFORE the pairwise loop runs. " +
-  "Measured by excising only the pairwise loop from a counterfactual build and re-running every " +
-  "forgery class against every eligible golden: the pairwise gate changes ZERO verdicts on the " +
-  "corpus as committed. It fires only for nonce-bearing evidence, of which the goldens cite none. " +
-  "So HAS TEETH is a statement about the FUNCTION; on today's corpus the gate still refuses nothing " +
-  "— for a completely different reason than the one the retracted 'dormant' comment gave.",
+  "src/golden/pre-nonce-observations.js. THE SECOND HALF OF THIS PARAGRAPH WAS RETRACTED when the " +
+  "four self-citing normal-band goldens were re-promoted. It read: 'ZERO of the observation ids " +
+  "cited by the promoted goldens carries one ... the pairwise gate changes ZERO verdicts on the " +
+  "corpus as committed', measured by excising the loop from a counterfactual build. That was true " +
+  "of the corpus it was measured on. The goldens now cite 60 distinct records, NINE of them " +
+  "nonce-bearing across four goldens, so a forgery on one of those nine reaches the pairwise loop " +
+  "and the excision would change verdicts. This tool does NOT re-measure that — it never ran the " +
+  "promotion path — so take the count from test/capture-campaign.test.js, which forges every cited " +
+  "record of every golden and asserts which gate refuses each. What is unchanged: HAS TEETH is a " +
+  "statement about the FUNCTION, and reachable is not the same as protecting anything.",
 
   "It matches each record against the CANDIDATE its target names, which is what the promotion path " +
   "does, so it undercounts the gate's teeth by one whole class. The matcher additionally accepts a " +

@@ -15,18 +15,32 @@
       "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
       "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter"
     ],
-    "observedAt": "2026-08-30T21:29:43Z",
+    "observedAt": "2026-08-31T01:18:29Z",
     "captureToolVersion": "ss2-capture/0.1.0",
-    "repetitions": 2,
+    "repetitions": 9,
     "observationIds": [
-      "obs-diag",
-      "obs-gold3"
+      "obs-gold3",
+      "obs-camp2",
+      "obs-fps240",
+      "obs-fps960",
+      "obs-fr2",
+      "obs-par2",
+      "obs-par3",
+      "obs-pq1",
+      "obs-pq2"
     ],
     "observationDigests": [
-      "35243cba349b523414b2cf06ea6a149b93d75ab28227d4fc1545508fb97d18d8",
-      "296fb8bb88db24094de5fd3c3bf7469eb22d525c52e8721657d5fd4432c48939"
+      "296fb8bb88db24094de5fd3c3bf7469eb22d525c52e8721657d5fd4432c48939",
+      "722a2215214d2879fe406627321d4d3d13cc1dad03c7ae7c2579e3607c72598b",
+      "1782c24764f84d96dd62e37f1ba1662921d049b997bdac0e1da0572541926baa",
+      "f7676e5afb90accede163e8f695835606aba7177f091ed234fa94e0ecf62470d",
+      "a0c8d48edb1cfddeca7379cdbe41dd6dd2dd638d6aa6fef1700bdead672cf99b",
+      "d8d7b81beb0353c08e39822ca1951dccb4fc2d5e92d31fa0cb56fcc6f4114648",
+      "ecae067231e1071097dbc78bb857a42c61d1ad912ae7506a2ce7371540f16b8a",
+      "edfa614b9231dce2bb4cece0ce7e37ec526bd7a60e461ace4b927686be090d44",
+      "39901b845eee21be2d1b4f8e351bd17651e7e4ca217b82ab69e34e2179689b3c"
     ],
-    "captureManifestSha256": "889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c"
+    "captureManifestSha256": "c123b7b1b544aa7ef4b5f42c7594953e406c87be8154e80becf936b7f6e9833e"
   },
   "scenario": {
     "attackerSide": "hero",

@@ -131,8 +131,13 @@ check PR state with `git ls-remote github "refs/pull/*/head"`.
 
   **Four goldens counted their candidate's own source record as one of their two
   "independent" observations.** `135f211` says so in plain words and draws the
-  opposite conclusion. That is now REFUSED (`7856e2b`, `141e98a`). The four are
-  NOT yet re-promoted; the eligible records are committed and named in `7856e2b`.
+  opposite conclusion. That is now REFUSED (`7856e2b`, `141e98a`). **DONE
+  2026-08-31: all four are RE-PROMOTED, pipeline only, from every other
+  committed record that matches them** — 3, 5, 9 and 4 records respectively,
+  each from that many distinct sessions. Their scenario, samples and expected
+  blocks are byte-identical to what they were; only `provenance` moved. Read
+  the block "What the re-promotion did and did not establish" below before
+  quoting it as an independence result.
   What is NOT in question: the goldens' measurements. The game really does produce
   those outcomes. What was broken is the provenance argument, and for four of them
   the independence of the pair.
@@ -195,8 +200,8 @@ that derivation was impossible — and five wrong rows in the `staminacost` tabl
 notably `rest`, which is `0 - round(stamina*15)`, a GAIN, not 0.
 
 Not yet done, in priority order (the projection/exclusion hazard and the copy
-hole that led this list are both closed — see the paragraph above): re-promote
-the four goldens from eligible records (pipeline only, never by hand); correct the
+hole that led this list are both closed — see the paragraph above; ~~re-promote
+the four goldens from eligible records~~ **DONE 2026-08-31**): correct the
 CONTRADICTED scalars in non-promoted fixtures (7 of 9 misc-a carry a
 strength/damage triple no weapon row in the build produces; two pin an enchantment
 potency of 5 against a cap of 3; spell `damageMethod: null` for ids 31/32/35 where
@@ -485,12 +490,16 @@ ones that change what the next session should DO are marked ►.
   connected it to. It is not a separate hole to close; it is a reason the nonce
   residual outranks its current billing as "smaller than what it replaced".
 
-  **This bears directly on the re-promotion of the four self-citing goldens
-  (next-steps item below).** `test/capture-campaign.test.js` asserts those four
-  cannot be re-promoted from their own source record. That assertion is true of
-  the honest pipeline and bypassable by a forger, which are different
-  guarantees. Re-promote them from genuinely independent nonce-bearing evidence;
-  do not treat the gate as proof the pipeline cannot be walked past.
+  **The re-promotion this bullet pointed at is DONE (2026-08-31), and the
+  advice in it was only half achievable.** The four were re-promoted from
+  independent evidence, and 9 nonce-bearing records are now cited — but
+  "genuinely independent NONCE-BEARING evidence" was not available for all of
+  them: `golden-prisoner-normal-kill` rests on three records of which ONE
+  carries a nonce, so it has zero comparable nonce pairs and its independence is
+  still two operator-chosen strings plus the blanket pre-nonce waiver. The
+  assertion this bullet described no longer exists; see "What the re-promotion
+  did and did not establish" below for what replaced it and why deleting it as
+  its own comment prescribed would have been a mistake.
 
 ► **`capture.observedAt` is free end to end, and nothing anywhere checks it.**
   Its only consumer on the promotion path is the stamp that writes the golden's
@@ -681,6 +690,79 @@ capture window deliberately closes before `nextphase`
 `staminaBonus` is 0 and the field is a pure echo of the scenario value. The pin
 costs six exact-equality constraints per fixture, none related to deflection
 thresholds, armour removal, or the equality quirk these fixtures exist to test.
+
+### What the re-promotion did and did not establish
+
+Landed 2026-08-31. All four self-citing normal-band goldens were re-promoted
+through `campaign.mjs settle`, from every other committed record that matches
+them. **Read the limits before quoting this as an independence result** — a
+write-nothing verifier aimed at exactly that claim returned BROKEN, and it was
+right.
+
+WHAT IS TRUE. Each golden has stopped citing the record its own candidate was
+transcribed from, so each now rests only on records that COULD have refuted it.
+Evidence went 2 -> 3, 2 -> 5, 2 -> 9 and 2 -> 4 records. Nine nonce-bearing
+records are cited where zero were before, and the pairwise gate is now
+REACHABLE from committed evidence for the first time. Scenario, samples and
+expected are byte-identical: this changed provenance, not measurement.
+
+WHAT IS NOT. **The corpus cannot distinguish an honest repeat from a copy, and
+this change does not alter that.** Measured with the project's own
+`canonicalJsonStringify`: for each of the four candidates, EVERY matching
+record — the refused source record included — collapses to ONE content group
+once `observationId`, `digest`, `capture.sessionId`, `capture.observedAt` and
+the attestation keys are stripped. `obs-camp3` differs from `obs-20260830-t1`
+in exactly four leaves, and from `obs-fr1` in the same four. That is what a
+deterministic outcome recorded twice looks like AND what a copy looks like;
+nothing in the normalized record separates them. The one artifact that could —
+the raw trace — is in `captures/`, which is gitignored and Windows-side, so
+**this question is not adjudicable from a WSL clone at all.**
+
+Read the per-golden strength honestly. `golden-prisoner-normal-kill-dir6` is
+the strong one: 9 records, 4 nonces, two separate launcher invocations, a
+3h49m span. `golden-prisoner-normal-kill` is the weak one: 3 records, ONE
+nonce, so zero comparable nonce pairs, and the other two are four-leaf twins of
+the record the gate just refused.
+
+Two caveats a future reader should not have to rediscover:
+
+- **`provenance.observedAt` gets LESS informative as evidence grows.** It is
+  the max of the cited records' `capture.observedAt` (and that field is stamped
+  by the launcher BEFORE Ruffle starts, so it is not when anything was
+  observed). dir6's now summarises a 3h49m span in one scalar, with no span
+  field anywhere on the golden.
+- **`repetitions` counts RECORDS, not occasions.** dir6's 9 records come from 7
+  wall-clock occasions: `obs-par2`/`obs-par3` share a timestamp and
+  `obs-pq1`/`obs-pq2` share another, being concurrent arms of one
+  `run-campaign.ps1 -Concurrency 3`. They carry distinct minted nonces, so they
+  are distinct player launches; they are not distinct sittings.
+
+Three defects were found by the verifiers and fixed in the same commit, each of
+which would have made this change a net loss:
+
+- **`settle` wrote the capture manifest BEFORE asking the gate**, and never
+  rolled it back. A refused run therefore deposited a session-independence
+  attestation for evidence the repository had just refused — and `git checkout
+  -- .` does not remove an untracked file, so the wreckage survived the obvious
+  cleanup with the suite fully green over it. It now promotes first and writes
+  second.
+- **Nothing walked manifest -> golden.** 26 manifests against 22 goldens passed
+  the whole suite. `test/capture-campaign.test.js` now asserts every committed
+  manifest is cited by a golden, and the four attesting the retired pairs were
+  deleted with the promotions that cited them.
+- **The self-citation test's own comment prescribed deleting it, and that was
+  wrong.** Deleting it leaves `goldenPartition.eligible` as a silent filter in
+  front of the reproduction loop: measured, re-planting a self-citing golden
+  REMOVED a failure — nine with the plant, ten without, none naming it. The
+  partition is gone instead, so the reproduction loop runs the gate over all 22
+  goldens and a self-citing one fails by name.
+
+**`captureManifestSha256` is a fact about when `settle` ran, not about the
+evidence.** `buildSs2CaptureManifest` defaults `createdAt` to the wall clock and
+the driver passes nothing, so two settle runs over identical records produce
+different goldens. This is how all 22 committed manifests were made and was NOT
+changed here; reproducibility runs through the committed manifest file, which
+carries its own `createdAt`. Worth fixing, deliberately, as its own change.
 
 ### Still open, with the evidence below the archive line
 

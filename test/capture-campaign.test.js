@@ -64,8 +64,14 @@ const FAMILY = "prisoner-normal-kill";
  * The digest docs/integration/ss2-runtime-capture.md names as the one the
  * rebuild must reproduce, and that golden-prisoner-normal-kill-dir6 cites.
  * Written out literally so a change to either side is a visible diff here.
+ *
+ * Moved when dir6 was re-promoted off its own transcription source. The old
+ * value, 889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c,
+ * attested [obs-diag, obs-gold3] — obs-diag being the record dir6's candidate
+ * was copied out of — and its manifest file was retired with the promotion
+ * that cited it.
  */
-const DIR6_MANIFEST_SHA256 = "889e099e00f67b66199f7fc0b23642feb603362725197d9721dcb69e0bcefd6c";
+const DIR6_MANIFEST_SHA256 = "c123b7b1b544aa7ef4b5f42c7594953e406c87be8154e80becf936b7f6e9833e";
 
 const cloneJson = (value) => JSON.parse(JSON.stringify(value));
 const readJson = async (filePath) => JSON.parse(await readFile(filePath, "utf8"));
@@ -267,7 +273,22 @@ const jsonFileNames = async (root, ...segments) => {
 
 const dir6Candidate = candidateById.get(`candidate-${FAMILY}-dir6`);
 const dir6Golden = goldenById.get(`golden-${FAMILY}-dir6`);
-const dir6ManifestEntry = manifestByObservationIds.get(idKey(["obs-diag", "obs-gold3"]));
+/**
+ * dir6's cited evidence and the manifest that attests it, both DERIVED from
+ * the committed golden rather than listed. A re-promotion moves both together
+ * and every test below follows; a listed pair would have to be hand-edited,
+ * which is how a test ends up pinned to evidence that has been retired.
+ */
+const dir6CitedIds = dir6Golden.provenance.observationIds;
+const dir6ManifestEntry = manifestByObservationIds.get(idKey(dir6CitedIds));
+
+/**
+ * Two records that are eligible evidence for dir6 — neither is its
+ * `authoredFrom` — used wherever a test needs "some matching pair" rather than
+ * dir6's actual evidence. They were `["obs-diag", "obs-gold3"]` until obs-diag
+ * stopped counting as evidence for the candidate transcribed out of it.
+ */
+const DIR6_ELIGIBLE_PAIR = ["obs-gold3", "obs-camp2"];
 
 /** Two spell candidates whose spell ids differ, so they form a lawful family. */
 const spellLethal = candidateById.get("candidate-spell-lethal-slain");
@@ -279,6 +300,12 @@ const summarize = (row) => ({
   goldenId: row.goldenId,
   hasGolden: row.hasGolden,
   observationIds: sortedIds(row.observations.map((observation) => observation.observationId)),
+  // Records that match but are refused as evidence. Summarized alongside the
+  // counted ones so a row that dropped a record can never be deep-equal to a
+  // row that never had one.
+  ineligibleObservationIds: sortedIds(
+    row.ineligibleObservations.map((observation) => observation.observationId)
+  ),
   sessionCount: row.sessionCount,
   promotable: row.promotable
 });
@@ -304,19 +331,27 @@ test("rebuilding every committed capture manifest from its own observations repr
 test("the rebuilt dir6 manifest carries the digest golden-prisoner-normal-kill-dir6 cites", () => {
   const committed = dir6ManifestEntry.value;
   const { manifest, digest } = buildSs2CaptureManifest(
-    recordsFor(["obs-diag", "obs-gold3"]),
+    recordsFor(dir6CitedIds),
     { createdAt: committed.createdAt }
   );
 
-  // Both observations really do come from test/observations/ss2-1v1/obs-20260830-auto{1,3}.json,
-  // whose file names deliberately do not match the observation ids they carry.
-  assert.equal(path.basename(observationFileById.get("obs-diag")), "obs-20260830-auto1.json");
+  // A record's file name is not its observation id, and keying on the wrong
+  // one is a trap this repository has fallen into. obs-gold3 is cited by dir6
+  // and lives in obs-20260830-auto3.json; obs-diag, which dir6 was transcribed
+  // FROM and no longer cites, lives in obs-20260830-auto1.json. Both are
+  // asserted, so the mismatch stays covered whichever side of the eligibility
+  // line the record is on.
   assert.equal(path.basename(observationFileById.get("obs-gold3")), "obs-20260830-auto3.json");
+  assert.equal(path.basename(observationFileById.get("obs-diag")), "obs-20260830-auto1.json");
 
   assert.equal(digest, DIR6_MANIFEST_SHA256);
   assert.equal(digest, computeSs2CaptureManifestDigest(committed));
   assert.equal(digest, dir6Golden.provenance.captureManifestSha256);
-  assert.deepEqual(manifest.sessions.map((session) => session.sessionId), ["session-diag", "session-gold3"]);
+  assert.deepEqual(
+    manifest.sessions.flatMap((session) => session.observationIds).sort(),
+    [...dir6CitedIds].sort(),
+    "the manifest must attest exactly the records the golden cites"
+  );
 });
 
 test("EVERY promoted golden cites a manifest the repository can reproduce", () => {
@@ -345,6 +380,41 @@ test("EVERY promoted golden cites a manifest the repository can reproduce", () =
   }
 });
 
+test("EVERY committed manifest is cited by a golden, so none attests retired evidence", () => {
+  // THE CONVERSE OF THE TEST ABOVE, and it was missing. That one walks
+  // golden -> manifest and catches a dangling citation; nothing walked
+  // manifest -> golden, so a manifest that no golden cites sat in the evidence
+  // directory undetected. Measured before this landed: with the four
+  // self-citing goldens re-promoted, the four manifests attesting the retired
+  // pairs survived untouched — 26 manifests against 22 goldens — and the suite
+  // was FULLY GREEN over all of them. They were not skipped: the rebuild test
+  // above loads test/manifests/ by directory scan, so each one was read,
+  // rebuilt, validated and passed.
+  //
+  // A capture manifest is a session-independence ATTESTATION. One that no
+  // golden cites is a signed claim about evidence with nothing standing behind
+  // it, and the four in question attested exactly the transcription-source
+  // pairs the re-promotion existed to retire. `settle` can produce this state
+  // on its own — it names manifests after the candidate, so a manifest written
+  // under an older naming scheme is never overwritten, only orphaned.
+  const citedDigests = new Map(
+    goldenEntries.map((entry) => [entry.value.provenance.captureManifestSha256, entry.value.fixtureId])
+  );
+  assert.ok(manifestEntries.length > 0, `no manifests found: the directory scan is wrong`);
+  const orphans = manifestEntries.filter(
+    (entry) => !citedDigests.has(computeSs2CaptureManifestDigest(entry.value))
+  );
+  assert.deepEqual(
+    orphans.map((entry) => `${entry.name} attesting ${manifestObservationIds(entry.value).join(", ")}`),
+    [],
+    "committed manifests that no golden cites; retire them with the promotion that cited them"
+  );
+  // And the correspondence is one-to-one in both directions, so a manifest
+  // cannot be shared by two goldens or counted twice.
+  assert.equal(manifestEntries.length, goldenEntries.length);
+  assert.equal(citedDigests.size, goldenEntries.length, "two goldens cite one manifest digest");
+});
+
 test("the four prisoner-normal-kill directions are all promoted", () => {
   assert.equal(familyGoldens.length, 4, "all four directions of the family should be promoted goldens");
 });
@@ -352,7 +422,7 @@ test("the four prisoner-normal-kill directions are all promoted", () => {
 test("createdAt is the only field the builder originates", () => {
   const committed = dir6ManifestEntry.value;
   const startedAt = Date.now();
-  const { manifest } = buildSs2CaptureManifest(recordsFor(["obs-diag", "obs-gold3"]));
+  const { manifest } = buildSs2CaptureManifest(recordsFor(dir6CitedIds));
 
   assert.ok(!Number.isNaN(Date.parse(manifest.createdAt)), "createdAt must be a parseable timestamp");
   assert.ok(Date.parse(manifest.createdAt) >= startedAt, "an omitted createdAt is stamped now, not copied");
@@ -387,10 +457,10 @@ test("two observations from one session collapse into a single manifest session,
 
 test("session order is chronological, so the digest does not depend on record order", () => {
   const committed = dir6ManifestEntry.value;
-  const forward = buildSs2CaptureManifest(recordsFor(["obs-diag", "obs-gold3"]), {
+  const forward = buildSs2CaptureManifest(recordsFor(dir6CitedIds), {
     createdAt: committed.createdAt
   });
-  const reversed = buildSs2CaptureManifest(recordsFor(["obs-gold3", "obs-diag"]), {
+  const reversed = buildSs2CaptureManifest(recordsFor([...dir6CitedIds].reverse()), {
     createdAt: committed.createdAt
   });
 
@@ -400,9 +470,28 @@ test("session order is chronological, so the digest does not depend on record or
   // caller read them off disk — `settle` supplies them in readdir order, so
   // without this the same evidence would digest differently on a filesystem
   // that enumerates differently.
-  const chronological = ["session-diag", "session-gold3"];
-  assert.deepEqual(forward.manifest.sessions.map((session) => session.sessionId), chronological);
-  assert.deepEqual(reversed.manifest.sessions.map((session) => session.sessionId), chronological);
+  // Derived from the records rather than listed, and it exercises the TIE
+  // BREAK for the first time. The builder sorts on `observedAt` and breaks ties
+  // on `sessionId` "so the ordering is total"; dir6's evidence contains two
+  // tied pairs (session-par2/par3 both 2026-08-31T01:06:42Z, session-pq1/pq2
+  // both 01:18:29Z), so reversing the input reverses two tied pairs. The old
+  // two-record version of this test had no tie in it and could not have caught
+  // a missing tiebreak at all.
+  const observedAtOf = (sessionId) => forward.manifest.sessions
+    .find((session) => session.sessionId === sessionId).observedAt;
+  const order = forward.manifest.sessions.map((session) => session.sessionId);
+  assert.ok(order.length >= 4, `too few sessions (${order.length}) to test ordering`);
+  assert.deepEqual(reversed.manifest.sessions.map((session) => session.sessionId), order);
+  assert.deepEqual(
+    [...order].sort((left, right) =>
+      Date.parse(observedAtOf(left)) - Date.parse(observedAtOf(right)) || left.localeCompare(right)),
+    order,
+    "sessions are not ordered by capture time with sessionId breaking ties"
+  );
+  assert.ok(
+    new Set(forward.manifest.sessions.map((session) => session.observedAt)).size < order.length,
+    "no two sessions share an observedAt, so this input cannot exercise the tie break"
+  );
   assert.equal(forward.digest, DIR6_MANIFEST_SHA256);
   assert.equal(reversed.digest, DIR6_MANIFEST_SHA256);
   assert.equal(validateSs2CaptureManifest(reversed.manifest), reversed.manifest);
@@ -567,65 +656,116 @@ test("computeCoverage reports the prisoner-normal-kill family as fully promoted"
   }
 });
 
-test("coverage counts exactly the observations that match each candidate", async () => {
+test("coverage accounts for every matching observation, as evidence or as refused", async () => {
+  // THE CONTRACT, and it changed. It used to be "coverage counts exactly what
+  // `matchSs2ObservationToFixture` accepts". It is now "coverage PARTITIONS
+  // what the matcher accepts into evidence and refused-with-a-reason, and
+  // loses nothing" — because `settle` promotes from `row.observations`, so a
+  // record the gate will refuse must not be in it, and a record that silently
+  // vanishes is a cap this driver forbids.
+  //
+  // The partition is what makes this stronger rather than weaker: a bug that
+  // dropped a record on the floor passed the old assertion only if it also
+  // fooled the recomputation, but a bug that dropped one QUIETLY now has
+  // nowhere to hide, because the two halves must still sum to the matcher's
+  // own answer.
   const coverage = await computeCoverage(FAMILY);
   const loaded = await loadFamily(FAMILY);
 
+  let refused = 0;
   for (const row of coverage.rows) {
     const fixture = loaded.byActionKey.get(row.action.key).fixture;
     const genuinelyMatching = observationEntries
       .filter((entry) => matchSs2ObservationToFixture(fixture, entry.value).match)
       .map((entry) => entry.value.observationId);
+    const counted = row.observations.map((observation) => observation.observationId);
+    const declined = row.ineligibleObservations.map((observation) => observation.observationId);
     assert.deepEqual(
-      sortedIds(row.observations.map((observation) => observation.observationId)),
+      sortedIds([...counted, ...declined]),
       sortedIds(genuinelyMatching),
-      `${row.action.label} coverage disagrees with matchSs2ObservationToFixture`
+      `${row.action.label} coverage loses or invents an observation the matcher accepted`
     );
+    // The two halves are disjoint: no record is both evidence and refused.
+    assert.equal(new Set([...counted, ...declined]).size, counted.length + declined.length);
+    // Every refusal names a reason and the record it refused, and the record
+    // really is the candidate's declared source.
+    for (const observation of row.ineligibleObservations) {
+      assert.equal(observation.reason, "authored-from");
+      assert.equal(observation.observationId, fixture.provenance.authoredFrom);
+      assert.equal(observation.filePath, observationFileById.get(observation.observationId));
+      refused += 1;
+    }
     // No observation is evidence for two directions at once.
     for (const cited of row.observations) {
       assert.equal(observationById.get(cited.observationId).target.fixtureId, row.fixtureId);
     }
   }
+  // All four members of this family are transcribed candidates whose source
+  // record is committed, so the refusal path must have run four times. Zero
+  // would mean the split had quietly stopped firing.
+  assert.equal(refused, 4, "the authoredFrom refusal did not fire for every member of this family");
   const counted = coverage.rows.flatMap((row) => row.observations.map((o) => o.observationId));
   assert.equal(new Set(counted).size, counted.length, "an observation must not back two directions");
 });
 
 /**
- * Every committed golden, split by whether its cited evidence is eligible.
+ * Every committed golden with its candidate. NOT PARTITIONED, and the removal
+ * of that partition is the point.
  *
- * A golden is SELF-CITING when its `observationIds` include the record its own
- * candidate was transcribed from. Such a golden was promoted counting a copy of
- * itself as one of the two independent confirmations, so it is not reproducible
- * under the corrected gate and must not be.
+ * This used to be split into `eligible` and `selfCiting`, because four goldens
+ * cited the record their own candidate was transcribed from and so could not
+ * be reproduced by the gate. The reproduction loop below walked only the
+ * eligible half. That made the partition a SILENT FILTER, and it was measured
+ * doing exactly what a silent filter does: with the split in place, reverting
+ * one golden to its self-citing form REMOVED a failure from the suite — nine
+ * failures with the plant, ten without, and not one of them naming the
+ * offender. A self-citing golden was cheaper to hold than an honest one.
  *
- * The split is DERIVED, never listed: it reads `provenance.authoredFrom` off the
- * candidate. Land a re-promotion and a golden moves from one partition to the
- * other on its own, and both tests below react.
+ * With all four re-promoted there is nothing left to partition around, so
+ * every golden goes through one loop that RUNS THE GATE. A golden that cites
+ * its own source record now fails that loop by name, which is the behaviour
+ * the split was standing in for.
  */
-const goldenPartition = { eligible: [], selfCiting: [] };
-for (const golden of goldenEntries.map((entry) => entry.value)) {
+const goldenPairs = goldenEntries.map((entry) => entry.value).map((golden) => {
   const candidateId = `candidate-${golden.fixtureId.slice("golden-".length)}`;
   const candidate = candidateById.get(candidateId);
   assert.ok(candidate, `${candidateId} is missing`);
-  const bucket = golden.provenance.observationIds.includes(candidate.provenance.authoredFrom)
-    ? goldenPartition.selfCiting
-    : goldenPartition.eligible;
-  bucket.push({ golden, candidate, candidateId });
-}
+  return { golden, candidate, candidateId };
+});
+
+test("no committed golden cites the record its own candidate was transcribed from", () => {
+  // Stated separately from the reproduction loop so the failure names the
+  // defect rather than a downstream symptom. The loop below would also fail,
+  // with "not reproducible from its evidence", which is true but does not say
+  // why.
+  const declared = goldenPairs.filter(({ candidate }) =>
+    candidate.provenance.kind === "transcribed-observation");
+  assert.ok(
+    declared.length > 0,
+    "no promoted golden comes from a transcribed candidate, so this assertion is vacuous"
+  );
+  for (const { golden, candidate, candidateId } of declared) {
+    assert.equal(
+      golden.provenance.observationIds.includes(candidate.provenance.authoredFrom),
+      false,
+      `${golden.fixtureId} cites ${candidate.provenance.authoredFrom}, the record ${candidateId} was ` +
+      "transcribed from. A copy cannot fail to match its original, so that citation is not evidence. " +
+      "Re-promote from records captured independently of the transcription."
+    );
+  }
+});
 
 test("the settle recipe reproduces every committed golden byte for byte", () => {
   // Widened from this one family to the whole corpus when the self-citation
   // split landed: with all four normal-band goldens self-citing, a
   // family-scoped loop would have had nothing left to iterate and would have
-  // passed while asserting nothing.
-  assert.equal(
-    goldenPartition.eligible.length + goldenPartition.selfCiting.length,
-    goldenEntries.length,
-    "the partition must cover every committed golden"
-  );
-  assert.ok(goldenPartition.eligible.length > 0, "no golden left to reproduce: this test would be vacuous");
+  // passed while asserting nothing. It now walks EVERY golden, with no
+  // partition in front of it — see the comment on `goldenPairs` for why the
+  // exemption list was more dangerous than the goldens it exempted.
+  assert.equal(goldenPairs.length, goldenEntries.length, "every committed golden must be walked");
+  assert.ok(goldenPairs.length > 0, "no golden to reproduce: this test would be vacuous");
 
-  for (const { golden, candidate } of goldenPartition.eligible) {
+  for (const { golden, candidate } of goldenPairs) {
     const ids = golden.provenance.observationIds;
     const manifestEntry = manifestByObservationIds.get(idKey(ids));
     assert.ok(manifestEntry, `${golden.fixtureId} has no committed manifest for ${idKey(ids)}`);
@@ -636,37 +776,6 @@ test("the settle recipe reproduces every committed golden byte for byte", () => 
     assert.deepEqual(promoted.golden, golden, `${golden.fixtureId} is not reproducible from its evidence`);
     assert.equal(promoted.captureManifestSha256, golden.provenance.captureManifestSha256);
     assert.equal(promoted.matches.length, ids.length);
-  }
-});
-
-test("a golden that cites its own candidate's source record is not re-promotable", () => {
-  // NOT a hypothetical, and not a schema opinion. Four committed goldens were
-  // promoted counting the very observation their candidate's scenario and tape
-  // were transcribed from as one of the two independent confirmations. A copy
-  // cannot fail to match its original, so that observation confirmed nothing
-  // and the pair was never two pieces of evidence.
-  //
-  // This asserts the consequence by RUNNING the gate rather than by describing
-  // it. Re-promoting these four from independent evidence is the capture
-  // pipeline's job; when that lands they move into the eligible partition, the
-  // reproduction loop above picks them up, and this test fails and should be
-  // deleted rather than adjusted.
-  assert.ok(
-    goldenPartition.selfCiting.length > 0,
-    "every golden now cites eligible evidence: delete this test, the loop above covers them"
-  );
-  for (const { golden, candidate, candidateId } of goldenPartition.selfCiting) {
-    assert.equal(candidate.provenance.kind, "transcribed-observation", candidateId);
-    const ids = golden.provenance.observationIds;
-    const records = recordsFor(ids);
-    const { manifest } = buildSs2CaptureManifest(records, {
-      createdAt: manifestByObservationIds.get(idKey(ids)).value.createdAt
-    });
-    assert.throws(
-      () => promoteSs2CandidateToGolden(candidate, records, manifest),
-      new RegExp(`${candidate.provenance.authoredFrom} is the record ${candidateId} was authored from`),
-      `${golden.fixtureId} must not be re-promotable from the record it was copied from`
-    );
   }
 });
 
@@ -740,47 +849,97 @@ test("the pairwise gate can refuse a promotion, and does it on callSite", () => 
   }
 });
 
-test("no promotion the committed goldens rest on ever reaches the pairwise gate", () => {
-  // THE CORRECTION THIS FILE EXISTS TO CARRY, and it is the opposite of the
-  // one above. The gate has teeth, and on the evidence this repository holds
-  // those teeth never get a turn: ZERO of the observation ids the goldens cite
-  // carries a launchNonce, all of them are waived only by having their exact
-  // digest listed in `pre-nonce-observations.js`, and every forgery re-digests
-  // — so each one drops out of the waiver and the NONCE gate refuses it about
-  // forty lines before the pairwise loop runs.
+test("which gate refuses a forgery is decided by the forged record's nonce, golden by golden", () => {
+  // THE CORRECTION THIS FILE CARRIES, and it has now moved once. It used to
+  // assert `reachedPairwise === 0`: ZERO of the observation ids the goldens
+  // cited carried a `launchNonce`, every one was waived only by having its
+  // exact digest listed in `pre-nonce-observations.js`, every forgery
+  // re-digests and so drops out of that waiver, and the NONCE gate refused it
+  // about forty lines before the pairwise loop ran. The pairwise gate had
+  // teeth and never got a turn.
   //
-  // This is asserted because the two facts are easy to conflate, and the
-  // conflation is dangerous in the permissive direction: "the pairwise gate
-  // has teeth" invites landing a field exclusion on the strength of a gate
-  // that, on committed evidence, is refusing nothing.
+  // Re-promoting the four self-citing goldens changed that fact — nine cited
+  // ids now carry a nonce — and the old test's own instructions were to NARROW
+  // it to the goldens that still cite nonce-free records. That repair was
+  // measured and rejected: the narrowing predicate and the asserted outcome are
+  // the same proposition, so the test would restate its own filter, could no
+  // longer fail, and would drop every re-promoted golden — the entire subject
+  // of the change — out of the probe.
   //
-  // It is a live tripwire rather than a monument. Re-promote any golden from
-  // nonce-bearing evidence and its refusal moves to the pairwise gate, this
-  // test goes red, and it should be narrowed to the goldens that still cite
-  // nonce-free records rather than deleted.
+  // So it is widened instead. Every cited record of every golden is forged in
+  // turn, and the outcome is PREDICTED from that record alone: forging a
+  // nonce-free record re-digests it out of the waiver, so the nonce gate
+  // refuses; forging a nonce-bearing record leaves the waiver irrelevant, so
+  // the refusal falls through to the pairwise comparison. Both branches are
+  // now exercised by committed evidence, both counts are derived from the
+  // corpus rather than written down, and either can fail.
   let reachedPairwise = 0;
   let refusedByNonce = 0;
   let probed = 0;
+  let expectedPairwise = 0;
 
-  for (const { golden, candidate } of goldenPartition.eligible) {
+  for (const { golden, candidate } of goldenPairs) {
     const records = recordsFor(golden.provenance.observationIds);
     assert.ok(records.length >= 2, `${golden.fixtureId} cites fewer than two records`);
-    const forged = [cloneJson(records[0]), forgeCallSite(records[1])];
-    const { manifest } = buildSs2CaptureManifest(forged, { createdAt: "2026-08-31T12:00:00Z" });
-    probed += 1;
-    try {
-      promoteSs2CandidateToGolden(candidate, forged, manifest);
-      assert.fail(`${golden.fixtureId} promoted from a forged record`);
-    } catch (error) {
-      if (/disagree with EACH OTHER/.test(error.message)) reachedPairwise += 1;
-      else if (/carries no capture\.launchNonce/.test(error.message)) refusedByNonce += 1;
-      else throw error;
+
+    // CONTROL. The honest evidence must promote, or a refusal below would only
+    // prove the evidence was bad.
+    const manifestEntry = manifestByObservationIds.get(idKey(golden.provenance.observationIds));
+    assert.ok(manifestEntry, `${golden.fixtureId} has no committed manifest`);
+    assert.ok(
+      promoteSs2CandidateToGolden(candidate, recordsFor(golden.provenance.observationIds),
+        buildSs2CaptureManifest(recordsFor(golden.provenance.observationIds),
+          { createdAt: manifestEntry.value.createdAt }).manifest).golden,
+      `${golden.fixtureId} does not promote from its own cited evidence`
+    );
+
+    for (let index = 0; index < records.length; index += 1) {
+      const forged = records.map((record, position) =>
+        position === index ? forgeCallSite(cloneJson(record)) : cloneJson(record));
+      // The matcher is blind to callSite, so nothing upstream of the two gates
+      // can refuse this. If that ever stops being true the divergence check
+      // fires first and the `else throw` below reports it.
+      assert.equal(
+        matchSs2ObservationToFixture(candidate, forged[index]).match,
+        true,
+        `${golden.fixtureId}: the forged record stopped matching, so the matcher is refusing it instead`
+      );
+      const forgedNonceBearing = records[index].capture.launchNonce !== undefined;
+      if (forgedNonceBearing) expectedPairwise += 1;
+      const { manifest } = buildSs2CaptureManifest(forged, { createdAt: "2026-08-31T12:00:00Z" });
+      probed += 1;
+      try {
+        promoteSs2CandidateToGolden(candidate, forged, manifest);
+        assert.fail(`${golden.fixtureId} promoted from a forged record`);
+      } catch (error) {
+        const where = /disagree with EACH OTHER/.test(error.message)
+          ? "pairwise"
+          : /carries no capture\.launchNonce/.test(error.message)
+            ? "nonce"
+            : null;
+        if (where === null) throw error;
+        assert.equal(
+          where,
+          forgedNonceBearing ? "pairwise" : "nonce",
+          `${golden.fixtureId}: forging ${records[index].observationId} ` +
+          `(launchNonce ${forgedNonceBearing ? "present" : "absent"}) was refused by the ${where} gate`
+        );
+        if (where === "pairwise") reachedPairwise += 1; else refusedByNonce += 1;
+      }
     }
   }
 
-  assert.ok(probed > 0, "no eligible golden to probe: this test would be vacuous");
-  assert.equal(refusedByNonce, probed, "an eligible golden was not refused by the nonce gate");
-  assert.equal(reachedPairwise, 0, "a forgery reached the pairwise gate — narrow this test, do not delete it");
+  assert.ok(probed > 0, "no golden to probe: this test would be vacuous");
+  assert.equal(reachedPairwise + refusedByNonce, probed);
+  assert.equal(reachedPairwise, expectedPairwise);
+  // BOTH branches must be non-empty, or one of them is asserting nothing. The
+  // pairwise count was zero on committed evidence until the four normal-band
+  // goldens were re-promoted onto nonce-bearing records; if it returns to zero
+  // the gate has stopped being reachable from any promotion this repository
+  // rests on, and "the pairwise gate protects the corpus" is again an argument
+  // nobody has.
+  assert.ok(reachedPairwise > 0, "no forgery reached the pairwise gate: it is unreachable again");
+  assert.ok(refusedByNonce > 0, "no forgery was refused by the nonce gate: that branch is untested");
 });
 
 // ---------------------------------------------------------------------------
@@ -790,7 +949,7 @@ test("no promotion the committed goldens rest on ever reaches the pairwise gate"
 test("promotable is true for two matching observations from two independent sessions and no golden", async () => {
   const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
-    observations: recordsFor(["obs-diag", "obs-gold3"])
+    observations: recordsFor(DIR6_ELIGIBLE_PAIR)
   });
   const coverage = await sandbox.computeCoverage(FAMILY);
 
@@ -799,26 +958,36 @@ test("promotable is true for two matching observations from two independent sess
     fixtureId: "candidate-prisoner-normal-kill-dir6",
     goldenId: "golden-prisoner-normal-kill-dir6",
     hasGolden: false,
-    observationIds: ["obs-diag", "obs-gold3"],
+    observationIds: sortedIds(DIR6_ELIGIBLE_PAIR),
+    ineligibleObservationIds: [],
     sessionCount: 2,
     promotable: true
   }]);
 
-  // And the gate agrees — on ELIGIBLE evidence. `obs-diag` is the record dir6's
-  // candidate was transcribed from, so the pair dir6 was actually promoted on
-  // is refused; coverage still counts it because coverage answers "which
-  // records match this fixture", which is a different question from "which
-  // records are evidence for it". The two disagreeing here is the point: a
-  // coverage row is a shortlist, and the gate is what decides.
-  const records = recordsFor(["obs-gold3", "obs-camp2"]);
+  // And the gate agrees, on the same set. COVERAGE AND THE GATE NOW APPLY THE
+  // SAME ELIGIBILITY RULE, and that is a reversal of a decision recorded here.
+  // The argument that stood in this comment was: "coverage still counts it
+  // because coverage answers 'which records match this fixture', which is a
+  // different question from 'which records are evidence for it' ... a coverage
+  // row is a shortlist, and the gate is what decides."
+  //
+  // That is true of a REPORT and false of a WORK LIST, and this row is both:
+  // `plan` prints it and `settle` promotes from `row.observations`. Under the
+  // shortlist reading, settle built a capture manifest over evidence the gate
+  // then refused — and wrote it to disk first, so a blocked run deposited a
+  // session-independence attestation for a pair the repository had just
+  // rejected. What survives of the old argument is its real content: the
+  // distinction must stay VISIBLE. So the refused record is not dropped, it is
+  // reported in `ineligibleObservations`, which the test below pins.
+  const records = recordsFor(DIR6_ELIGIBLE_PAIR);
   const { manifest } = buildSs2CaptureManifest(records, { createdAt: dir6ManifestEntry.value.createdAt });
   const promoted = promoteSs2CandidateToGolden(dir6Candidate, records, manifest).golden;
   assert.deepEqual(promoted.scenario, dir6Golden.scenario);
   assert.deepEqual(promoted.samples, dir6Golden.samples);
   assert.deepEqual(promoted.expected, dir6Golden.expected);
-  assert.deepEqual(promoted.provenance.observationIds, ["obs-gold3", "obs-camp2"]);
+  assert.deepEqual(promoted.provenance.observationIds, DIR6_ELIGIBLE_PAIR);
 
-  const citedRecords = recordsFor(["obs-diag", "obs-gold3"]);
+  const citedRecords = recordsFor([dir6Candidate.provenance.authoredFrom, "obs-gold3"]);
   assert.throws(
     () => promoteSs2CandidateToGolden(dir6Candidate, citedRecords, buildSs2CaptureManifest(citedRecords, {
       createdAt: dir6ManifestEntry.value.createdAt
@@ -827,11 +996,60 @@ test("promotable is true for two matching observations from two independent sess
   );
 });
 
+test("coverage refuses the candidate's own source record, and says so on the row", async () => {
+  // The exclusion must never be a silent cap. A row that dropped a record has
+  // to stay distinguishable from a row that never had one — this file's own
+  // rule, stated for the divergence count in campaign.mjs, and it applies here
+  // for the same reason: `candidate-duel-firstblood-normal-kill`'s ONLY
+  // matching record is its own source, so without the disclosure its row would
+  // read exactly like a fixture nobody has ever run.
+  const source = dir6Candidate.provenance.authoredFrom;
+  assert.equal(source, "obs-diag");
+  const { campaign: sandbox } = await createCampaignSandbox({
+    candidates: [dir6Candidate],
+    observations: recordsFor([source, ...DIR6_ELIGIBLE_PAIR])
+  });
+  const [row] = (await sandbox.computeCoverage(FAMILY)).rows;
+
+  assert.deepEqual(
+    sortedIds(row.observations.map((observation) => observation.observationId)),
+    sortedIds(DIR6_ELIGIBLE_PAIR),
+    "the source record must not be counted as evidence"
+  );
+  assert.deepEqual(row.ineligibleObservations.map((observation) => ({
+    observationId: observation.observationId,
+    reason: observation.reason
+  })), [{ observationId: source, reason: "authored-from" }]);
+  assert.match(row.ineligibleObservations[0].detail, /provenance\.authoredFrom/);
+  // It really did match — the exclusion is not the matcher quietly disagreeing.
+  assert.equal(matchSs2ObservationToFixture(dir6Candidate, observationById.get(source)).match, true);
+
+  // And the disclosure reaches an operator's screen through the real command,
+  // printed ABOVE the early return that suppresses blockers and notes once a
+  // member has a golden. Asserted in BOTH states, because the four goldens this
+  // exclusion was written for are all in the `hasGolden` one.
+  for (const goldens of [[], [dir6Golden]]) {
+    const { campaign: printer } = await createCampaignSandbox({
+      candidates: [dir6Candidate],
+      goldens,
+      observations: recordsFor([source, ...DIR6_ELIGIBLE_PAIR])
+    });
+    const { lines } = await withCapturedLog(() => printer.commandPlan({ family: FAMILY }));
+    const printed = lines.join("\n");
+    assert.match(
+      printed,
+      new RegExp(`refused as evidence \\(authored-from\\): ${source}@`),
+      `the refusal is invisible with ${goldens.length} golden(s) on disk`
+    );
+    assert.equal(printed.includes(`${source}@session-diag,`), false, "a refused record is not cited as evidence");
+  }
+});
+
 test("promotable is false once the direction already has a golden", async () => {
   const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
     goldens: [dir6Golden],
-    observations: recordsFor(["obs-diag", "obs-gold3"])
+    observations: recordsFor(DIR6_ELIGIBLE_PAIR)
   });
   const [row] = (await sandbox.computeCoverage(FAMILY)).rows;
 
@@ -844,7 +1062,7 @@ test("promotable is false once the direction already has a golden", async () => 
 test("promotable is false with fewer than two matching observations", async () => {
   const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
-    observations: recordsFor(["obs-diag"])
+    observations: recordsFor(["obs-gold3"])
   });
   const [row] = (await sandbox.computeCoverage(FAMILY)).rows;
 
@@ -853,7 +1071,7 @@ test("promotable is false with fewer than two matching observations", async () =
   assert.equal(row.sessionCount, 1);
   assert.equal(row.promotable, false);
 
-  const records = recordsFor(["obs-diag"]);
+  const records = recordsFor(["obs-gold3"]);
   const { manifest } = buildSs2CaptureManifest(records, { createdAt: dir6ManifestEntry.value.createdAt });
   assert.throws(
     () => promoteSs2CandidateToGolden(dir6Candidate, records, manifest),
@@ -911,18 +1129,18 @@ test("coverage ignores an observation that targets the candidate but diverges fr
   // everything a target-id rule would look at.
   assert.equal(validateSs2Observation(diverging), diverging);
   assert.equal(diverging.target.fixtureId, dir6Candidate.fixtureId);
-  assert.notEqual(diverging.capture.sessionId, observationById.get("obs-diag").capture.sessionId);
+  assert.notEqual(diverging.capture.sessionId, observationById.get("obs-camp2").capture.sessionId);
   const comparison = matchSs2ObservationToFixture(dir6Candidate, diverging);
   assert.equal(comparison.match, false);
   assert.deepEqual(comparison.differences.map((difference) => difference.path), ["/finalState/hero/staminaleft"]);
 
   const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate],
-    observations: [...recordsFor(["obs-diag"]), diverging]
+    observations: [...recordsFor(["obs-camp2"]), diverging]
   });
   const [row] = (await sandbox.computeCoverage(FAMILY)).rows;
 
-  assert.deepEqual(row.observations.map((observation) => observation.observationId), ["obs-diag"]);
+  assert.deepEqual(row.observations.map((observation) => observation.observationId), ["obs-camp2"]);
   assert.equal(row.sessionCount, 1);
   assert.equal(row.promotable, false, "a divergent run is never counted towards the two-observation rule");
 });
@@ -960,7 +1178,7 @@ test("computeCoverage REPORTS on a family whose members share an action identity
 
   const { campaign: sandbox } = await createCampaignSandbox({
     candidates: [dir6Candidate, twin],
-    observations: recordsFor(["obs-diag", "obs-gold3"])
+    observations: recordsFor(DIR6_ELIGIBLE_PAIR)
   });
   const coverage = await sandbox.computeCoverage(FAMILY);
 
