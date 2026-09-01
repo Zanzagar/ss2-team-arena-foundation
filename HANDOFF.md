@@ -605,6 +605,87 @@ has per-fixture commands.
 
 ## Open items
 
+### Found 2026-09-01: the armoured and tournament families are blocked by the FIXTURES, not by capture luck
+
+► **ALL EIGHT REMAINING "REACHABLE" FIXTURES PIN A PATH-DETERMINED OUTPUT WHILE
+  OMITTING THE INPUTS THAT DETERMINE IT. No amount of sampling, throughput or
+  memory fixes this, and the campaign planner's advice — "the remedy is more
+  rounds, not a code change" — is WRONG for this family.** Re-derived from the
+  SWF and the archive 2026-09-01, and independently reproduced by the main
+  session after a question-diverse wave raised it.
+
+  The five `candidate-armoured-*` and three `candidate-tournament-*` all pin
+  hero AND villain at `staminaleft 105 / staminamax 110`. `staminaleft` is
+  PATH-DETERMINED — the battle map says so in its own words, and the bytes agree:
+  `nextphase` (`overlay:862/frame:52/DoAction@0x240c7f` `+0x32a1`–`+0x3304`)
+  subtracts `staminacost` and adds `1 + round(stamina/3)` on `game_attacker`
+  ONLY, unbranched, every phase transition. So the value at any
+  `checkattackroll` is a function of the actions already taken.
+
+  **What the archive measures.** 42 `session-adc*` directories exist, **38 of
+  them armed** (`"at":"action-armed"`), and only 11 were ever delogged to a
+  `.jsonl` — so **27 complete armed traces have never been converted into
+  observations**, and every count taken from the 11 committed divergence reports
+  understates the evidence by 3.5x. Across the 38:
+
+  - hero `staminaleft == 110 − (walk count)`, **38 of 38, no exceptions.** The
+    map's stamina arithmetic is runtime-confirmed at n=38.
+  - hero `== 105` in 13 of 38; villain `== 105` in **1** of 38 (`session-adc21`);
+    **both == 105 in 0 of 38.** Villain range 77–110, wider than the 90–110 the
+    11-report subset shows.
+
+  **Why the villain wanders.** The tournament opponent is drawn by
+  `randomise_gladiator(whichcharacter, whichavatar, herolevel)` — six call sites,
+  including `sprite:1788/frame:69` (x3) and `root/frame:214`. Its `strength` was
+  observed ranging 1..8 across the archived rounds. `staminacost` reads
+  `strength`, `charisma`, `magicka` and `movement_speed` off `game_attacker`, and
+  `movement_speed = clamp(round(speed*1.5), 4, 60)`. **So `speed` and `strength`
+  set the villain's per-phase stamina cost — and the armoured villain block pins
+  NEITHER.** Compare the two families' villain blocks:
+
+  | | villain stats pinned |
+  | --- | --- |
+  | `prisoner-*` (12 goldens) | `attack, strength, charisma, magicka, min_damage, max_damage` + armour |
+  | `armoured-*`/`tournament-*` (0 goldens) | armour pieces + `defence` ONLY |
+
+  The armoured fixtures describe a RANDOMISED opponent by its armour alone, then
+  pin an output that its unpinned stats determine. That is the whole defect.
+
+  **`speed` is invisible to the instrument as well.** It is absent from the
+  wrapper's 28-name `DEFAULT_WATCH_FIELDS`, so no archived trace records it and
+  nobody could see it varying. **Do NOT fix that by widening the default** — the
+  wrapper's own comment explains why, and it is right: the watch fires per
+  assignment, so a newly watched field the game writes during an armed action
+  adds mutation lines and DIVERGES EVERY EXISTING GOLDEN. `-WatchFields` already
+  EXTENDS the default per session, which is the correct mechanism.
+
+  **What the runbook does and does not stage.** Its `-StageVillain` string
+  (`ss2-staging-runbook.md` §3) stages `defence, herolevel, vitality, stamina,
+  hitpoints, staminaleft, armourclass, armourclass_max` and the piece ids — and
+  neither `speed` nor `strength`. All 11 rufflelogs show the write-time
+  `{"t":"dbg","at":"staged"}` line carrying `villain.staminaleft=105` exactly as
+  prescribed, and the arming-time readback showing it overwritten. **The operator
+  followed the runbook; the runbook under-specifies the opponent.**
+
+  **The sound remedy is candidate re-derivation, not a capture tweak** — pin the
+  villain's full stat vector the way the prisoner family already does, and stage
+  it (villain staging is durable; the villain is never re-skinned). NOT ATTEMPTED
+  2026-09-01: editing eight candidates is exactly the move this project treats as
+  high-stakes, and it should be done against the map with adversarial
+  verification, not at the end of a session.
+
+  **Two traps this cost, both worth keeping.** (1) The end-line `staged`
+  declaration cannot disagree with the staged state dump — `beginAction` runs
+  `stagedAtArming = stagedSummary()` and `dumpSide("state", ...)` as consecutive
+  statements over the same objects, so ingest's cross-check is a forgery check on
+  hand-edited records, not an overwrite detector. What actually exposed the
+  overwrite was the ordinary fixture-vs-observation diff. (2) The main session
+  first concluded from the 11 reports that "the villain was never staged to 105"
+  and that this was an operator error. Both halves were wrong, and the correction
+  came from reading the wrapper rather than from more measurement. **A perfect
+  correlation between two numbers is worth checking for a shared source before it
+  is worth explaining.**
+
 ### Found 2026-08-31, not yet closed
 
 The blocks below are in reverse order of discovery. Read this list first; the
