@@ -770,6 +770,45 @@ has per-fixture commands.
 The blocks below are in reverse order of discovery. Read this list first; the
 ones that change what the next session should DO are marked ►.
 
+► **THE WHOLE PROMOTED CORPUS RESTS ON ONE OPPONENT ARCHETYPE, AND `speed` IS AN
+  UNPINNED INPUT TO A PINNED OUTPUT IN ALL 82 FIXTURES.** Measured 2026-09-01
+  across every candidate and golden:
+
+  - **82 of 82** fixtures pin the villain's `staminaleft`.
+  - **0 of 82** pin `speed`, for either combatant.
+  - **All 22 promoted goldens share ONE villain profile**: `attack`, `defence`,
+    `strength`, `charisma`, `magicka` all **zero**.
+
+  `staminacost` for a walk is `round(movement_speed / 2)`, and
+  `movement_speed = clamp(round(speed * 1.5), 4, 60)`. For a zero-speed villain
+  the CLAMP FLOOR of 4 does the work: any `speed <= 2` gives `movement_speed` 4,
+  so the walk costs 2 whatever `speed` actually is, and the unpinned input cannot
+  bite. **That is why the prisoner and probe families promoted and nothing else
+  ever has** — not because those fixtures are better specified, but because their
+  opponent's stat vector makes the missing pin harmless.
+
+  Every other family fights an opponent the build DRAWS: `randomise_gladiator`
+  (six call sites, incl. `sprite:1788/frame:69` x3 and `root/frame:214`) redraws
+  `speed` and `strength` each round, and the archived traces show villain
+  `strength` ranging 1..8. There, `speed` is live, unpinned, and unobserved — it
+  is absent from the wrapper's 28-name `DEFAULT_WATCH_FIELDS` too, so no trace
+  records it and nobody could see it vary.
+
+  **22 of the 38 unpromoted candidates pin villain `staminaleft` while pinning
+  NONE of `speed`/`strength`/`charisma`/`magicka`** — the four stats
+  `staminacost` reads. The other 16 (champion 5, spell 8, duel 2, taunt 1) pin
+  some of them but still never `speed`.
+
+  **This reframes the roadmap's "the remaining work is breadth".** It is not
+  breadth: 22 goldens covering one opponent archetype is one archetype verified
+  many ways. Extending to a second archetype needs the fixtures to pin what the
+  first one got away with leaving out — which is a schema question about what a
+  scenario must declare, not a capture backlog. **Do not fix this by widening
+  `DEFAULT_WATCH_FIELDS`**; the wrapper's own comment explains why, and it is
+  right: the watch fires per assignment, so a newly watched field the game writes
+  during an armed action adds mutation lines and diverges every existing golden.
+  `-WatchFields` already EXTENDS the default per session, which is the mechanism.
+
 ► **40 DROPPED LAUNCH NONCES ARE RECOVERABLE FROM THE ARCHIVE, AND DOING IT
   COSTS RE-PROMOTING 20 OF THE 22 GOLDENS.** Measured 2026-09-01 by
   `node tools/recover-launch-nonces.mjs --archive <dir>` — REPORT ONLY, no write
