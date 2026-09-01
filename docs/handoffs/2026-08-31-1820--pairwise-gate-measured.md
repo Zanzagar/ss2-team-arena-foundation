@@ -115,10 +115,33 @@ clone; `captures/` (23 MB) is gitignored and stays Windows-side by design.
   a third party's public repository. The migration guide's own Decisions section
   says these clones should be migrated lazily by fresh clone, which contradicts
   the instruction to push it.
-- **Authorship — untouched by design.** 158 of 159 commits here are authored
-  `Codex Local <codex-local@invalid>`, unattributable to Corey's GitHub account.
-  Recommended: correct identity going forward, optionally a `.mailmap`; NOT a
-  history rewrite of 158 pushed commits. His call alone.
+- **Authorship — DECIDED 2026-08-31: forward-only fix, no history rewrite.**
+  165 of this repo's 166 commits are authored `Codex Local <codex-local@invalid>`
+  (the sole exception is `e3f14aa`, a GitHub-web PR merge). `.invalid` is a
+  reserved TLD that can never resolve, and GitHub matches commits to accounts by
+  email — so none of those 165 are attributable to Corey.
+
+  Cause: the repo was created by the `Atman\CodexSandboxOffline` account and its
+  `.git/config` carries a REPO-LOCAL identity, while the Windows GLOBAL identity
+  was never set. Local beats global, silently, forever.
+
+  Fixed forward in all four working trees, which now all author as
+  `Zanzagar <coreyhoydic@gmail.com>`: the Windows global identity is set (root
+  cause), plus repo-local overrides in `C:\ss2-capture` and
+  `C:\ss2-progression-design` to beat the inherited config. WSL inherits global
+  with no local override. Verified with `git var GIT_AUTHOR_IDENT` per tree, not
+  by reading config.
+
+  **A history rewrite was considered and REJECTED, and the reason is specific to
+  this project rather than general caution: `HANDOFF.md` and every handoff cite
+  commit SHAs throughout.** A rewrite changes every SHA and turns the project's
+  written record into dangling references — damaging exactly the discipline that
+  makes the corpus trustworthy. It would also break the WSL clone and both
+  worktrees. Do not revisit this without a much better reason than tidiness.
+
+  A `.mailmap` remains available if local attribution ever matters; it would fix
+  `git log`/`shortlog`/`blame` but NOT GitHub contribution credit, which no
+  repository-side change can restore without a rewrite.
 
 ## Added 21:00 — the WSL migration is DONE; work happens in Linux now
 
