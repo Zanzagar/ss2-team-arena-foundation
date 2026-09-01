@@ -118,9 +118,17 @@ edited away, because each was load-bearing.
 617 by the end of that session — a number this file was never updated with, so
 every "614" below it was stale on the day it was written; 620 after `2b123b9`.
 Was 603 before the audit pass; the "602" written below was already stale when
-written — `20197f2`'s own message says 603). `github/main` is **`4409ec7`**, not `e3f14aa`: PR #2
-(`design/endless-progression-readiness`) merged after this file was last touched.
-No PR is open for `arena/champion-capture`. **`gh` IS installed and authenticated
+written — `20197f2`'s own message says 603). `github/main` is **`362859a`** — corrected 2026-09-01; this
+line has now named a stale tip twice, first `e3f14aa`, then `4409ec7`. `4409ec7`
+was PR #2 (`design/endless-progression-readiness`) merging; `362859a` is the
+`.mailmap` landing directly on `main` — a normal commit with `4409ec7` as its
+only parent, authored by Corey, not a PR merge. **So `main` does take direct
+commits; "do not push to `main`" binds AGENTS, not the owner.** That `.mailmap`
+is the one the authorship decision left as available-if-ever-needed, so that
+part of the record has moved too. **Re-derive this rather than trusting it:
+`git fetch github && git log --oneline -1 github/main`.**
+No PR is open for `arena/champion-capture`, which is now 61 commits ahead of
+`main` — every promoted golden and the whole capture pipeline sit unmerged. **`gh` IS installed and authenticated
 in WSL** (2.98.0, `Zanzagar`) as of 2026-08-31; it is NOT installed on Windows.
 `git ls-remote github "refs/pull/*/head"` works in both and needs no `gh`.
 
@@ -254,9 +262,10 @@ tournament families**. **622 tests, all passing, 0 skipped** (this paragraph sai
 worktree.
 
 The 2026-08-30 session landed 38 commits (`1d829c7..2d70738`); the previous
-handoff said 36. PR #1 and PR #2 have since merged — `github/main` is `4409ec7`, whose
-history includes `ecf4510` — and the 2026-08-31 session added the commits on
-`arena/champion-capture`.
+handoff said 36. PR #1 and PR #2 have since merged and `github/main` has moved past both — it is
+`362859a` as of 2026-09-01, and `4409ec7` and `ecf4510` are both still ancestors
+of it (checked with `git merge-base --is-ancestor`, not assumed) — and the
+2026-08-31 session added the commits on `arena/champion-capture`.
 
 ### Expected test profiles
 
@@ -893,6 +902,29 @@ the driver passes nothing, so two settle runs over identical records produce
 different goldens. This is how all 22 committed manifests were made and was NOT
 changed here; reproducibility runs through the committed manifest file, which
 carries its own `createdAt`. Worth fixing, deliberately, as its own change.
+
+### Nothing states when a branch should reach `main`
+
+Found 2026-09-01 while correcting the two stale `main` SHAs above. The only
+written rule about `main` is a PROHIBITION — `AGENTS.md`: "Do not push to
+`main`. Work happens on feature branches. Ask before pushing anything." No
+document in this repository says when a branch becomes ELIGIBLE to merge: not
+`AGENTS.md`, not this file, not `docs/handoffs/README.md`, not the roadmap, and
+there is no CONTRIBUTING.
+
+The de facto practice, read off the history rather than from any document: a
+branch becomes a GitHub PR and a HUMAN merges it in the web UI. Both merges to
+`main` are PR merges (`e3f14aa`, `4409ec7`), and the only commit in this
+repository not authored by `Codex Local <codex-local@invalid>` was one of those
+web merges. The gate is the owner, exercised through GitHub, not anything an
+agent runs.
+
+That is a real gap on a project this careful about writing rules down, and it
+has a cost right now: `arena/champion-capture` is 61 commits ahead of `main`
+with no PR, so every promoted golden, the capture pipeline and the whole
+2026-08-31 corpus repair are unmerged. `gh` is installed and authenticated in
+WSL as of 2026-08-31, so opening one is newly cheap — **but that is a decision
+for the owner, not a cleanup an agent should perform.**
 
 ### Still open, with the evidence below the archive line
 
