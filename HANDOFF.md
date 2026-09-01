@@ -770,6 +770,63 @@ has per-fixture commands.
 The blocks below are in reverse order of discovery. Read this list first; the
 ones that change what the next session should DO are marked ►.
 
+► **THE FIX FOR THE ARMOURED FAMILY ALREADY EXISTS IN THE WRAPPER, BEHIND A
+  ONE-LINE BYPASS. It is not a schema change and not a fixture edit.** Measured
+  2026-09-01.
+
+  `captureAllowedNow()` in `ss2-capture-wrapper.as` has a champion branch that
+  refuses to arm unless the live hero state matches what the scenario requires
+  (`staminaleft == staminamax`, `herolevel == arenaStagedLevel`), emitting
+  `capture-refused-unstaged`. **It works and it is proven**: `arena-champ-1` and
+  `arena-champ-2` fired it **382 and 460 times** and correctly produced no trace.
+  Its own comment states the doctrine better than this file had:
+
+  > *"The wrapper injects only the RNG tape — it stages no combatant state — so
+  > there is nothing to force here, only something to refuse. Refusing turns a
+  > silent non-match into a visible low success rate, which is the right trade: a
+  > session that cannot be evidence should produce no trace rather than a trace
+  > nobody can reproduce."*
+
+  Three lines above it: `if (arenaCaptureMode == "always") return true;`.
+  **All 38 armed `adc` rounds ran `captureMode: "always"`, and
+  `capture-refused-unstaged` appears ZERO times in any of them.** So the armoured
+  family spent 38 rounds in the one mode that refuses nothing, and banked 11
+  divergence reports against a precondition it never checked.
+
+  **THE SCENARIO BLOCK IS A PRECONDITION, NOT A STAGED INPUT** — that distinction
+  is what the family got wrong. `-StageVillain` is only the MECHANISM that tries
+  to make the precondition true; `scenario.villain.staminaleft` is a state the
+  capture must actually be IN when it arms. Staging establishes the fields the
+  game does not touch afterwards (defence, hitpoints, armour pieces, stamina,
+  herolevel, vitality — all durable on the villain). It cannot establish
+  `staminaleft`, because the villain's own turns mutate it between the staging
+  window and arming. **A field staging cannot hold and the gate does not check is
+  a precondition in name only.**
+
+  So the remedy is (c) from the design question, not (d): generalise the champion
+  branch to refuse arming unless the live state matches the target fixture's
+  scenario on the path-determined fields, and run the armoured family under it
+  rather than under `always`. Cost is a wrapper edit — so
+  `validate-vehicle.ps1` must PASS afterwards — plus a low per-round success
+  rate, which is the trade the comment already argues for and the champion route
+  already pays.
+
+  **What this does NOT settle**: how many rounds that then takes. Across the 38
+  armed traces the joint precondition (hero 105 AND villain at its pinned value)
+  held **0 times** at 105/105 and **once** at 105/110. A gate makes the failures
+  visible and the successes trustworthy; it does not make them frequent. Whether
+  to also choose a villain stat vector whose stamina is invariant to its own
+  walk count — `stamina 2` gives regen 2, exactly the minimum walk cost, so
+  walking nets zero and `check_stats` clamps at `staminamax` — is a separate
+  scenario-design decision with every dependent value needing re-derivation.
+
+  **A byte-level fact this uncovered, worth keeping**: `staminaleft` CARRIES
+  ACROSS BOUTS. `battlevalues` resets it only when it is already `<= 0`, arena
+  `initbattle` resets the VILLAIN's only, `restore_char` does not carry it, and
+  root frame 214 resets hitpoints alone. Different opponents mean different turn
+  counts mean different residual stamina — which is why the champion gate had to
+  exist at all.
+
 ► **THE WHOLE PROMOTED CORPUS RESTS ON ONE OPPONENT ARCHETYPE, AND `speed` IS AN
   UNPINNED INPUT TO A PINNED OUTPUT IN ALL 82 FIXTURES.** Measured 2026-09-01
   across every candidate and golden:
