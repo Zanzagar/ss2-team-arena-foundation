@@ -1,0 +1,17 @@
+{"t":"meta","schemaVersion":1,"observationId":"obs-pr-power-rollneeded-miss-33","sessionId":"session-pr-power-rollneeded-miss-33","captureToolVersion":"ss2-capture/0.1.0","method":"injected-tape-runtime","observedAt":"2026-08-30T23:12:15Z","mutationGranularity":"property-watch","installHashVerifiedBefore":true,"attackerSide":"hero"}
+{"t":"var","name":"phase_action","value":"walkright"}
+{"t":"var","name":"phase_action","value":"walkright"}
+{"t":"var","name":"phase_action","value":"walkright"}
+{"t":"var","name":"phase_action","value":"walkright"}
+{"t":"var","name":"phase_action","value":"walkright"}
+{"t":"var","name":"phase_action","value":"power_attack"}
+{"t":"state","side":"hero","fields":{"gladiator_dir":"right","ammo_left":5,"staminamax":110,"hitpointsmax":30,"max_damage":23,"min_damage":21,"magicka":1,"charisma":1,"strength":10,"defence":1,"attack":1,"shield":0,"boot":0,"shinguard":0,"greaves":0,"gauntlet":0,"breastplate":0,"shoulderguard":0,"helmet":0,"taunted2":false,"taunted1":false,"life_stolen":false,"poison":false,"frozen":false,"burning":false,"staminaleft":105,"armourclass_max":0,"armourclass":0,"hitpoints":30}}
+{"t":"state","side":"villain","fields":{"gladiator_dir":"left","ammo_left":5,"staminamax":100,"hitpointsmax":10,"max_damage":3,"min_damage":1,"magicka":0,"charisma":0,"strength":0,"defence":0,"attack":0,"shield":0,"boot":0,"shinguard":0,"greaves":0,"gauntlet":0,"breastplate":0,"shoulderguard":0,"helmet":0,"taunted2":false,"taunted1":false,"life_stolen":false,"poison":false,"frozen":false,"burning":false,"staminaleft":95,"armourclass_max":0,"armourclass":0,"hitpoints":10}}
+{"t":"var","name":"fight_mode","value":"misc"}
+{"t":"var","name":"attack_direction","value":9}
+{"t":"roll","label":"hit-roll","source":"randomBetween","min":1,"max":100,"value":62,"callSite":"overlay:862/frame:52/DoAction@0x240c7f","injected":true}
+{"t":"roll","label":"power-critical-roll","source":"randomBetween","min":5,"max":20,"value":7,"callSite":"overlay:862/frame:52/DoAction@0x240c7f","injected":true}
+{"t":"event","type":"defender-blocked"}
+{"t":"final","side":"hero","fields":{"gladiator_dir":"right","ammo_left":5,"staminamax":110,"hitpointsmax":30,"max_damage":23,"min_damage":21,"magicka":1,"charisma":1,"strength":10,"defence":1,"attack":1,"shield":0,"boot":0,"shinguard":0,"greaves":0,"gauntlet":0,"breastplate":0,"shoulderguard":0,"helmet":0,"taunted2":false,"taunted1":false,"life_stolen":false,"poison":false,"frozen":false,"burning":false,"staminaleft":105,"armourclass_max":0,"armourclass":0,"hitpoints":30}}
+{"t":"final","side":"villain","fields":{"gladiator_dir":"left","ammo_left":5,"staminamax":100,"hitpointsmax":10,"max_damage":3,"min_damage":1,"magicka":0,"charisma":0,"strength":0,"defence":0,"attack":0,"shield":0,"boot":0,"shinguard":0,"greaves":0,"gauntlet":0,"breastplate":0,"shoulderguard":0,"helmet":0,"taunted2":false,"taunted1":false,"life_stolen":false,"poison":false,"frozen":false,"burning":false,"staminaleft":95,"armourclass_max":0,"armourclass":0,"hitpoints":10}}
+{"t":"end","installHashVerifiedAfter":null,"overdraw":0,"launchNonce":"402-1096136511"}

@@ -7,3 +7,4 @@ local-mod-work/*
 !local-mod-work/README.md
 captures/*
 !captures/README.md
+.audit-harvest/

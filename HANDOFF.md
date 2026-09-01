@@ -853,13 +853,29 @@ The free count is exact, not a lower bound: a leaf the matcher compares cannot
 be free, since every record matches its fixture at baseline.
 
 **And on committed evidence it refuses nothing, for a reason nobody had looked
-at.** Zero of the observation ids the 22 goldens cite carries a `launchNonce`;
-each is waived only by its exact digest in `pre-nonce-observations.js`; every
-forgery re-digests and so leaves the waiver. The **nonce check** refuses all 18
-eligible goldens' forgeries about forty lines before the pairwise loop runs.
-Excising the loop changes zero verdicts. It fires only on nonce-bearing
-evidence, of which three promotable groups exist (`obs-cachecold`+`obs-cachewarm`,
-`obs-iso2`+`obs-par1`, `obs-par2`+`obs-par3`) and no golden cites any.
+at.** ~~Zero of the observation ids the 22 goldens cite carries a `launchNonce`~~
+— **FALSE since the 2026-08-31 re-promotion; corrected 2026-09-01 by
+re-derivation.** All **9** nonce-bearing records ARE cited, across **4** goldens:
+`dir5` (`obs-cachecold`+`obs-cachewarm`), `dir6` (`obs-par2`+`obs-par3`+`obs-pq1`
++`obs-pq2`), `dir8` (`obs-iso2`+`obs-par1`) and `golden-prisoner-normal-kill`
+(`obs-pq3`). The other 18 goldens cite none. The rest of the sentence still
+holds for those 18: each cited record is waived only by its exact digest in
+`pre-nonce-observations.js`, and every forgery re-digests and so leaves the
+waiver. The **nonce check** refuses those 18 goldens' forgeries about forty lines
+before the pairwise loop runs. ~~It fires only on nonce-bearing evidence, of
+which three promotable groups exist (`obs-cachecold`+`obs-cachewarm`,
+`obs-iso2`+`obs-par1`, `obs-par2`+`obs-par3`) and no golden cites any.~~ **Also
+false, and it names the three groups that ARE cited — they are exactly `dir5`,
+`dir8` and `dir6` above.**
+
+**This paragraph contradicted line ~715 of this same file**, which has carried
+the corrected "9 nonce-bearing records are now cited" since the re-promotion
+landed. The 2026-08-31-2244 handoff says the correction was written "in the
+gate's own comment, in `pairwise-gate-dormancy.mjs`, `docs/roadmap.md` and
+`ss2-runtime-capture.md`" — four places, none of them here. **That is the
+retract-at-the-instruction rule failing on the exact file that states it, for
+the third time.** Found by an adversarial verifier aimed at a different claim
+entirely, then re-derived directly: 4 goldens, 9 citations, 0 disagreement.
 
 **So the old "DORMANT TODAY" comment was wrong about the function and
 accidentally right about the corpus.** Both halves are now pinned by tests in
