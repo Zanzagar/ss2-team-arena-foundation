@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "recordedOn": "2026-08-29",
+  "recordedOn": "2026-09-01",
   "source": "licensed-local-steam-install",
   "steam": {
     "appId": 1055430,
-    "buildId": 24807725,
+    "buildId": 25046632,
     "depotId": 1055432,
-    "depotManifest": "8233185473219625516"
+    "depotManifest": "433190280864947326"
   },
   "collection": {
     "airApplicationId": "com.game.whiskeybarrelstudios.swordsandsandalsclassic",
     "airApplicationVersion": "1.7.2",
     "launcher": {
       "relativePath": "swords_and_sandals_classic.swf",
-      "bytes": 99259496,
-      "sha256": "6A58E0843967AF5B781133E878A8E8DEB66F0D9EA265D0AAC8A0A4E53712D397",
+      "bytes": 99256433,
+      "sha256": "7E15456500E41E930D5046D1853AC1CCFBB1E69A9EBF08FAD11DF0C0B91B8A4C",
       "swfVersion": 51,
       "actionScriptVm": "AVM2"
     },
@@ -42,5 +42,18 @@
     "gameLaunched": false,
     "scriptsOrAssetsExported": false,
     "originalFilesCopiedIntoProject": false
-  }
+  },
+  "priorBuilds": [
+    {
+      "buildId": 24807725,
+      "depotManifest": "8233185473219625516",
+      "recordedOn": "2026-08-29",
+      "supersededOn": "2026-09-01",
+      "launcherSha256": "6A58E0843967AF5B781133E878A8E8DEB66F0D9EA265D0AAC8A0A4E53712D397",
+      "launcherBytes": 99259496,
+      "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA",
+      "ss2Unchanged": true,
+      "note": "Steam build 24807725 -> 25046632 changed the AVM2 launcher ONLY (99259496 -> 99256433 bytes). The AVM1 SS2 SWF was byte-identical across the transition, so every golden, divergence fixture and observation measured against 24807725 remains valid, and the battle map's byte offsets are untouched. The two SWFs move independently. Prior build is recoverable and this was TESTED before updating, not assumed: `download_depot 1055430 1055432 8233185473219625516` in the Steam console downloads depot 1055432 (6617 files, 1851 MB)."
+    }
+  ]
 }
