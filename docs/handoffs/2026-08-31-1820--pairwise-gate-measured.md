@@ -166,6 +166,14 @@ How it was done, because the method matters if it is ever repeated:
   capture-bearing profile, which proves the 238-entry `captures/` archive
   survived the copy. Both worktrees report clean.
 
+**The design worktree moved too, to `C:\ss2-progression-design`.** `git worktree
+move` REFUSED it ("Permission denied" — OneDrive handles, or the
+`CodexSandboxOffline` ownership), so it went copy → `git worktree repair` run
+FROM INSIDE the new location, which is what fixes the main repo's `gitdir`
+pointer. Both trees now report from local disk and nothing is registered on
+OneDrive any more. The stale copies carry retirement markers and are safe to
+delete deliberately.
+
 Note the runtime contrast, all three measured today: **11.9s** in WSL on ext4,
 **~25s** in the old OneDrive tree, **30.3s** in `C:\ss2-capture`. NTFS is not the
 bottleneck OneDrive was, but ext4 is still the place to run tests.
