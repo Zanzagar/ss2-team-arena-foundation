@@ -53,12 +53,24 @@ function headingsIn(text) {
  * otherwise make every assertion below pass over an empty list.
  */
 function citedSections(text) {
-  // Whitespace is collapsed because markdown wraps: a reference near a line
-  // end arrives with a newline inside the quotes, and comparing that against a
-  // one-line heading fails for a reason that has nothing to do with the map
-  // being wrong. An ELLIPSIS is not normalised away, deliberately — "§ 'The
-  // pairwise gate…'" is a reference a reader cannot follow, and this test
-  // caught exactly that on its first run.
+  // THIS NORMALISATION IS ASYMMETRIC ON PURPOSE, and it will look like an
+  // oversight to whoever tidies it next. Do not make it uniform in either
+  // direction; the two cases are different kinds of thing.
+  //
+  // Wrapped whitespace IS collapsed. Markdown wraps, so a reference near a
+  // line end arrives with a newline inside its quotes. That is the FORMATTING
+  // differing from the heading, not the map naming a section that does not
+  // exist, and failing on it would report a defect that is not there.
+  //
+  // An ellipsis is NOT normalised away. "§ \"The pairwise gate…\"" names no
+  // heading, and a reader who follows it dead-ends exactly as they would on an
+  // outright wrong name — a truncated reference IS a dead link, which is the
+  // only thing this test is for. Strip the ellipsis to make it resolve and the
+  // test starts passing over the failure it exists to catch.
+  //
+  // Both cases are real: the first run of this test on the map it was written
+  // for produced one wrapped reference AND one ellipsis, and only one of them
+  // was a defect.
   return [...text.matchAll(/§\s+"([^"]+)"/g)].map((match) => match[1].replace(/\s+/g, " ").trim());
 }
 
