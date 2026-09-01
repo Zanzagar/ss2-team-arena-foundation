@@ -7,9 +7,17 @@ the latest handoff in `docs/handoffs/` and proceed" — with this file as the st
 it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
-**Two sessions closed the night of 2026-08-31 and each left a handoff. Read both,
-and know which answers what** — `ls` puts the migration one last, and it is not
-the corpus brief:
+**LATEST:
+[2026-09-01 12:50 — the WSL capture pipeline, and the armoured fixture defect](docs/handoffs/2026-09-01-1250--wsl-capture-pipeline-and-armoured-fixture-defect.md).**
+Start there. It carries how to drive a capture from WSL (five things nothing had
+written down, three of which fail looking like a wrapper defect), and the closed
+derivation that the armoured/tournament villain `staminaleft` is **110, not 105**.
+Both of its agent waves are UNVERIFIED-PARTIAL — 109 verifiers died on a usage
+limit — so read its opening paragraph before quoting any count from it.
+
+**Two earlier sessions closed the night of 2026-08-31 and each left a handoff.
+Read both, and know which answers what** — `ls` puts the migration one last, and
+it is not the corpus brief:
 [00:30 — migration close-out, and what is untested](docs/handoffs/2026-09-01-0030--migration-closeout-and-what-is-untested.md)
 covers the WSL/Windows split and what on this machine has never been exercised;
 [00:21 — corpus repair and doc-integrity guards](docs/handoffs/2026-09-01-0021--corpus-repair-and-doc-integrity-guards.md)
@@ -666,6 +674,43 @@ has per-fixture commands.
   `{"t":"dbg","at":"staged"}` line carrying `villain.staminaleft=105` exactly as
   prescribed, and the arming-time readback showing it overwritten. **The operator
   followed the runbook; the runbook under-specifies the opponent.**
+
+  **THE DERIVED VALUE IS 110, AND THE ARITHMETIC IS CLOSED (2026-09-01).**
+  `arena` sprite 2249 frame 1 (`initbattle`), `DoAction@0x6e421b` `+0x0b8a`–
+  `+0x0bb6`, assigns `_root.game.villain.staminaleft = _root.game.villain.staminamax`
+  UNCONDITIONALLY — the nearby `character_xp` branch at `+0x0b0c` targets the
+  first instruction of that write, so both arms execute it. A scenario that
+  declares no villain actions therefore determines `staminaleft = staminamax =
+  110`, not 105:
+
+  ```
+  stamina     = (staminamax - 100) / 10 = 1        // battlevalues +0x37b6
+  initbattle  : staminaleft := staminamax = 110
+  villain phases declared by the scenario = 0
+  staminaleft = min(110, 110 + 0) = 110            // check_stats clamp +0x110a
+  ```
+
+  **`obs-adc5` observed exactly that** — villain 110, hero 105 on five walks. So
+  one already-archived round matches the corrected villain value, and the
+  corrected fixture is not a speculative target.
+
+  **WHERE THE 105 CAME FROM, AND WHY IT IS NOT AN ARBITRARY ERROR.** 53 of the 82
+  committed fixtures carry villain `staminaleft == staminamax - 5`, across BOTH
+  staminamax values. On the prisoner/probe route that -5 IS derivable: that
+  villain has all-zero stats, so `speed 0 -> movement_speed` clamps to 4, walk
+  cost `round(4/2) = 2`, `stamina 0 -> regen 1`, net -1 per walk, x5 walks = 95 —
+  and it reproduced in 66 of 66 observations, which is why those 22 goldens
+  promoted. **The constant was carried from a route where it was derivable to a
+  route where it is not.** That is the whole mistake, and it is a much more
+  instructive one than a typo.
+
+  **The runbook's own rationale is false for exactly one field.**
+  `ss2-staging-runbook.md` argues that staging overwrites the generator's draw
+  "so the draw stops mattering". True of every staged field EXCEPT `staminaleft`:
+  staging runs for `STAGE_APPLY_TICKS = 20` after `_global.battle_started`, the
+  autopilot's first action fires at battle tick 8, and arming is later still — and
+  `staminaleft` is the sole staged field the villain's OWN turns mutate in that
+  gap. Every other staged field is inert across it.
 
   **The sound remedy is candidate re-derivation, not a capture tweak** — pin the
   villain's full stat vector the way the prisoner family already does, and stage
