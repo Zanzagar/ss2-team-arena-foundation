@@ -8,7 +8,7 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-01 12:50 — the WSL capture pipeline, and the armoured fixture defect](docs/handoffs/2026-09-01-1250--wsl-capture-pipeline-and-armoured-fixture-defect.md).**
+[2026-09-01 19:50 — Codex independence, and what the corpus actually proves](docs/handoffs/2026-09-01-1950--codex-independence-and-the-corpus-archetype.md).**
 Start there. It carries how to drive a capture from WSL (five things nothing had
 written down, three of which fail looking like a wrapper defect), and — read this
 one carefully — a derivation that the armoured/tournament villain `staminaleft`
