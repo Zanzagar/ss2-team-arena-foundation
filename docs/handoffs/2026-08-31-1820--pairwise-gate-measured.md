@@ -1,6 +1,6 @@
 ---
 handoff:      2026-08-31-1820--pairwise-gate-measured
-written:      2026-08-31 18:20 -0400, extended 19:35 and 20:10 -0400
+written:      2026-08-31 18:20 -0400, extended 19:35, 20:10 and 21:00 -0400
 sessionStart: 2026-08-31 17:30 -0400
 sessionId:    a87c4347-3cea-4308-8683-3f1282ef7009
 agentRuns:    wf_0192d778-833 (4 ground lenses + 2 independent implementations + 3 adversarial verifiers)
@@ -118,6 +118,44 @@ clone; `captures/` (23 MB) is gitignored and stays Windows-side by design.
   `Codex Local <codex-local@invalid>`, unattributable to Corey's GitHub account.
   Recommended: correct identity going forward, optionally a `.mailmap`; NOT a
   history rewrite of 158 pushed commits. His call alone.
+
+## Added 21:00 — the WSL migration is DONE; work happens in Linux now
+
+**If you are a fresh session, you are probably in WSL. Your repo is
+`~/projects/swords-and-sandals-2-multiplayer`, not the OneDrive tree.**
+
+Measured, not assumed: Ubuntu 24.04.4 LTS on WSL2 (kernel 6.18), node **v26.3.1**,
+npm 11.16.0, Claude Code **2.1.252**, codex-cli **0.151.0**, gh 2.98.0, git
+identity `Zanzagar <coreyhoydic@gmail.com>` with `core.autocrlf` UNSET. No reboot
+was needed — `VirtualMachinePlatform` was already enabled.
+
+- **Acceptance passed: 622 tests, 621 passed, 1 skipped, 0 failed** — the correct
+  fresh-clone profile. **622/0/0 is NOT the target in WSL** and never will be:
+  `captures/` is gitignored and stays Windows-side by design.
+- WSL runs the suite in **11.9s vs 24–26s** in the OneDrive tree.
+- Remote is named `github` (renamed from `origin` at clone time) so this repo's
+  own docs keep working.
+- `~/projects/claude-harness` holds the shared standard; its `install.sh`
+  symlinked 12 skills into `~/.claude/skills`.
+- Launchers `opus5` / `fable5` are in `~/.bashrc` (Opus 5 / Fable 5, ultracode,
+  bypass permissions), and `~/.claude/settings.json` was MERGED, not overwritten.
+
+**THE WINDOWS TREE STILL EXISTS AND IS STILL ON ONEDRIVE.** It was not relocated
+to `C:\ss2-capture` — that needs a quiet moment because two worktrees share one
+`.git` (so `git worktree repair`, never a plain move) and agent processes hold it
+open. **The capture pipeline stays there permanently**: Ruffle is a Windows
+binary, the save and snapshots live under `%LOCALAPPDATA%`, and the capture
+scripts are PowerShell. The end state is HYBRID, not a move.
+
+**Sequential, never parallel.** Do not work the OneDrive tree and the WSL clone in
+the same period — Windows git has `core.autocrlf=true` at system scope and WSL has
+it unset, so the same file edited from both sides produces phantom whole-file
+diffs.
+
+**Agent memory did NOT carry over and never will** — it is path-keyed and
+machine-local. That is why this file exists. A WSL session starts from "read the
+latest handoff", and `AGENTS.md` is environment-agnostic as of `ef69ac0` so its
+test command works there.
 
 ## Read this before you touch the staminaleft exclusion
 
