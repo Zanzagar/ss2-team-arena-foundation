@@ -6,7 +6,7 @@ session lives in [`docs/handoffs/`](docs/handoffs/README.md), stamped
 the latest handoff in `docs/handoffs/` and proceed" — with this file as the state
 it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session. Latest:
-[2026-08-31 22:44 — the four self-citing goldens are re-promoted](docs/handoffs/2026-08-31-2244--self-citing-goldens-repromoted.md).
+[2026-09-01 00:30 — migration close-out, and what is untested](docs/handoffs/2026-09-01-0030--migration-closeout-and-what-is-untested.md).
 
 ---
 

@@ -85,6 +85,47 @@ function headingOffset(text, heading) {
   return at === -1 ? -1 : at + 1;
 }
 
+/**
+ * Handoff stamps sort lexicographically, so the newest is the last name.
+ * `README.md` is not a handoff and is excluded by the stamp pattern rather
+ * than by name, so a second non-handoff file cannot quietly join it.
+ */
+const HANDOFF_STAMP = /^(\d{4}-\d{2}-\d{2}-\d{4})--[a-z0-9-]+\.md$/;
+
+async function committedHandoffs() {
+  return (await readdir(HANDOFFS_DIR)).filter((name) => HANDOFF_STAMP.test(name)).sort();
+}
+
+test("the head's \"Latest\" pointer names the newest committed handoff", async () => {
+  // This has gone stale twice, both times the same way: a session lands a
+  // handoff and the pointer keeps naming the previous one, so AGENTS.md sends
+  // the next reader to "read the newest file in docs/handoffs/" while the head
+  // names a different file as latest. It went stale again the moment a
+  // concurrent session pushed a newer handoff without touching the head, which
+  // is the case no amount of care by one author prevents.
+  const handoffs = await committedHandoffs();
+  assert.ok(handoffs.length >= 4, `only ${handoffs.length} handoffs matched the stamp pattern`);
+  const newest = handoffs.at(-1);
+
+  const linked = [...handoffText.matchAll(/\(docs\/handoffs\/([^)]+\.md)\)/g)].map((match) => match[1]);
+  assert.ok(linked.length > 0, "the head links no handoff at all");
+  assert.ok(
+    linked.includes(newest),
+    `the head's Latest pointer names ${linked.filter((name) => HANDOFF_STAMP.test(name)).join(", ") || "no handoff"}, ` +
+    `but the newest committed handoff is ${newest}`
+  );
+});
+
+test("every committed handoff has a row in the handoffs index", async () => {
+  // The index lost a row once already — the 14:43 handoff was never added, so
+  // the index's newest row was the second-newest handoff. Derived from a
+  // directory listing rather than a count, so a handoff added without a row
+  // fails by name.
+  const index = await readFile(path.join(HANDOFFS_DIR, "README.md"), "utf8");
+  const missing = (await committedHandoffs()).filter((name) => !index.includes(name));
+  assert.deepEqual(missing, [], "handoffs with no row in docs/handoffs/README.md");
+});
+
 test("the living head's reading map is present, and above the archive line", () => {
   const mapAt = headingOffset(handoffText, MAP_HEADING);
   const archiveAt = headingOffset(handoffText, ARCHIVE_LINE);
