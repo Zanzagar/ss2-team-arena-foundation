@@ -1054,10 +1054,18 @@ the analysis that established it is below the line. **Correct these HERE.**
 - **`-StageGold` re-stages on every `-Attempts` retry.** Scope any fix to make
   the SHOP TRIP idempotent, not the gold write; the obvious fix is worse than the
   bug.
-- **`validate-vehicle.ps1` launches Ruffle at the REAL save** with no
-  `--save-directory` and no process guard, while this file mandates running it
-  after every wrapper edit. Its save tripwire also hashes only the FIRST
-  `ss2_data.sol` of three.
+- ~~**`validate-vehicle.ps1` launches Ruffle at the REAL save** with no
+  `--save-directory` and no process guard. Its save tripwire also hashes only
+  the FIRST `ss2_data.sol` of three.~~ **CLOSED — all three clauses are stale,
+  corrected 2026-09-01.** The script gives Ruffle its own empty
+  `--save-directory` under `captures\vehicle-check\`, throws if any Ruffle
+  process is already running, and hashes EVERY `.sol` under the shared root.
+  Confirmed twice: in the script's own header, and in a live run this session
+  that printed all three `.sol` hashes before and after and used a private store
+  `save-20260901005702`. Read the tripwire for what it is, though — the stub
+  writes no SharedObject, so a PASS is the absence of a counterexample, not
+  evidence of isolation. **This item is what an open item looks like after the
+  code moved and nobody re-read it; an open list is a claim that decays.**
 - **`run-arena.ps1` kills every Ruffle process rather than its own pid**, which
   sabotages any concurrent isolated session.
 - **The spell family (8) cannot arm**; `spell_id` does not exist in the build.
