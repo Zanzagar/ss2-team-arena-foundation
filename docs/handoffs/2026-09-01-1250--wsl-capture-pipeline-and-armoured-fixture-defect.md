@@ -41,8 +41,26 @@ before re-running anything; it holds 458 verdicts and 12 investigator reports ac
 
 ## Highest-value work, ranked, with the reason
 
-1. **DECIDE WHAT A SCENARIO MUST DECLARE. This is a schema question and it now
-   outranks every capture.** Measured across all 82 fixtures: 82 of 82 pin the
+1. **RUN THE ARMOURED FAMILY UNDER THE ARMING GATE INSTEAD OF `-ArenaCapture
+   always`. The fix already exists in the wrapper and is proven on another
+   route.** `captureAllowedNow()`'s champion branch refuses to arm unless the
+   live state matches what the scenario requires, emitting
+   `capture-refused-unstaged`; `arena-champ-1` and `arena-champ-2` fired it 382
+   and 460 times and correctly produced no trace. Three lines above it sits
+   `if (arenaCaptureMode == "always") return true;` — and **all 38 armed `adc`
+   rounds ran `always`, with ZERO refusals logged.** Generalise that branch to
+   check the target fixture's scenario, then re-run the family under it.
+   `validate-vehicle.ps1` must PASS after the wrapper edit. Expect a LOW success
+   rate — the joint precondition held 0 of 38 times historically — which is the
+   trade the wrapper's own comment already argues for: a session that cannot be
+   evidence should produce no trace rather than an unreproducible one.
+
+   **The scenario block is a PRECONDITION, not a staged input.** `-StageVillain`
+   is only the mechanism that tries to make it true, and it cannot hold
+   `staminaleft` because the villain's own turns mutate it between staging and
+   arming. That is the distinction the family got wrong.
+
+2. **THEN decide whether the scenario schema needs to change at all.** Measured across all 82 fixtures: 82 of 82 pin the
    villain's `staminaleft`, **0 of 82 pin `speed`**, and all 22 promoted goldens
    share ONE villain profile with every stat zero. For that opponent the
    `movement_speed` clamp floor of 4 makes the missing `speed` pin harmless — which
@@ -57,15 +75,15 @@ before re-running anything; it holds 458 verdicts and 12 investigator reports ac
    into the head and RETRACTED it before any fixture was edited. 110 assumes the
    villain took zero phases while the hero took five walks; five villain walks give
    exactly 105. Both are under-determined. See the head.*
-2. **Then capture the armoured family.** 27 archived armed traces were never even
+3. **Then capture the armoured family.** 27 archived armed traces were never even
    delogged; the family has spent far more rounds than the repository can see.
-3. **The nonce recovery (40 records, waiver 58 -> 18).** Mechanically sound and
+4. **The nonce recovery (40 records, waiver 58 -> 18).** Mechanically sound and
    re-derived twice, BUT see Trap 4 before acting: nothing in the repository can
    distinguish a recovered nonce from an invented one.
-4. **Fix `.claude/workflows/question-fanout-audit.js`** so verifiers receive the
+5. **DONE this session: fixed `.claude/workflows/question-fanout-audit.js`** so verifiers receive the
    environment facts. See Trap 1 — this defect cost ~8 wasted verifiers and
    several 240-second `find` timeouts in this session alone.
-5. **Inject the 22 goldens into the resolver.** `defineTeamRuleSet` is still
+6. **Inject the 22 goldens into the resolver.** `defineTeamRuleSet` is still
    called exactly once outside tests, from `placeholder-rules.js`. The corpus is
    an asset nothing consumes; breadth is buying less than use would.
 
