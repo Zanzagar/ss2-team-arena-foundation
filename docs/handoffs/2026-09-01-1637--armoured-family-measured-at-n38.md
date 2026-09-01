@@ -81,11 +81,21 @@ has taken a phase the value IS determined.
    Pinning walks removes the hero-side lottery outright. This is the "fix the
    capture, not the comparison" remedy the head has prescribed since 2026-08-31
    and which has never been implemented.
-3. **Decide the villain-stamina scenario question — owner's call, now costed
-   honestly.** It is **3 values per fixture and 0 recalculations**, not the
-   full re-derivation the head claimed: `chance` (42), `rollNeeded` (58),
-   `deflectionThreshold` and `selectedDamage` read none of the villain's stamina
-   vector. Every fixture's purpose survives.
+3. **Decide the SCHEMA question. ~~Decide the villain-stamina scenario
+   question — 3 values per fixture and 0 recalculations.~~ SUPERSEDED THE SAME
+   EVENING by a second VERIFIED wave (6/6 derivers, 18/18 verifiers, 7 BROKEN),
+   which the owner authorised and which says the remedy CANNOT be expressed as a
+   fixture edit. No fixture was changed.** `COMBATANT_KEYS`
+   (`src/golden/run-1v1-fixture.js:91`) is a closed 42-key allow-list holding
+   `staminaleft` and `staminamax` but NOT `stamina`, `speed`, `vitality` or
+   `herolevel`: **the schema pins the output and refuses the input.** Adding
+   `stamina` throws and fails 17 tests. A value-only edit passes 630/629/0/1 —
+   but so does setting the same fields to **7**, which is impossible in the
+   runtime, so the suite cannot tell a derived value from an arbitrary one.
+   And the minimum stamina is not a constant: `stamina_min = 3M - 4` where
+   `M = max(2*movement_speed, round(strength*3), round(charisma*2),
+   round(magicka), 7)`, and the villain's `strength` is DRAWN 1..8. Full
+   derivation, with offsets, in the head under § "DECIDED 2026-09-01 (evening)".
 4. **Only then a gate — and only one an extended stub can exercise.** The
    technique is proven here once already: `stub-game.as:52-65` was extended with
    `ov.game_attacker`/`ov.game_defender` so the gate could see the attacker-side

@@ -1068,6 +1068,100 @@ fixture, 0 recalculations — see the correction in the block below); (4) only
 then a gate, and only one that can be exercised by an extended stub. **Nothing
 in (1) through (3) needs Ruffle, the save, or a supervised window.**
 
+### DECIDED 2026-09-01 (evening): the villain-stamina remedy needs a SCHEMA change, and the fixtures were NOT edited
+
+The owner chose the remedy — re-scenario the villain with a stat vector whose
+stamina is invariant to its own action sequence — and it was derived properly
+before being written: a VERIFIED wave (6/6 question-diverse derivers, 18/18
+write-nothing verifiers, 0 errors, **7 of 18 verdicts BROKEN**), forbidden from
+opening any capture, working from the hash-verified SWF. **The derivation says
+the remedy cannot be expressed as a fixture edit today. No fixture was
+changed.** That is the finding, and it is worth more than the edit would have
+been.
+
+► **THE SCHEMA PINS THE OUTPUT AND REFUSES THE INPUT. This is the whole defect,
+  stated exactly, and it is not a fixture-authoring oversight.**
+  `COMBATANT_KEYS` (`src/golden/run-1v1-fixture.js:91`) is a closed allow-list of
+  **42** keys. `staminaleft` and `staminamax` are in it. **`stamina`, `speed`,
+  `vitality` and `herolevel` are NOT** — re-derived directly from the source, not
+  relayed. `assertAllowedKeys` (:216-221) throws
+  `scenario.villain has unsupported fields: stamina.`, measured at
+  **630 / 612 / 17 / 1**. `TOURNAMENT_OPPONENT_PARAMETERS`
+  (`test/ss2-post-tutorial-fixtures.test.js:170`) independently pins the same
+  15-key villain surface, so two places must move together.
+
+  So a scenario may pin a quantity the game DERIVES while being forbidden from
+  declaring what derives it. Every "unpinned input to a pinned output" finding in
+  this file is a symptom of that one fact.
+
+► **AND GOING GREEN ON A VALUE-ONLY EDIT PROVES NOTHING — measured, and this is
+  the result that stopped the edit.** Setting
+  `villain.staminaleft = staminamax = 300` plus the paired
+  `expected.state.villain.staminaleft` in all 8 fixtures **passes the full suite,
+  630 / 629 / 0 / 1**. But a verifier then set the same fields to **7** and got
+  the identical 630 / 629 / 0 / 1 — and 7 is impossible in the runtime, since
+  `battlevalues` makes `staminamax = 100 + stamina*10 >= 100` always. **The suite
+  cannot tell a derived value from an arbitrary one here**; its only stamina
+  teeth are `clampCombatant`'s `0 <= staminaleft <= staminamax`. A green suite
+  would have been mistaken for a validated remedy.
+
+► **THE MINIMUM STAMINA IS NOT THE CONSTANT 20 I CARRIED INTO THIS. It is a
+  function of four stats the scenario cannot declare.** Byte-derived:
+
+  ```
+  M = max( 2*movement_speed,      chargeleft/right  +0x4214 / +0x4480
+           round(strength*3),     power_attack +0x603c; snipe*/bombard* +0x6bb5
+           round(charisma*2),     taunt +0x67bb
+           round(magicka),        18 cast_* blocks
+           7 )                    block +0x4ca4
+      movement_speed = clamp(round(speed*1.5), 4, 60)
+  regen = 1 + round(stamina/3)       so   stamina_min = 3M - 4
+  ```
+
+  `M = 8` — and hence `stamina 20`, `staminamax 300` — holds **only** for a
+  villain with `strength <= 2, charisma <= 4, magicka <= 8, speed <= 2`. **The
+  tournament villain's `strength` is DRAWN by `randomise_gladiator` and was
+  observed ranging 1..8**, so `M` is not fixed: at `strength 8`, `M = 24`,
+  `stamina 68`, `staminamax 780`. There is no single vector without pinning the
+  four stats — which returns to the schema.
+
+► **THE REMEDY HAS A SIDE EFFECT ON A FIELD THESE FIXTURES DO PIN.** `nextphase`
+  regenerates the acting combatant's hitpoints by **`1 + Math.ceil(stamina/2)`**
+  every phase transition (`+0x3305..+0x3346`, immediately before `check_stats`).
+  Raising villain `stamina` to 20 raises that from 2 HP/phase to 11. The 8
+  fixtures pin `villain.hitpoints 80`. **Buying stamina invariance spends
+  hitpoint stability**, and no one had connected the two.
+
+► **`hitpointsmax: 80` CARRIES THE IDENTICAL DEFECT, and it is worse.**
+  `battlevalues` recomputes it unconditionally at `+0x378e` as
+  `herolevel*10 + vitality*20`, and **neither is declarable** either. Worse than
+  `staminamax`, which inverts to a unique `stamina`: `80` is satisfied by
+  herolevel 6/vitality 1, 4/2 AND 2/3, so it does not even pin one vector.
+
+► **THE HERO SIDE IS STRICTLY LESS DETERMINED THAN THE VILLAIN'S, NOT MORE.**
+  Arena `initbattle` resets only the VILLAIN's `staminaleft` to its max
+  (`sprite:2249/frame:1 +0x0b9c`, unconditional). Nothing does it for the hero,
+  and `staminaleft` carries across bouts. So a villain-only fix leaves the same
+  defect on the hero, where the guaranteed starting point does not exist.
+
+► **AND A CAVEAT THAT MAY KILL THE APPROACH OUTRIGHT, flagged by the deriver
+  against its own answer:** three `getphase` branches rewrite the ACTING
+  combatant's own base stats mid-bout — `cast_swiftsandals`, `cast_bloodlust`,
+  `cast_colossus` — and all three are villain-selectable through
+  `villain_cast_spells`. Hardening the invariant against them needs `stamina 122`.
+  **Not verified; treat as the next thing to check**, because if it holds no
+  reachable vector is invariant and the answer is a different remedy entirely.
+
+**What to do with this.** The question is no longer "what value should
+`villain.staminaleft` be". It is: **should `COMBATANT_KEYS` admit the derived
+stats (`stamina`, `speed`, `vitality`, `herolevel`) so a scenario can declare
+what the game derives from?** That is a schema decision for the owner, it is now
+costed and byte-backed rather than vague, and it is the same decision the head
+has been circling since 2026-08-31 under the name "the schema question".
+**Do not land a value-only edit in the meantime** — it would put the conclusion
+of a derivation into a file that refuses to carry the premise, in a suite
+measured to be blind to the difference.
+
 ### Found 2026-09-01: the armoured and tournament families are blocked by the FIXTURES, not by capture luck
 
 ► **ALL EIGHT REMAINING "REACHABLE" FIXTURES PIN A PATH-DETERMINED OUTPUT WHILE
