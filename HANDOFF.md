@@ -86,8 +86,9 @@ every "614" below it was stale on the day it was written; 620 after `2b123b9`.
 Was 603 before the audit pass; the "602" written below was already stale when
 written — `20197f2`'s own message says 603). `github/main` is **`4409ec7`**, not `e3f14aa`: PR #2
 (`design/endless-progression-readiness`) merged after this file was last touched.
-No PR is open for `arena/champion-capture`. `gh` is NOT installed on this machine;
-check PR state with `git ls-remote github "refs/pull/*/head"`.
+No PR is open for `arena/champion-capture`. **`gh` IS installed and authenticated
+in WSL** (2.98.0, `Zanzagar`) as of 2026-08-31; it is NOT installed on Windows.
+`git ls-remote github "refs/pull/*/head"` works in both and needs no `gh`.
 
 ► **THE "IMPOSSIBLE" FIXTURES ARE REACHABLE. This is the correction that changes
   the roadmap.** This file has said no tool path can change hero `attack` or

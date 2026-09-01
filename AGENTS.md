@@ -114,14 +114,33 @@ Use `--test-concurrency=1`: the machine is memory-starved with many agents, and
 parallel spawns intermittently fail with `spawn UNKNOWN`, which is not a code
 failure.
 
-**If `node` is not on PATH, you are in a Windows-native session** (npm is not
-installed there either). Use the codex runtime's node, which is the only one on
-that machine — resolve it rather than pinning it, as the directory moves on
-update:
+**IF `node` IS NOT ON PATH, WORK OUT WHICH ENVIRONMENT YOU ARE IN BEFORE
+REACHING FOR A FIX — the two remedies are not interchangeable and the wrong one
+is a syntax error, not a fallback.**
+
+**In WSL/Linux, a missing `node` almost always means a NON-INTERACTIVE shell.**
+node is installed via nvm and loaded from `~/.bashrc`, which returns early for
+non-interactive shells — so `bash -c`, `bash -lc`, scripts, and anything driven
+from Windows via `wsl -- bash -c` all start without it. This is expected. Source
+nvm yourself at the top of any script:
+
+```
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+```
+
+Use `bash -ic` when testing shell FUNCTIONS (`opus5`, `fable5`, `sol`), since
+those are defined after the same early return.
+
+**In a Windows-native session** (PowerShell, and only there) node genuinely is
+absent, npm too. Use the codex runtime's node — resolve it rather than pinning
+it, as the directory moves on update:
 
 ```
 & 'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --test --test-concurrency=1
 ```
+
+That line is PowerShell. **Do not run it in WSL — it is a bash syntax error**,
+and the path is unreachable from Linux anyway.
 
 **Two test profiles are correct, and which one you get depends on the tree:**
 
@@ -139,8 +158,9 @@ derivation FAILS and names itself rather than skipping silently.
 
 - Use `git commit -F <file>` for any message containing quotes — PowerShell
   mangles them otherwise.
-- `gh` is NOT installed. Check PR state with
-  `git ls-remote github "refs/pull/*/head"`.
+- **`gh` IS installed and authenticated in WSL** (2.98.0, account `Zanzagar`), at
+  `~/.local/bin/gh`. It is NOT installed on Windows — there, check PR state with
+  `git ls-remote github "refs/pull/*/head"`, which works everywhere.
 - **Flag your own mistakes prominently in the repo's own record** rather than
   quietly fixing them. Commit messages here name which errors were whose.
 - End a working session by writing a date-stamped brief to `docs/handoffs/`
