@@ -14,8 +14,9 @@ written down, three of which fail looking like a wrapper defect), and — read t
 one carefully — a derivation that the armoured/tournament villain `staminaleft`
 is 110 which was **RETRACTED the same day by its own author**. Neither 110 nor
 105 is determined by the scenario. See § "Found 2026-09-01" for the retraction.
-Both of its agent waves are UNVERIFIED-PARTIAL — 109 verifiers died on a usage
-limit — so read its opening paragraph before quoting any count from it.
+Both of its agent waves completed VERIFIED (209/209 and 230/230 verifiers, zero
+errors). An independent Codex review then found what neither wave did — 67 raw
+traces wrongly committed — so read its opening paragraph before quoting it.
 
 **Two earlier sessions closed the night of 2026-08-31 and each left a handoff.
 Read both, and know which answers what** — `ls` puts the migration one last, and

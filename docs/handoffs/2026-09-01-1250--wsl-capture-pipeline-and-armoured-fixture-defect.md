@@ -4,7 +4,7 @@ written:      2026-09-01 12:50 -0400
 sessionStart: 2026-09-01 00:30 -0400
 sessionId:    515e2223-2bd5-49c7-9246-554a40e00772
 agentRuns:    wf_8d57104d-417 (nonce recovery) — COMPLETED **VERIFIED**: 6/6 questions, 209/209 verifiers, 0 errors
-              wf_e72fa4b5-b31 (armoured/tournament) — UNVERIFIED-PARTIAL: 6/6 questions, 247 verdicts, 86 verifiers died on a usage limit
+              wf_e72fa4b5-b31 (armoured/tournament) — COMPLETED **VERIFIED**: 6/6 questions, 230/230 verifiers, 0 errors
               Digests of every returned agent: .audit-harvest/ (gitignored, 2.1 MB)
 branch:       arena/champion-capture
 commits:      194587f..<tip>   # run `git log --oneline -1`; unpushed with `git log --oneline @{u}..HEAD`
@@ -14,14 +14,23 @@ supersedes:   none
 ---
 # Handoff — the capture pipeline runs from WSL, and the armoured family is blocked by its own fixtures
 
-**WAVE 1 IS VERIFIED — 209 of 209 verifiers returned, zero errors. WAVE 2 IS
-UNVERIFIED-PARTIAL — 86 of its verifiers died on a usage limit.** By this
-repository's own standing rule the second is not complete, and its findings are
-claims. **Nothing below rests on an unreplicated agent report** — every
-load-bearing number was re-derived by the main session directly.
+**BOTH WAVES COMPLETED VERIFIED** — wave 1 at 209/209 verifiers and wave 2 at
+230/230, zero errors in either, after several rounds of usage-limit deaths were
+re-run to completion. **Nothing below rests on an unreplicated agent report** —
+every load-bearing number was re-derived by the main session directly, and an
+independent Codex review re-derived the load-bearing ones a third time.
+
+**AN INDEPENDENT CODEX REVIEW FOUND WHAT 758 AGENTS DID NOT**: 67 raw traces
+committed and pushed by a `git add -A` after a subagent script wrote them into
+`test/observations/ss2-1v1/undefined/arch/`. Removed, with a `.gitignore` rule and
+a mutation-tested guard in `ss2-capture-attestation.test.js` that now fails by
+name on any tracked trace. **They remain in pushed history at `4610132`; whether
+to rewrite the branch is the owner's call.** That review also caught the retracted
+"110" still standing at three other sites, and four defects of mine. Its findings
+were treated as claims and re-derived before any was acted on.
 
 **Every returned agent is digested in `.audit-harvest/` (gitignored).** Read that
-before re-running anything; it holds 458 verdicts and 12 investigator reports across 671 agents.
+before re-running anything; it holds 545 verdicts and 12 investigator reports across 758 agent transcripts.
 
 ## Where things stand
 
