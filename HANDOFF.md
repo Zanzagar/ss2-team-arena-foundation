@@ -8,8 +8,20 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-01 19:50 — Codex independence, and what the corpus actually proves](docs/handoffs/2026-09-01-1950--codex-independence-and-the-corpus-archetype.md).**
-Start there. It carries how to drive a capture from WSL (five things nothing had
+[2026-09-01 16:37 — the armoured family measured at n=38](docs/handoffs/2026-09-01-1637--armoured-family-measured-at-n38.md).**
+Start there. It RETRACTS the previous handoff's ranked item 1 — "run the armoured
+family under the arming gate" — by measurement: that gate would have armed **0
+times in 38**, its hero predicate CONTRADICTS all eight target fixtures, and a
+new branch in it is dead code under `validate-vehicle.ps1`. What it puts in its
+place is better news: **35 of 38 archived rounds already reproduce the fixture on
+every pinned field except `staminaleft`**, and `hero.staminaleft == 110 − (walk
+count)` holds 38 of 38, so the hero side is deterministic and unused. Wave
+VERIFIED (6/6 questions, 18/18 write-nothing verifiers, 0 errors) — with **9 of
+18 verdicts BROKEN**, so read the corrections, not just the claims.
+
+**Still current, and superseded only in its ranking:**
+[2026-09-01 15:50 — Codex independence, and what the corpus actually proves](docs/handoffs/2026-09-01-1550--codex-independence-and-the-corpus-archetype.md).
+It carries how to drive a capture from WSL (five things nothing had
 written down, three of which fail looking like a wrapper defect), and — read this
 one carefully — a derivation that the armoured/tournament villain `staminaleft`
 is 110 which was **RETRACTED the same day by its own author**. Neither 110 nor
@@ -17,6 +29,9 @@ is 110 which was **RETRACTED the same day by its own author**. Neither 110 nor
 Both of its agent waves completed VERIFIED (209/209 and 230/230 verifiers, zero
 errors). An independent Codex review then found what neither wave did — 67 raw
 traces wrongly committed — so read its opening paragraph before quoting it.
+*(That file was renamed from `…-1950--` to `…-1550--` on 2026-09-01 with the
+owner's approval: it was stamped in UTC while claiming `-0400`, which would have
+kept `ls docs/handoffs/` pointing the next session at the superseded brief.)*
 
 **Two earlier sessions closed the night of 2026-08-31 and each left a handoff.
 Read both, and know which answers what** — `ls` puts the migration one last, and
@@ -77,9 +92,33 @@ universal.
 - **`captures/` absent is a CAPABILITY boundary, not a test-count difference.**
   The raw traces are the only artifact that can distinguish two independent
   captures from a copy — the normalized records cannot, measured. They are
-  Windows-side and gitignored, so **a question that turns on record
-  independence cannot be settled from a WSL clone at all.** The 1-skipped test
+  Windows-side and gitignored, so ~~**a question that turns on record
+  independence cannot be settled from a WSL clone at all.**~~ The 1-skipped test
   profile is the visible symptom of this, not the substance of it.
+
+  ► **CORRECTED 2026-09-01 (evening). THE ARCHIVE IS FULLY READABLE FROM WSL, AT
+    `/mnt/c/ss2-capture/captures`** — 240 entries, 1,603 files, 42 of them
+    `session-adc*`; `grep`, `find` and `node` all read it normally. The
+    distinction the old sentence missed is CLONE versus MACHINE: a fresh clone
+    has no `captures/`, but a WSL session ON THE CAPTURE BOX reaches the Windows
+    tree through `/mnt/c`. **This wording is what would have stopped this
+    session's central measurement**, and two independent agents flagged it before
+    taking any number. Two further copies of it live at line ~1492 ("the archive
+    is not reachable from Linux") and line ~1524 ("not adjudicable from a WSL
+    clone at all"); both are struck there too. Retract at every site.
+
+  ► **AND THE ARCHIVE HAS ONE REACHABLE COPY TODAY, NOT THREE.** The head says
+    below that three exist (live tree, retired OneDrive tree, `D:`). Measured:
+    `D:` is not attached (`/mnt/d` is an empty mount point), the OneDrive
+    Documents tree holds only `ss2-team-arena-foundation.bundle` — a git bundle,
+    which by construction cannot carry gitignored traces — and a bounded search
+    of `/mnt/c` to depth 5 finds every `.rufflelog` under
+    `/mnt/c/ss2-capture/captures` and nowhere else. **1,603 files, ~20 MB, the
+    primary measured evidence the whole corpus is ingested from, unreplicated.**
+    Note the exposure inverts what the head assumes: the archive sits OUTSIDE the
+    Claude MSIX container, so an app reset does not touch it — while the
+    save-state store INSIDE the container (75 snapshots, ~62 KB) is the smaller
+    store. **Protecting the container does not protect the evidence.**
 
 ## The design track is deliberately quarantined
 
@@ -288,6 +327,16 @@ of it (checked with `git merge-base --is-ancestor`, not assumed) — and the
 
 ### Expected test profiles
 
+► **THE COUNTS IN THIS SECTION ARE STALE BY 8. Corrected 2026-09-01 (evening),
+  measured on this tree: `630 tests, 629 passed, 0 failed, 1 skipped`** — the
+  fresh-clone profile, since the WSL tree's `captures/` holds only `README.md`.
+  The 15:50 handoff already states 630/629/0/1 correctly; **the defect is that
+  the LIVING HEAD was not updated with it**, which is exactly the failure mode
+  `AGENTS.md` names when it says the head is the only place a wrong instruction
+  may be corrected. Read every "622" below as 630 and every "621" as 629 until
+  someone re-measures both profiles the way this section demands. The
+  capture-bearing profile has NOT been re-measured since; do not assume 630/0.
+
 - A capture-bearing operator worktree with the complete ignored raw-trace
   archive runs all **622 tests: 622 passed, 0 skipped, 0 failed**.
 - A fresh clone or worktree with none of those ignored traces runs **622 tests:
@@ -415,6 +464,21 @@ are the original level-1 gladiator.
 
 **`zainger-repaired` is a WIPED save under a reassuring name.** `save-state.ps1`
 now refuses to restore it without `-Force`.
+
+► **THE SNAPSHOT STORE IS 75 DIRECTORIES HOLDING ONLY 7 DISTINCT SAVES, AND THE
+  LIVE SAVE IS ALREADY ONE OF THEM. Measured 2026-09-01 (evening) by hashing
+  every `ss2_data.sol` under `/mnt/c/ss2la/ss2-capture-snapshots`; the head's
+  "74" at line ~608 is stale.** Distribution of the 75:
+  **58** share `2514b1cb…`, 12 share `6a06e9e8…`, and five are unique.
+
+  **The operationally useful part: the LIVE save is `2514b1cb…` too** — byte
+  identical to those 58, which include `level4-vitality-tournament-gate`. So for
+  the armoured/tournament family **"restore `level4-vitality-tournament-gate`"
+  is a no-op today and destroys nothing**, and the starting state that family
+  needs is redundantly preserved 58 times over. That removes the restore risk the
+  runbook warns about — but NOT the run risk: `run-arena.ps1` mutates the live
+  save DURING a run, which is why it takes its own snapshot and why a fresh
+  snapshot name stays mandatory.
 
 ### Codex: which machine owns which config, and what is actually installed
 
@@ -601,6 +665,33 @@ real test"; this was it, and it needed five things nothing had written down.
   profile store — which, unpackaged, is the empty one. `N>1` forces a
   per-session store seeded from the real save, which is what makes it work.
 
+  ► **THIS RULE IS SCOPED TO `run-campaign.ps1` PRISONER CAMPAIGNS, AND READING
+    IT AS GENERAL IS DANGEROUS FOR THE ARMOURED FAMILY. Verified in the scripts
+    2026-09-01 (evening).** `run-campaign.ps1:123-124` **refuses**
+    `-Concurrency > 1` for any `-Navigate` other than `prisoner`, and passes
+    `-SaveDirectory` only when `Concurrency > 1` (`:166`, `:179`).
+    `run-arena.ps1` — the vehicle all five armoured fixtures use — has **no
+    `-Concurrency` parameter at all** (its only mention is a comment at `:121`)
+    and passes `-Navigate arena` (`:266`). **So the armoured family cannot get
+    per-session save isolation by any parameter, and necessarily runs against the
+    licensed save.** That is not a nicety: it is why `run-arena.ps1` snapshots
+    first, and why an armoured run is a supervised, serial, save-mutating
+    operation rather than something to fan out.
+
+- **`-RunSeconds` is NOT a capture parameter.** It exists only in
+  `validate-vehicle.ps1` (default 12), so the "cold profile needs `-RunSeconds
+  30`" rule above governs the VEHICLE-VALIDATION step that `AGENTS.md` requires
+  after a wrapper edit — not `launch-capture.ps1`, `run-arena.ps1`,
+  `run-campaign.ps1` or `run-capture.ps1`, none of which accept it.
+
+- **The WSL repo cannot launch Ruffle at all.** `launch-capture.ps1:156`
+  resolves `ruffle.exe` under `$projectRoot/.tools`, which exists only in the
+  Windows tree at `C:\ss2-capture`. **A capture must be driven from that tree —
+  which is currently 28 commits behind this one**, so any wrapper edit made here
+  has to reach it before it can run. Its 38 "modified" files are pure CRLF churn
+  (verified by diffing content, not `git status`), so the tree is clean in
+  substance; it simply has not been fetched since `98482b6`.
+
 ### The live save has moved past the prisoner, and 22 goldens depend on that bout
 
 The saved gladiator (John Ringler) has progressed beyond the dungeon prisoner
@@ -664,12 +755,47 @@ them. The win is deleting redundant work, not relieving contention.
 
 ### AVM1 has ONE comparison opcode
 
-`>` is `<` with operands swapped; `>=` and `<=` are `<` negated. Every
+~~`>` is `<` with operands swapped;~~ `>=` and `<=` are `<` negated. Every
 comparison with NaN is false, so **both negated forms return TRUE for NaN**, and
 every field the wrapper reads is undefined until the frame that initialises it.
 This caused **three separate live defects in one day**, including one that
 rewrote the gladiator's gold. The only safe shape is un-negated `<`, twice:
 `(n < 1) || (0 < n)`. Use `isNum()`.
+
+► **THE HEADING AND THE FIRST CLAUSE ARE WRONG; THE RULE THEY JUSTIFY IS RIGHT.
+  Corrected 2026-09-01 (evening) — and this section is titled by the wrong half,
+  which is why it is corrected here rather than quietly rephrased.** This build's
+  AVM1 has **TWO** numeric comparison opcodes, `ActionLess2` (0x48) and
+  `ActionGreater` (0x67, SWF6+). Verified two ways: an opcode census over the
+  compiled wrapper artefact (Less2 70 = 51 `<` + 19 `>=`; Greater 39 = 28 `>` +
+  11 `<=`), and directly by the main session against the hash-verified licensed
+  SWF, whose own action stream contains both `Greater` and `Less2`. So `>` is a
+  real opcode here, not `<` with swapped operands.
+
+  **What survives untouched, because it is what the section exists for:** on this
+  toolchain `a >= b` compiles to `Less2; Not` and `a <= b` to `Greater; Not`, so
+  **both still return TRUE when an operand is NaN**, while bare `<` and `>`
+  return FALSE. Keep using `isNum()`.
+
+  **But do not read "un-negated `<`, twice" as a universal.** NaN-safety here is
+  branch POLARITY plus a guard, not an operator whitelist. The wrapper's own
+  dominant idiom — used inside `captureAllowedNow()` — is *reject NaN first, then
+  compare normally* (`if (!isNum(f)) return false;` then any ordinary
+  comparison), at lines 2029→2031, 755→756 and 735→737. A rule that forbade `>=`
+  outright would condemn all three. Where no `isNum` guard precedes the test:
+  if the true-branch ACCEPTS, the comparison must be un-negated so NaN fails it
+  (line 574); if the true-branch REFUSES or defaults, it must be negated so NaN
+  triggers the refusal (lines 588, 2137). Rewriting the second kind into the
+  first is what turns a gate fail-OPEN.
+
+  **And `isNum()` rejects only NaN.** `Number("")`, `Number(null)`,
+  `Number(false)` and `Number([])` are all 0, so `isNum(f) && Number(f) == want`
+  ACCEPTS all of them whenever `want` is 0 — and the armoured fixture family
+  carries 19 zero-valued fields, including `hero.armourclass` and eight zero hero
+  armour slots. **Before any gate compares a game field against a target of 0,
+  measure what Ruffle yields for a field that is `""` or `null`.** The wrapper
+  already treats `""` as a distinct hazard for FlashVars (lines 571, 580, 2118);
+  the same hazard for game-read fields is unsolved.
 
 ### `validate-vehicle.ps1` proves less than its name suggests
 
@@ -679,6 +805,38 @@ body leaves the gate green while restoring the demonstrated save-corruption bug
 verbatim. Save corruption is outside its observable universe by construction —
 it compares a trace to a fixture, never a save. It now says so in its own PASS
 output and names the wrapper source hash it compiled.
+
+► **BUT ITS PASS TEXT NOW OVERSTATES ITS OWN BLINDNESS, AND THAT MATTERS FOR THE
+  ARMING-GATE WORK. Measured 2026-09-01 (evening).** The PASS output says the
+  gate "never enters the navigator, the arena state machine, the four gates,
+  staging, the shop, the fight policy or **the capture gate**". The last item is
+  false: **`captureAllowedNow()` runs on every gate run.** The path is
+  `ov.checkattackroll()` → the checkattackroll wrap (wrapper 2376-2389) →
+  `if (!actionCaptured) beginAction();` (2381) → `if (!captureAllowedNow())
+  return;` (2216). A gate run's own log shows `called:checkattackroll` followed
+  immediately by `attacker-resolved-hero`, and **two archived gate runs went RED
+  on a capture-gate refusal** — they produced a 387-byte `.jsonl` with no
+  observation, so ingest threw.
+
+  **So the gate is a working oracle for the FIRST HALF of that function** — the
+  `arenaStopped` check and the whole attacker-side guard (2006-2023) — and blind
+  only from line 2024 onward, because no `-Pnavigate` is passed and `arenaMode`
+  is false. **Anything added inside the `champion` block is DEAD CODE under the
+  gate and would pass green untested.**
+
+  **The remedy is proven on this codebase, not speculative:** when the
+  attacker-side guard was fixed, `stub-game.as` was extended with
+  `ov.game_attacker` / `ov.game_defender` (`stub-game.as:52-65`, whose comment
+  says exactly why), and the gate then demonstrated that guard firing in BOTH
+  directions and going red for each. **Extend the stub so the gate can see a new
+  branch** — that is the technique, and it has worked here once already.
+
+  *(Also corrected: `attack_chances` is NOT the arming point the gate exercises.
+  `called:attack_chances` appears **0 times** in vehicle-check rufflelogs and 209
+  times across the archive. The single vehicle-check "hit" for that string is
+  inside a decompiled wrapper SOURCE copy, not a trace — the exact false-positive
+  class the wrapper's own comment warns about, and it has now caught a reader
+  twice.)*
 
 ---
 
@@ -758,6 +916,111 @@ has per-fixture commands.
 ---
 
 ## Open items
+
+### Found 2026-09-01 (evening): the armoured family measured at n=38, and what it is actually waiting on
+
+**Read this before the block below it, which it corrects in its ranking.** All 38
+armed `adc` traces were delogged to scratch (27 of them for the first time) and
+run through the repository's OWN matcher — `ingestSs2CaptureTrace` +
+`matchSs2ObservationToFixture` — against all 8 blocked fixtures. Nothing was
+written into the corpus. Re-derive with the archive at
+`/mnt/c/ss2-capture/captures`; `node tools/capture-session.mjs delog --trace <f>
+--out <scratch>` needs no install and no Ruffle.
+
+► **THE FAMILY IS ONE FIELD FROM EVIDENCE, AND THE FIELD IS THE VILLAIN'S
+  `staminaleft`.** Comparing every pinned field the trace actually watches,
+  **35 of 38 armed rounds reproduce the target fixture's scenario exactly except
+  `staminaleft`**; the only other offender is `hero.hitpoints`, in 3. Under the
+  full matcher (samples, mutationTrace, finalState and events included) **4 of 38
+  — `adc33`, `adc35`, `adc37`, `adc42` — diverge on NOTHING BUT `staminaleft`.**
+
+► **THE HERO SIDE IS SOLVED AND NOBODY HAS USED IT.**
+  `hero.staminaleft == 110 − (hero walk count)` holds **38 of 38**, exceptionless.
+  So the hero's value is a deterministic function of a quantity the autopilot
+  CHOOSES. The fixtures' `hero.staminaleft 105` is exactly 5 walks, which
+  occurred in 13 of 38. **Pin the approach-step count and the hero side stops
+  being a lottery** — this is the "fix the capture, not the comparison" remedy
+  § "READ THIS FIRST" already prescribes, and it has never been implemented.
+
+► **THE VILLAIN SIDE IS NOT MERELY UNPINNED — IT IS UNOBSERVED, BY
+  CONSTRUCTION.** The wrapper's action stream comes from ONE hook,
+  `getphase` (wrapper 2347-2357), and `getphase` carries only the HERO's
+  actions: the villain is dispatched through `villaindecisionA` /
+  `villaindecisionB` (`+0x3ac0`, `+0x3b0a`), written by `villainChooseAction`
+  at `sprite:862[overlay]/frame:52/DoAction@0x23f835`. **So the sole determinant
+  of `villain.staminaleft` at arming — the villain's own action sequence — is
+  recorded nowhere in any of the 240 archive entries.** Confirmed live: `adc36`
+  drained 33 villain stamina and its trace records four `phase_action` lines,
+  all the hero's. Widening `DEFAULT_WATCH_FIELDS` cannot reach this; a watch
+  fires on a field, and this is a sequence. **Hooking `villainChooseAction` is
+  the change that would make the villain's stamina explainable from the record.**
+  Not attempted; costed nowhere; and note it is an OBSERVABILITY change, not a
+  determinism one — `villainChooseAction` makes its own random draws.
+
+► **`attackDirection` IS THE SECOND BLOCKER AND IS IRREDUCIBLE AT P = 1/4.**
+  32 of 38 rounds diverge on `/scenario/attackDirection` (observed 4, 8, 10, 11
+  against the pinned 5). `normal_attack` draws it at `+0x61f1` as
+  `randomBetween(5, 8)`. **It cannot be injected**: across all 38 traces the 254
+  recorded rolls are `injected: true` and **not one is a `(5,8)` draw**, because
+  the wrapper arms after the direction is already chosen — `beginAction` READS
+  `ov.attack_direction` rather than serving it. So every armoured round is a
+  1-in-4 lottery on direction before stamina is even considered. The map says
+  the same thing in its own words ("nothing in a run can select the direction");
+  this is that claim confirmed from the traces.
+
+► **TWO OF THE EIGHT FIXTURES CANNOT INGEST AT ALL, AND IT IS NOT A DIVERGENCE.**
+  `candidate-armoured-removal-destroys-helmet` and
+  `-destroys-shoulderguard` REFUSE every one of the 38 traces with
+  *"the staged villain state is missing the required field `helmet_defence`"*
+  (`shoulderguard_defence` for the other). Those fields are pinned by the
+  fixtures and absent from the wrapper's 29-key state dump. **The mechanism is
+  already right and is `-WatchFields`, which EXTENDS the default per session** —
+  do NOT widen `DEFAULT_WATCH_FIELDS`, for the reason the wrapper's own comment
+  gives. This is the cheapest unblocking on the list and nothing records it.
+
+► **ALL 38 ROUNDS TARGETED ONE FIXTURE. Seven of the eight have never had a
+  capture attempt that could match them.** Identified by the injected tape,
+  whose seven values pick out `candidate-armoured-deflection-threshold-cleared`
+  uniquely. `equality-quirk` and the three `tournament-*` stage a different
+  villain (`armourclass 22, helmet 2`) that no `adc` round ever staged. **So
+  "the armoured family has spent 38 rounds" is really "one fixture has".**
+
+► **DELOGGING THE 27 ADDS NO MATCHABLE EVIDENCE, WHICH RETIRES A RANKED ITEM.**
+  The 15:50 handoff ranks "27 archived armed traces were never delogged" third,
+  on the reasoning that the repository can see only a third of the evidence. It
+  can see only a third of the TRACES, but all four staminaleft-only near-misses
+  were already among the 11 delogged. The 27 contribute 0 additional near-misses
+  and diverge on `attackDirection` 27 times out of 27.
+
+► **AND THEY CANNOT BE HONESTLY INGESTED TODAY.** All 38 traces carry
+  `"installHashVerifiedAfter": null`. Ingest's placeholder path then runs
+  `verifyInstallAgainstFingerprint` LIVE and stamps `true` — **asserting a
+  post-session hash check about sessions that ran on 2026-08-31.** That is the
+  quiet conversion of measured evidence into asserted data this project exists
+  to refuse, and there is no committed record to carry the value forward from,
+  because **zero `adc` observation records are committed** (68 observations, none
+  from this family). Measure them in scratch, as this session did; do not ingest
+  them without deciding that question first.
+
+► **THE LOAD-BEARING NEGATIVE UNDER THE WHOLE PLAN HAS NO BYTE CITATION.**
+  "The villain is never re-skinned, so `-StageVillain` is durable" is the
+  foundation of every armoured capture, and it appears only in this file (lines
+  ~716-724, ~897) with no offset, no reference count and no `inspect-swf`
+  command — while its HERO half is fully byte-cited. Observational support does
+  exist and is decent (12 of 12 staged villain fields constant across all 38
+  rounds, while 6 unstaged villain stats vary), but that is not the same as the
+  negative being established. Check it with
+  `inspect-swf --references '"value":"skincharacter"'` before another supervised
+  window is spent on it.
+
+**So the ranked order that follows from the measurements is:** (1) add
+`helmet_defence`/`shoulderguard_defence` via `-WatchFields` — two fixtures
+unblocked for the cost of one parameter; (2) pin the approach-step count, which
+removes the hero-side lottery outright; (3) decide the villain-stamina scenario
+question, which is the owner's call and is now costed honestly (3 values per
+fixture, 0 recalculations — see the correction in the block below); (4) only
+then a gate, and only one that can be exercised by an extended stub. **Nothing
+in (1) through (3) needs Ruffle, the save, or a supervised window.**
 
 ### Found 2026-09-01: the armoured and tournament families are blocked by the FIXTURES, not by capture luck
 
@@ -852,6 +1115,59 @@ has per-fixture commands.
   stop pinning it, which the head forbids elsewhere and which should stay
   forbidden until (a) and (b) are ruled out.
 
+  ► **CORRECTED 2026-09-01 (evening), AND THE FRAMING ABOVE IS THE RANKING
+    ERROR: (a) AND (b) ARE NOT ALTERNATIVES — THEY ARE THE SAME PREDICATE.**
+    The only villain `staminaleft` a scenario can legally DERIVE from the map is
+    `staminamax`, because `initbattle` (`+0x0b9c`) assigns
+    `villain.staminaleft = villain.staminamax` unconditionally and the scenario
+    declares no villain actions. So (a)'s only legally-founded gate condition is
+    `villain.staminaleft == villain.staminamax` — byte-identical in shape to the
+    hero predicate the champion branch already computes at wrapper line 2066.
+    **(b) is not an alternative to (a); (b) is the only thing that makes (a)
+    pass more than twice in 38.** Presenting them as either/or costs (a) its
+    success rate and (b) its gate.
+
+  ► **AND `stamina 2` IS WRONG BY AN ORDER OF MAGNITUDE. Byte-verified against
+    the licensed SWF by the main session 2026-09-01, not taken from an agent.**
+    The arithmetic in (b) is right for a WALK and false for the villain's actual
+    action set. `villainChooseAction`
+    (`sprite:862[overlay]/frame:52/DoAction@0x23f835`) writes **25 distinct
+    labels** into `villaindecisionA`, and they include `chargeright`
+    (`+0x0a18`), `chargeleft` (`+0x0d07`) and `jumpleft`/`jumpright` at eight
+    sites. Charge costs `Math.round(movement_speed * 2)` — read off the opcodes
+    at `+0x4214` (chargeright) and `+0x4480` (chargeleft): push `staminacost`,
+    get `game_attacker.movement_speed`, push 2, `Multiply`, `Math.round`. At the
+    `movement_speed` clamp FLOOR of 4 that is **8**, against a `stamina 2` regen
+    of 2. Net −6, every charge.
+
+    Regen is `1 + Math.round(stamina / 3)`, byte-read at `+0x32c9`–`+0x32fc`
+    (the cost subtraction is `+0x32a7`–`+0x32c2`). So invariance to the villain's
+    ENTIRE action set requires `1 + round(stamina/3) >= 8`, i.e.
+    `stamina >= 19.5`, i.e. **`stamina 20` and `staminamax 300`** — not
+    `stamina 2` / `staminamax 120`.
+
+    **A verifier disputed the charge premise and was wrong; the bytes settle
+    it.** It argued charge is wired only as a HERO button and that no byte
+    evidence places it in the villain's set, which would have made the minimum
+    `stamina 8` (no charge) or `stamina 2` (no charge, no jump). Re-derived here
+    with `inspect-swf --references 'villaindecisionA'` over the hash-verified
+    install (`77cb545c…`, matching the pinned fingerprint): 92 references, and
+    charge is in the villain's set at the two offsets above. Record the command,
+    not the argument.
+
+  ► **(b) IS ALSO ROUGHLY TEN TIMES CHEAPER THAN THIS BLOCK CLAIMS.** "A new
+    scenario needing every dependent value re-derived" is false: across all 8
+    fixtures `chance` is 42 and `rollNeeded` 58 (functions of `hero.attack 1` and
+    `villain.defence 3` only), `deflectionThreshold` is `(100 − 1.5*helmet) +
+    greaves`, and `selectedDamage` comes from the hero's own min/max damage.
+    **None of the five reads the villain's stamina vector.** The change is 3
+    values per fixture on the villain side plus new PINS for
+    speed/strength/charisma/magicka/stamina, and **0 calculations re-derived.**
+    Every fixture's purpose survives — the armour-equality quirk is still damage
+    22 against armourclass 22, the deflection fixtures still turn on
+    helmet/greaves, the removal fixtures still on `helmet_defence`/
+    `shoulderguard_defence`.
+
   *The retracted paragraph is kept below because the arithmetic in it is correct
   and load-bearing; only the conclusion drawn from it was wrong.*
 
@@ -916,9 +1232,69 @@ has per-fixture commands.
 The blocks below are in reverse order of discovery. Read this list first; the
 ones that change what the next session should DO are marked ►.
 
-► **THE FIX FOR THE ARMOURED FAMILY ALREADY EXISTS IN THE WRAPPER, BEHIND A
-  ONE-LINE BYPASS. It is not a schema change and not a fixture edit.** Measured
-  2026-09-01.
+► ~~**THE FIX FOR THE ARMOURED FAMILY ALREADY EXISTS IN THE WRAPPER, BEHIND A
+  ONE-LINE BYPASS. It is not a schema change and not a fixture edit.**~~
+  **RETRACTED 2026-09-01 (evening) BY MEASUREMENT. Do not act on this item as
+  written — it was ranked FIRST in the 15:50 handoff and it is wrong in its
+  premise, its mechanism and its cost.** The paragraphs below are kept because
+  their byte-level observations are correct; only what was concluded from them
+  is not. Established by a VERIFIED question-diverse wave (6/6 investigators,
+  18/18 write-nothing verifiers, 0 errors) plus direct re-derivation from the
+  licensed SWF by the main session.
+
+  **The four things that refute it, in order of how much they cost to discover:**
+
+  1. **THE GATE IS PROVEN ONLY TO REFUSE, NEVER TO ARM.** Across all four
+     champion rufflelogs the branch was evaluated 931 times and emitted
+     `action-armed` ZERO times. "Proven on another route" is true only in the
+     sense that the answer is "it refuses everything".
+  2. **THE GATE'S HERO PREDICATE CONTRADICTS ALL EIGHT FIXTURES.**
+     `captureAllowedNow()` requires `hero.staminaleft == hero.staminamax`
+     (wrapper line 2066). All 8 target fixtures pin `hero.staminaleft 105` with
+     `staminamax 110`. **A session that satisfies the gate can never match a
+     fixture, and a session that matches a fixture can never pass the gate.**
+     Generalising the branch therefore means REPLACING its stamina predicate,
+     and someone must first decide which of the two is the correct scenario.
+     Measured on the live data: 0 of 38 armed `adc` rounds had the hero at
+     `staminamax`, and in 1091 champion-mode refusals the hero never reached it
+     (highest observed 107 of 110).
+  3. **A NEW BRANCH THERE WOULD BE DEAD CODE UNDER `validate-vehicle.ps1`.**
+     The gate passes no `-Pnavigate`, so `arenaMode` is false and
+     `captureAllowedNow()` returns at line 2024 — BEFORE the champion block at
+     2026. The gate would go green on a branch that never executed. (What the
+     gate DOES reach is the attacker-side guard; see the correction to that
+     script's own PASS text below.)
+  4. **THE WRAPPER HAS NO CHANNEL THROUGH WHICH A FIXTURE'S SCENARIO CAN
+     ARRIVE.** `launch-capture.ps1:278-304` passes `arenaStagedLevel`,
+     `stageHero` and `stageVillain` and nothing else. This is a new FlashVar
+     plumbed through three files (`ss2-capture-wrapper.as`,
+     `launch-capture.ps1`, and `run-arena.ps1`'s `-ArenaCapture` ValidateSet),
+     not "a one-line bypass" above an existing branch.
+
+  **And the yield it was ranked for does not exist.** A gate keyed on the
+  fixtures as written would have armed **0 times in 38** — for every one of the
+  8 fixtures, because all 8 pin `staminaleft 105` on BOTH sides and the observed
+  joint pair `(105,105)` never occurs (33 distinct pairs in 38 rounds; hero 105
+  in 13, villain 105 in 1, both in 0). Re-derived independently three ways.
+
+  **Read that 0/38 narrowly, though — it is not a gate's success rate.** All 38
+  `adc` rounds ran with NO autopilot: `launcher.log` says "Stage the scenario
+  yourself, perform the one controlled action". A HUMAN chose the arming moment.
+  So 0/38 measures an ungated MANUAL protocol. **The measurement that would
+  actually settle this has never been taken: arm on the hero's FIRST action of
+  the staged bout rather than on an operator-chosen turn.** `initbattle`
+  (`+0x0b8a`–`+0x0bb6`) assigns `villain.staminaleft = villain.staminamax`
+  unconditionally, so before the villain has taken a phase its value IS
+  determined. Every villain turn after that walks it away from the pin.
+
+  **What survives, and it is the useful half:** the armoured family is much
+  closer to evidence than the family's 0 goldens suggest. Running the
+  repository's OWN matcher over all 38 armed traces (all 38 delogged to scratch;
+  27 of them for the first time): **35 of 38 reproduce the target fixture's
+  scenario on every pinned, watched field except `staminaleft`**, the only other
+  offender being `hero.hitpoints` in 3. And `hero.staminaleft == 110 − (hero
+  walk count)` holds **38 of 38**, so the hero side is deterministic and
+  operator-controllable; only the villain side is not.
 
   `captureAllowedNow()` in `ss2-capture-wrapper.as` has a champion branch that
   refuses to arm unless the live hero state matches what the scenario requires
@@ -938,6 +1314,22 @@ ones that change what the next session should DO are marked ►.
   `capture-refused-unstaged` appears ZERO times in any of them.** So the armoured
   family spent 38 rounds in the one mode that refuses nothing, and banked 11
   divergence reports against a precondition it never checked.
+
+  *(Corrected 2026-09-01 evening: the 15:50 handoff restated this as "with ZERO
+  refusals logged", which is false. **Seven refusals ARE logged** — all
+  `capture-refused-wrong-side`, in `adc32`, `34`, `35`, `36`, `45`, `47`, `48`.
+  What is genuinely zero is `capture-refused-unstaged`, because `always` returns
+  true at line 2025 before any scenario check while the attacker-side guard three
+  lines earlier still fires. The claim is right about the ARMING gate and wrong as
+  literally stated about refusals.)*
+
+  *(Also corrected: all 38 rounds targeted ONE fixture —
+  `candidate-armoured-deflection-threshold-cleared`, identified by the injected
+  tape, whose seven values match it uniquely. **The other seven of the eight
+  blocked fixtures have never had a single capture attempt that could match
+  them.** Four of the eight share the staged villain profile and differ only in
+  the tape; `equality-quirk` and the three `tournament-*` stage a DIFFERENT
+  villain (armourclass 22, helmet 2) that no `adc` round ever staged.)*
 
   **THE SCENARIO BLOCK IS A PRECONDITION, NOT A STAGED INPUT** — that distinction
   is what the family got wrong. `-StageVillain` is only the MECHANISM that tries
@@ -1359,8 +1751,12 @@ The paragraph below said this question could not be settled from a WSL clone.
 That is still true of THIS tree, but the Windows session ran it: a six-agent
 probe over the raw `rufflelog` archive in `C:\ss2-capture\captures`, four probes
 INDEPENDENT and both adversarial verifiers BROKEN. **Treat every figure in this
-paragraph as unverified here — no one on this side has re-derived them, and the
-archive is not reachable from Linux.** What it reports: a 197-sample microsecond
+paragraph as unverified here — no one on this side has re-derived them~~, and the
+archive is not reachable from Linux~~.** *(Struck 2026-09-01 evening: the archive
+IS reachable from Linux at `/mnt/c/ss2-capture/captures`; see the correction in
+§ "What to read, and what you may skip". The figures below are still unverified
+here, but they are now CHECKABLE from this side — nothing stops the next WSL
+session re-deriving them.)* What it reports: a 197-sample microsecond
 timestamp series inside each log, 194-195 of 196 inter-line deltas differing,
 RMS divergence 3.5-31.3 ms, chi-squared on microsecond last digits uniform
 across all 25 logs (so not synthetically generated), frame cadence tracking the
@@ -1392,7 +1788,15 @@ in exactly four leaves, and from `obs-fr1` in the same four. That is what a
 deterministic outcome recorded twice looks like AND what a copy looks like;
 nothing in the normalized record separates them. The one artifact that could —
 the raw trace — is in `captures/`, which is gitignored and Windows-side, so
-**this question is not adjudicable from a WSL clone at all.**
+~~**this question is not adjudicable from a WSL clone at all.**~~
+**CORRECTED 2026-09-01 (evening): it is adjudicable from this machine.** The
+gitignored archive is readable from WSL at `/mnt/c/ss2-capture/captures`, so the
+raw traces this paragraph calls out of reach can be opened, delogged and matched
+without leaving Linux — this session delogged all 38 armed `adc` traces and ran
+the repository's own matcher over them. What remains true is the narrower claim
+the paragraph opens with: **the NORMALIZED record cannot separate an honest
+repeat from a copy.** That is a property of the record, not of the operating
+system, and this correction does not touch it.
 
 Read the per-golden strength honestly. `golden-prisoner-normal-kill-dir6` is
 the strong one: 9 records, 4 nonces, two separate launcher invocations, a
@@ -1532,6 +1936,19 @@ the analysis that established it is below the line. **Correct these HERE.**
 - **One `isNum` site survives at `ss2-capture-wrapper.as:1407`**, with a
   demonstrably NaN operand. Fail-closed, so diagnosability rather than
   corruption — but the claim that the guard is used everywhere is false.
+  ► **THE WORDING IS BACKWARDS AND SENDS A READER TO THE WRONG THING.
+    Corrected 2026-09-01 (evening), re-derived directly from the file.** Line
+    1407 contains **NO `isNum` call**. It reads
+    `if (currentTournament >= 19 && ranking <= 2) {` — a bare doubly-negated
+    comparison on two possibly-undefined game fields, which is precisely the
+    shape the `isNum` comment block forbids: with either field undefined,
+    `NaN >= 19` and `NaN <= 2` are BOTH true and the run takes
+    `arenaAbort("final-victory-arm")`. It is the surviving UNGUARDED NaN site,
+    not a surviving isNum site. `isNum` appears on 12 lines — 625 (the
+    definition), 634, 735, 755, 877, 951, 1296, 1496, 1597, 2029, 2065, 2129 —
+    and none of them is 1407. The severity assessment is unchanged and correct:
+    fail-closed, a spurious abort rather than a false capture. The same wording
+    appears again below the archive line at ~2042 and is wrong there too.
 - **`-StageGold` re-stages on every `-Attempts` retry.** Scope any fix to make
   the SHOP TRIP idempotent, not the gold write; the obvious fix is worse than the
   bug.

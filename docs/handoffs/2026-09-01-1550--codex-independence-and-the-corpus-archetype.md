@@ -1,6 +1,6 @@
 ---
-handoff:      2026-09-01-1950--codex-independence-and-the-corpus-archetype
-written:      2026-09-01 19:50 -0400
+handoff:      2026-09-01-1550--codex-independence-and-the-corpus-archetype
+written:      2026-09-01 15:50 -0400
 sessionStart: 2026-09-01 00:30 -0400
 sessionId:    515e2223-2bd5-49c7-9246-554a40e00772 (later turns: session_0131JYgqvFrYG5Vpaq8bxbcJ)
 agentRuns:    wf_8d57104d-417 (nonce recovery) — VERIFIED: 6/6 questions, 209/209 verifiers, 0 errors
@@ -16,7 +16,22 @@ supersedes:   2026-09-01-1250--wsl-capture-pipeline-and-armoured-fixture-defect
 # Handoff — what the corpus actually proves, and why the outside reviewer mattered
 
 **Supersedes `2026-09-01-1250`, which is stale in its wave status (it called
-wave 2 partial), its counts, and its top-ranked item.** Read this one.
+wave 2 partial), its counts, and its top-ranked item.** ~~Read this one.~~
+**SUPERSEDED IN TURN by
+[`2026-09-01-1637--armoured-family-measured-at-n38`](2026-09-01-1637--armoured-family-measured-at-n38.md),
+which RETRACTS this handoff's ranked item 1 by measurement.** Everything else
+here stands.
+
+> **RENAMED 2026-09-01 16:37, from `2026-09-01-1950--` to `2026-09-01-1550--`,
+> with the owner's approval.** This file was stamped in **UTC** while its
+> frontmatter claimed `-0400`; `git log` puts its commit at **15:50:59 -0400**,
+> exactly four hours before the name. The harm was not cosmetic: handoff names
+> sort lexicographically and `AGENTS.md` tells every session to *"read the newest
+> file in `docs/handoffs/`"*, so a `1950` stamp would have kept sending the next
+> reader to this superseded brief instead of the one that supersedes it. The
+> stamp is **local time when the handoff was written**, as
+> [`README.md`](README.md) says; the offset in the frontmatter is what makes it
+> unambiguous, and it has to be true.
 
 ## Where things stand
 
