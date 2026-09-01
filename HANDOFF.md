@@ -5,8 +5,16 @@ session lives in [`docs/handoffs/`](docs/handoffs/README.md), stamped
 `YYYY-MM-DD-HHMM--slug`.** Starting a session should cost one sentence — "read
 the latest handoff in `docs/handoffs/` and proceed" — with this file as the state
 it points at. A handoff must not restate what is here; if the two ever disagree,
-THIS file is right and the handoff was frozen at the end of its session. Latest:
-[2026-09-01 00:30 — migration close-out, and what is untested](docs/handoffs/2026-09-01-0030--migration-closeout-and-what-is-untested.md).
+THIS file is right and the handoff was frozen at the end of its session.
+
+**Two sessions closed the night of 2026-08-31 and each left a handoff. Read both,
+and know which answers what** — `ls` puts the migration one last, and it is not
+the corpus brief:
+[00:30 — migration close-out, and what is untested](docs/handoffs/2026-09-01-0030--migration-closeout-and-what-is-untested.md)
+covers the WSL/Windows split and what on this machine has never been exercised;
+[00:21 — corpus repair and doc-integrity guards](docs/handoffs/2026-09-01-0021--corpus-repair-and-doc-integrity-guards.md)
+covers the goldens, the promotion driver and the ranked work, and supersedes
+`2026-08-31-2244`.
 
 ---
 

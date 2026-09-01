@@ -48,10 +48,26 @@ supersedes:   none
 `sessionId` and `agentRuns` are the load-bearing ones. Every subagent's full
 transcript, its brief included, is recoverable at:
 
+**Derive this path, do not copy it — it is a function of the working directory,
+and the working directory has moved twice.** Claude Code names the project
+directory after the absolute path of the tree it was launched in, with the
+separators flattened. So:
+
 ```
-%USERPROFILE%\.claude\projects\C--Users-corey-OneDrive-Documents-ChatGPT-SS2-Multiplayer-Mod\
-  <sessionId>\subagents\workflows\<runId>\
+# WSL, measured 2026-09-01 — this is where the runs of the 2026-08-31 sessions are
+~/.claude/projects/-home-corey-projects-swords-and-sandals-2-multiplayer/
+  <sessionId>/subagents/workflows/<runId>/
+
+# Windows: same rule, derived from whichever tree was used at the time.
+%USERPROFILE%\.claude\projects\<flattened absolute path>\<sessionId>\subagents\workflows\<runId>\
 ```
+
+The literal path this file used to give —
+`C--Users-corey-OneDrive-Documents-ChatGPT-SS2-Multiplayer-Mod` — names the
+RETIRED OneDrive tree. It was already stale when the Windows tree moved to
+`C:\ss2-capture` on 2026-08-31, and it never described WSL at all. A path
+written out literally in a document that calls it load-bearing is exactly the
+thing that rots; the rule survives a relocation and a literal does not.
 
 So a later session can read exactly what an auditor was asked and what it
 answered, instead of trusting a summary of it. `docs/overnight-agent-plan.md`
@@ -112,6 +128,7 @@ Keep this shape; it is what worked:
 | Handoff | Session | One line |
 | --- | --- | --- |
 | [2026-08-31 22:44 — the four self-citing goldens are re-promoted](2026-08-31-2244--self-citing-goldens-repromoted.md) | `18794878` | All four re-promoted pipeline-only from independent records; five verifier BROKENs exposed settle writing manifests before the gate, no manifest→golden guard, and a test whose prescribed deletion rewarded a self-citing golden |
+| [2026-09-01 00:21 — corpus repair and doc-integrity guards](2026-09-01-0021--corpus-repair-and-doc-integrity-guards.md) | `18794878` | Supersedes 2026-08-31-2244. Four self-citing goldens re-promoted; settle no longer writes attestations before the gate; a test that rewarded the defect it named; three contradicting instructions in the head corrected; doc-pointer guards added |
 | [2026-09-01 00:30 — migration close-out, and what is untested](2026-09-01-0030--migration-closeout-and-what-is-untested.md) | `a87c4347` | WSL is primary and Windows is episodic; an honest list of what was configured but never exercised, incl. the capture pipeline since relocation; save+snapshots backed up; the pinned build auto-updates |
 | [2026-08-31 18:20 — the pairwise gate, measured](2026-08-31-1820--pairwise-gate-measured.md) | `a87c4347` | The gate HAS teeth (407 leaves at callSite) and on committed evidence refuses nothing, because the nonce check fires forty lines earlier; "162" reproduces exactly; the fresh-nonce hole also unlocks the authored-from gate |
 | [2026-08-31 14:43 — nonce gate, stat arithmetic, toolchain](2026-08-31-1443--nonce-gate-stat-arithmetic-toolchain.md) | `e386f047` | A record’s own copy stopped counting as the second session; the stat-vector arithmetic settled the 22 written-off fixtures; one shared AGENTS.md for both agents |

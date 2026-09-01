@@ -8,6 +8,14 @@ track list and the claim list below are records rather than estimates. Read
 The two runs are recoverable, and every number in this file was derived from
 them rather than remembered:
 
+These two runs were made from the OneDrive tree, which has since been retired,
+so the project directory below is the one that tree's path produced. **Derive
+the directory rather than copying this one** — Claude Code names it after the
+absolute path of the tree it was launched in, with separators flattened, so it
+moved when the tree moved (Windows now `C:\ss2-capture`, WSL
+`~/projects/swords-and-sandals-2-multiplayer`). See
+[`handoffs/README.md`](handoffs/README.md) § Frontmatter for the rule.
+
 ```
 %USERPROFILE%\.claude\projects\C--Users-corey-OneDrive-Documents-ChatGPT-SS2-Multiplayer-Mod\
   5132b52c-36d1-4d07-830e-7fb04e25e78e\subagents\workflows\
