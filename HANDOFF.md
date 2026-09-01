@@ -824,6 +824,35 @@ ones that change what the next session should DO are marked ►.
 
   Only `obs-pw10` and `obs-qk8` are cited by nothing and are therefore free.
 
+  **VERIFIED WAVE, and it corrected the main session twice.** `wf_8d57104d-417`
+  returned 6 of 6 questions and **209 of 209 verifiers, zero errors** — the first
+  wave this session that is not UNVERIFIED-PARTIAL.
+
+  - **THE HEADLINE SURVIVES: zero of 67 records differ in SUBSTANCE.** The union
+    of every changed JSON pointer across all 67 is exactly three —
+    `/capture/launchNonce`, `/capture/overdraw`, `/digest`. Nothing in
+    `scenario`, `samples`, `mutationTrace`, `events`, `resultEvent`,
+    `finalState`, `build`, `target` or `observationId` moves. 407 samples, 182
+    mutation entries, 189 events and 2,412 `finalState` fields reproduce from the
+    traces alone.
+  - **"27 reproduce byte-identically" was WRONG — only 17 do.** 27 reproduce with
+    zero VALUE difference and an identical digest, but **10 differ in `/scenario`
+    key ORDER alone**: committed `[attackerSide, attackDirection, result, hero,
+    villain, fightMode]` against today's `[attackerSide, result, hero, villain,
+    attackDirection, fightMode]`. The digest is unaffected because
+    `computeSs2ObservationDigest` canonicalises with sorted keys. **The churn is
+    itself evidence**: today's ingest no longer emits the shape that produced
+    those 10, so they were written by an earlier ingest version. They are
+    `obs-20260830-auto1/2/3`, `-e1`, `-t1`, `-u1` and `obs-camp1..4` — currently
+    correct, gaining nothing, and they would still churn a diff.
+  - **The waiver can shrink 58 -> 18 and NEVER to 0.** The 18 traces genuinely
+    never recorded a nonce: `obs-20260830-auto1/2/3`, `-e1`, `-t1`, `-u1`,
+    `camp1..4`, `pw1..pw8`.
+  - **The mis-pairing hazard was real in shape but never fired.** Only two
+    archive dirs hold more than one `.jsonl` (`vehicle-check`, `simulated`), and
+    they are exactly the dirs `NON_SESSION_CAPTURE_DIRS` already exempts; no
+    committed record points at either.
+
   **The reason this is not obviously worth doing.** A verifier this session
   resealed `obs-par1`'s digest with (a) its true nonce, (b) a FABRICATED nonce,
   (c) a nonce STOLEN from `obs-pq1` and (d) no nonce at all. **All four matched
