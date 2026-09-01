@@ -564,11 +564,31 @@ ones that change what the next session should DO are marked ►.
   `staminaleft` 105 was transcribed after the map predicted 110. The same hero
   block may have carried it into other fixtures — **audit the corpus before
   trusting any staged scalar.**
-► **The champion family cannot be captured at all** (hero `attack`/`defence` 3
+► ~~**The champion family cannot be captured at all** (hero `attack`/`defence` 3
   is unreachable; `hitpointsmax` 250 and `staminamax` 150 likewise). Five
-  fixtures join the fifteen impossible-hero ones. Re-derive from the map.
+  fixtures join the fifteen impossible-hero ones. Re-derive from the map.~~
+  **RETRACTED 2026-08-31 (`2d0b077`), and this copy was missed at the time.**
+  Every clause is false — `attack` and `defence` are ordinary level-up stats,
+  `L=11, vitality 7` gives `hitpointsmax` 250, and `stamina` is button 2254.
+  The family is reachable at `herolevel 11`. Run
+  `node tools/stat-vector-reachability.mjs`; the full retraction is at
+  § "Next steps, in order" item 1.
+  **This is the second copy of one instruction, and the retraction that fixed
+  the first one is the one that teaches "retract AT THE INSTRUCTION, not only
+  above it."** It reached the next-steps entry and not this one. See the
+  standing rule at the top of this file.
 ► **All eight reachable fixtures over-pin `staminaleft`**, which nothing in the
-  resolution chain reads. Fixing it needs a matcher change. **The sequencing
+  ATTACK-RESOLUTION chain reads. ~~Fixing it needs a matcher change.~~
+  **CORRECTED 2026-08-31: that is the prescription § "READ THIS FIRST" calls
+  DEAD, and this line was still stating it as the plan. Read that block before
+  doing anything here.** The sound path recorded there is to fix the CAPTURE —
+  pin the approach-step count so the value is deterministic — not the
+  comparison. Two scopes were also being conflated, which is why this line and
+  that block read as contradicting each other when they do not: `staminaleft` is
+  read by nothing in the attack-resolution chain (inventoried by offset in
+  § "The pairwise gate…" below), and it is NOT inert in the build at large — it
+  gates which attack buttons exist, forces the rest phase, and steers the villain
+  AI. Both are true; only the first licenses anything. **The sequencing
   advice that stood here — "which needs the dormant gate above landed first" —
   is superseded.** The gate is landed and has teeth, but on nonce-free evidence
   it is unreachable, so it backstops an exclusion for exactly nothing today.
@@ -584,7 +604,15 @@ ones that change what the next session should DO are marked ►.
   discarded before ingest.
 - The 81 divergence-report digests are unverified, and the obvious repair is
   itself an assertion that cannot fail.
-- Hook attribution forgery. *(Closed this session.)*
+- Hook attribution forgery. ~~*(Closed this session.)*~~ **NOT CLOSED —
+  corrected 2026-08-31. This bare line was the only place claiming it was**, and
+  two fuller statements disagree: § "Still open, with the evidence below the
+  archive line" calls it "a third working forgery against the promotion gate,
+  and it is open", and § "The pairwise gate…" says that gate "does not close the
+  hook-attribution hole and must not be described as closing it". What was
+  closed that session was narrower — the matcher now TRANSLATES `reason` rather
+  than stripping it. Two records agreeing on the same false attribution still
+  promote.
 
 Three claims I recorded during the session were wrong and are corrected in
 place: that the wrong-side defect was arena-specific; that `if (attacker ==
@@ -741,6 +769,34 @@ records are cited where zero were before, and the pairwise gate is now
 REACHABLE from committed evidence for the first time. Scenario, samples and
 expected are byte-identical: this changed provenance, not measurement.
 
+**PARTLY ANSWERED FROM THE RAW TRACES 2026-08-31, and NOT re-derived here.**
+The paragraph below said this question could not be settled from a WSL clone.
+That is still true of THIS tree, but the Windows session ran it: a six-agent
+probe over the raw `rufflelog` archive in `C:\ss2-capture\captures`, four probes
+INDEPENDENT and both adversarial verifiers BROKEN. **Treat every figure in this
+paragraph as unverified here — no one on this side has re-derived them, and the
+archive is not reachable from Linux.** What it reports: a 197-sample microsecond
+timestamp series inside each log, 194-195 of 196 inter-line deltas differing,
+RMS divergence 3.5-31.3 ms, chi-squared on microsecond last digits uniform
+across all 25 logs (so not synthetically generated), frame cadence tracking the
+declared fps across six independent 30 fps runs sharing no microsecond, and
+obs-par1/2/3 starting within 14 µs of one another — GPU contention that a copy
+does not produce. **A naive copy preserves in-file timestamps exactly, which is
+what the probes tested for and did not find.**
+
+One conflation to avoid, because a verifier made it: FILE metadata (mtime,
+birthtime) was demonstrated forgeable in a second, unprivileged. That refutes
+the mtime corroboration and NOT the in-file series, which is a different
+artifact. Also destroyed, and it is worth knowing the evidence is gone: the
+relocation in `c85b2ac` rewrote every file into `C:\ss2-capture` and reset NTFS
+ChangeTime — the one field `SetFileTime` cannot write — so ctime can never
+corroborate any of this again. Three copies of the archive exist (the live tree,
+the retired OneDrive tree, and D:), each 1,589 files.
+
+So the independence of these records now rests on ONE strong class of evidence
+that this repository does not contain. That is better than nothing and worse
+than a check, and it lives outside the pipeline entirely.
+
 WHAT IS NOT. **The corpus cannot distinguish an honest repeat from a copy, and
 this change does not alter that.** Measured with the project's own
 `canonicalJsonStringify`: for each of the four candidates, EVERY matching
@@ -758,6 +814,22 @@ the strong one: 9 records, 4 nonces, two separate launcher invocations, a
 3h49m span. `golden-prisoner-normal-kill` is the weak one: 3 records, ONE
 nonce, so zero comparable nonce pairs, and the other two are four-leaf twins of
 the record the gate just refused.
+
+**THE GATE COUNTS SESSIONS AND CANNOT SEE THAT TWO SESSIONS DIFFER IN THE
+STRENGTH OF THEIR EVIDENCE.** Eight records carrying no launch token satisfy
+"two independent sessions" exactly as well as eight carrying one. That is the
+structural version of everything above, it is not fixed by this change, and it
+is the reason the nonce residual outranks its billing. Found by the Windows
+session's trace pass, 2026-08-31.
+
+An ingest defect fell out of the same pass and is NOT verified here, because it
+needs the raw archive: **`obs-fr1` is reported to carry a `launchNonce` in its
+RAW trace that the ingest path never propagated to the committed record.** If
+that holds, re-ingesting supplies a nonce with no new capture — and it also
+means ingest can silently drop the one identity the operator does not choose.
+`obs-fr1` is cited by `golden-prisoner-normal-kill`, the weakest of the four, so
+this is the cheapest available strengthening. Confirm it against the archive on
+the Windows tree before acting.
 
 Two caveats a future reader should not have to rediscover:
 
@@ -814,7 +886,12 @@ the analysis that established it is below the line. **Correct these HERE.**
   adding a fixture-derived `callSite` comparison**: it is a compile-time constant
   and that would compare one constant to another.
 - **The eight reachable fixtures over-pin `staminaleft`/`staminamax`**, and the
-  prescribed exclusion must not be written before the audit named below.
+  prescribed exclusion ~~must not be written before the audit named below~~
+  **is DEAD, not merely deferred — corrected 2026-08-31.** This line read as
+  "write it after an audit"; § "READ THIS FIRST" says the comparison-side fix is
+  the wrong fix and the capture is what to pin. If an exclusion is ever landed
+  anyway it still needs the audit named below AND cannot lean on the pairwise
+  gate, which is unreachable on nonce-free evidence.
 - **The 81 divergence-report digests are unverified**, and the obvious repair is
   an assertion that cannot fail. A second code path produces them; until it is
   traced there is nothing to compare against.

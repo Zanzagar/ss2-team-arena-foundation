@@ -1,7 +1,7 @@
 export const meta = {
   name: 'question-fanout-audit',
   description: 'Investigate one topic via question-diverse agents, then one write-nothing adversarial verifier per claim; a wave with dead verifiers is UNVERIFIED',
-  whenToUse: 'Any investigation or audit big enough for multiple agents. Encodes the SS2 field rules (docs/multi-agent-field-rules.md): fan out on questions not replicas; verifiers break one named claim each; count started vs returned.',
+  whenToUse: 'Any investigation or audit big enough for multiple agents. Encodes the SS2 field rules — AGENTS.md "Multi-agent runs" and docs/overnight-agent-plan.md "Standing rules": fan out on questions not replicas; verifiers break one named claim each; count started vs returned.',
   phases: [
     { title: 'Investigate', detail: 'one agent per QUESTION — distinct aims, never replicas' },
     { title: 'Verify', detail: 'one write-nothing verifier per claim, incl. one on the real entry point' },
