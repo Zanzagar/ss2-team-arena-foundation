@@ -675,7 +675,41 @@ has per-fixture commands.
   prescribed, and the arming-time readback showing it overwritten. **The operator
   followed the runbook; the runbook under-specifies the opponent.**
 
-  **THE DERIVED VALUE IS 110, AND THE ARITHMETIC IS CLOSED (2026-09-01).**
+  **RETRACTED THE SAME DAY, BY THE AUTHOR, BEFORE ANY FIXTURE WAS EDITED:
+  ~~THE DERIVED VALUE IS 110, AND THE ARITHMETIC IS CLOSED~~. 110 IS NO BETTER
+  FOUNDED THAN 105.** The 110 derivation assumes the villain took ZERO phases,
+  while the same battle has the hero taking FIVE walks. With `stamina 1` the
+  villain's net is `1 - staminacost` = -1 per walk, so five villain walks give
+  exactly 110-5 = **105 — the value already in the fixture.** Both numbers are
+  derivable under different assumptions about an action sequence the scenario
+  does not declare, which means NEITHER is determined by it.
+
+  Measured across all 38 armed adc traces before acting: villain `staminaleft`
+  is 110 in **2**, is 105 in **1**, and the joint target (hero 105 AND villain
+  110) lands in **1** (`session-adc5`). The hero's walk count and the villain's
+  stamina deficit are **uncorrelated** — 12 hero walks with a deficit of 8, 5
+  hero walks with a deficit of 20. So swapping 105 for 110 would have replaced
+  one under-determined constant with another and moved the family from 0/38
+  matchable to 1/38.
+
+  **THE HONEST FINDING IS STRONGER THAN THE FIX I NEARLY MADE: `staminaleft`
+  cannot be pinned by ANY scenario for an AI-driven combatant on this route.**
+  The value is a function of the opponent's own action sequence, and
+  `randomise_gladiator` redraws that opponent's `speed` and `strength` every
+  round. That is a DESIGN DECISION for the owner, not a fixture edit, and the
+  options are: (a) extend `captureAllowedNow` to refuse arming unless the value
+  matches, turning a silent near-miss into a visible refusal, then sample; (b)
+  choose a villain stat vector whose stamina is invariant — `stamina 2` gives
+  regen `1 + round(2/3) = 2`, exactly the minimum walk cost, so walking is
+  net-zero and `check_stats` clamps it at `staminamax` 120 — which is a new
+  scenario needing every dependent value re-derived, not a correction; or (c)
+  stop pinning it, which the head forbids elsewhere and which should stay
+  forbidden until (a) and (b) are ruled out.
+
+  *The retracted paragraph is kept below because the arithmetic in it is correct
+  and load-bearing; only the conclusion drawn from it was wrong.*
+
+  **The `initbattle` half still holds (2026-09-01).**
   `arena` sprite 2249 frame 1 (`initbattle`), `DoAction@0x6e421b` `+0x0b8a`–
   `+0x0bb6`, assigns `_root.game.villain.staminaleft = _root.game.villain.staminamax`
   UNCONDITIONALLY — the nearby `character_xp` branch at `+0x0b0c` targets the
