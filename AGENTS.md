@@ -118,18 +118,24 @@ failure.
 REACHING FOR A FIX — the two remedies are not interchangeable and the wrong one
 is a syntax error, not a fallback.**
 
-**In WSL/Linux, a missing `node` almost always means a NON-INTERACTIVE shell.**
-node is installed via nvm and loaded from `~/.bashrc`, which returns early for
-non-interactive shells — so `bash -c`, `bash -lc`, scripts, and anything driven
-from Windows via `wsl -- bash -c` all start without it. This is expected. Source
-nvm yourself at the top of any script:
+**In WSL/Linux, a missing `node` means your environment was SCRUBBED** — cron, a
+hook, a systemd unit, or `wsl -- bash -c` driven from Windows. node comes from
+nvm, which puts it on PATH; an ordinary agent session inherits that PATH and
+`bash -c` and `bash -lc` both find node with no help. Only a wiped environment
+loses it. Then, and only then:
 
 ```
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
 ```
 
-Use `bash -ic` when testing shell FUNCTIONS (`opus5`, `fable5`, `sol`), since
-those are defined after the same early return.
+Use `bash -ic` when testing shell FUNCTIONS (`opus5`, `fable5`, `sol`) — those
+come from `~/.bashrc`, which does return early for non-interactive shells.
+
+*(Corrected 2026-08-31 after the first WSL session measured it. An earlier
+version of this paragraph blamed `.bashrc`'s non-interactive early return and
+told every session to source nvm. That was generalised from one unusual caller —
+WSL driven from Windows — and would have cost every session a step it does not
+need. The early return is real but is not what puts node on PATH.)*
 
 **In a Windows-native session** (PowerShell, and only there) node genuinely is
 absent, npm too. Use the codex runtime's node — resolve it rather than pinning
