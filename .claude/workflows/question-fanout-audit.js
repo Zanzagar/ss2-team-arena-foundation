@@ -13,7 +13,20 @@ export const meta = {
 //   questions: string[],               // DISTINCT aims — different entry points, methods, angles.
 //                                      //   Never two agents with the same brief: agreement between
 //                                      //   agents that share a brief is the correlated failure mode.
-//   groundBrief?: string,              // shared facts, if any. Injected as HYPOTHESES, not truth.
+//   groundBrief?: string,              // shared HYPOTHESES. Investigators only -- deliberately NOT
+//                                      //   given to verifiers, so a verifier re-derives rather than
+//                                      //   inheriting the premise it is meant to break.
+//   environment?: string,              // WHERE THINGS ARE and how to run them: paths, mounts, commands,
+//                                      //   read-only boundaries. Goes to EVERY agent, verifiers included.
+//                                      //   THIS FIELD EXISTS BECAUSE ITS ABSENCE COST A WHOLE WAVE.
+//                                      //   Measured 2026-09-01: the verifier prompt was built from
+//                                      //   `topic` alone, and that run's topic said "no local captures/
+//                                      //   archive". The archive WAS readable, the groundBrief said so,
+//                                      //   and verifiers never saw the groundBrief -- so a batch of them
+//                                      //   concluded the data did not exist and returned BROKEN after
+//                                      //   burning 240-second `find` timeouts. Environment facts are not
+//                                      //   premises to be broken; withholding them does not decorrelate
+//                                      //   anything, it just blinds the checker.
 //   entryPointQuestion?: string,       // end-to-end check via the REAL entry point (strongly recommended)
 // }
 
@@ -40,7 +53,9 @@ const VERDICT = {
 
 phase('Investigate')
 const ground = args.groundBrief ? `\nGROUND BRIEF (hypotheses, not truth):\n${args.groundBrief}\n` : ''
-const briefs = args.questions.map((q, i) => `TOPIC: ${args.topic}${ground}\nYOUR QUESTION (yours alone — answer THIS, not the general topic): ${q}\n${PREMISE_RULE}\nReturn via StructuredOutput.`)
+// Environment reaches EVERY agent. See the `environment` note in the args block.
+const env = args.environment ? `\nENVIRONMENT (where things are; facts, not hypotheses):\n${args.environment}\n` : ''
+const briefs = args.questions.map((q, i) => `TOPIC: ${args.topic}${env}${ground}\nYOUR QUESTION (yours alone — answer THIS, not the general topic): ${q}\n${PREMISE_RULE}\nReturn via StructuredOutput.`)
 log(`Dispatching ${briefs.length} question agents (started must equal ${briefs.length})…`)
 const answers = await parallel(briefs.map((b, i) => () => agent(b, { label: `q${i + 1}`, phase: 'Investigate', schema: FINDINGS })))
 
@@ -56,7 +71,7 @@ phase('Verify')
 const verdicts = await parallel(
   claims.map((c, i) => () =>
     agent(
-      `TOPIC: ${args.topic}\nYou are a WRITE-NOTHING adversarial verifier. You have ONE job: try to BREAK this single claim (from ${c.from}):\n"${c.claim}"\nDrive the real code/data yourself — do not trust any prior agent's report. ${c.from === 'entry-point' ? 'Specifically: exercise the REAL entry point end-to-end, not the internal functions others measured.' : ''}\nFor any assertion you rely on, name the one-line mutation that should break it and check that it does. A HOLDS verdict with evidence is as valuable as a break. ${PREMISE_RULE}\nReturn via StructuredOutput.`,
+      `TOPIC: ${args.topic}${env}\nYou are a WRITE-NOTHING adversarial verifier. You have ONE job: try to BREAK this single claim (from ${c.from}):\n"${c.claim}"\nDrive the real code/data yourself — do not trust any prior agent's report. ${c.from === 'entry-point' ? 'Specifically: exercise the REAL entry point end-to-end, not the internal functions others measured.' : ''}\nFor any assertion you rely on, name the one-line mutation that should break it and check that it does. A HOLDS verdict with evidence is as valuable as a break. ${PREMISE_RULE}\nReturn via StructuredOutput.`,
       { label: `verify:${c.from}#${i + 1}`, phase: 'Verify', schema: VERDICT }
     ).then((v) => ({ ...c, ...(v || { verdict: 'AGENT-DIED', evidence: 'verifier did not return' }) }))
   )
