@@ -3,8 +3,8 @@ handoff:      2026-09-01-1250--wsl-capture-pipeline-and-armoured-fixture-defect
 written:      2026-09-01 12:50 -0400
 sessionStart: 2026-09-01 00:30 -0400
 sessionId:    515e2223-2bd5-49c7-9246-554a40e00772
-agentRuns:    wf_8d57104d-417 (nonce recovery: 6 questions + 182 verifiers returned, 26 DIED)
-              wf_e72fa4b5-b31 (armoured/tournament: 6 questions + 147 verifiers returned, 83 DIED)
+agentRuns:    wf_8d57104d-417 (nonce recovery) — COMPLETED **VERIFIED**: 6/6 questions, 209/209 verifiers, 0 errors
+              wf_e72fa4b5-b31 (armoured/tournament) — UNVERIFIED-PARTIAL: 6/6 questions, 83 verifiers died on a usage limit
               Digests of every returned agent: .audit-harvest/ (gitignored, 2.1 MB)
 branch:       arena/champion-capture
 commits:      194587f..<tip>   # run `git log --oneline -1`; unpushed with `git log --oneline @{u}..HEAD`
@@ -14,11 +14,14 @@ supersedes:   none
 ---
 # Handoff — the capture pipeline runs from WSL, and the armoured family is blocked by its own fixtures
 
-**BOTH AGENT WAVES ARE UNVERIFIED-PARTIAL. 109 verifiers died** (26 + 83), almost
-all on "You've hit your session limit". By this repository's own standing rule a
-wave with dead verifiers is UNVERIFIED, not complete. **Nothing below rests on an
-unreplicated agent report** — every load-bearing number here was re-derived by the
-main session directly, and the ones that were not are marked.
+**WAVE 1 IS VERIFIED — 209 of 209 verifiers returned, zero errors. WAVE 2 IS
+UNVERIFIED-PARTIAL — 83 of its verifiers died on a usage limit.** By this
+repository's own standing rule the second is not complete, and its findings are
+claims. **Nothing below rests on an unreplicated agent report** — every
+load-bearing number was re-derived by the main session directly.
+
+**Every returned agent is digested in `.audit-harvest/` (gitignored).** Read that
+before re-running anything; it holds ~330 verdicts and 12 investigator reports.
 
 ## Where things stand
 
@@ -38,12 +41,22 @@ main session directly, and the ones that were not are marked.
 
 ## Highest-value work, ranked, with the reason
 
-1. **Re-derive the 8 armoured/tournament villain blocks.** The arithmetic is DONE
-   and byte-verified: `initbattle` (sprite 2249 frame 1, `+0x0b8a`) assigns
-   `villain.staminaleft = villain.staminamax` unconditionally, so a scenario
-   declaring no villain actions determines **110, not 105**. `obs-adc5` already
-   observed exactly that. This is the only item whose answer is already known —
-   it is editing 8 fixtures against a closed derivation, then capturing.
+1. **DECIDE WHAT A SCENARIO MUST DECLARE. This is a schema question and it now
+   outranks every capture.** Measured across all 82 fixtures: 82 of 82 pin the
+   villain's `staminaleft`, **0 of 82 pin `speed`**, and all 22 promoted goldens
+   share ONE villain profile with every stat zero. For that opponent the
+   `movement_speed` clamp floor of 4 makes the missing `speed` pin harmless — which
+   is the entire reason prisoner and probe promoted and nothing else has. Against a
+   `randomise_gladiator` draw the pin is live, and `speed` is not even observable
+   (absent from `DEFAULT_WATCH_FIELDS`). **Do NOT widen that default** — the
+   wrapper's own comment explains why, and it is right; `-WatchFields` extends it
+   per session instead. Ranked first because authoring 38 more fixtures to the
+   current shape would multiply the defect.
+
+   *Superseded during this session: I wrote "the derived value is 110, not 105"
+   into the head and RETRACTED it before any fixture was edited. 110 assumes the
+   villain took zero phases while the hero took five walks; five villain walks give
+   exactly 105. Both are under-determined. See the head.*
 2. **Then capture the armoured family.** 27 archived armed traces were never even
    delogged; the family has spent far more rounds than the repository can see.
 3. **The nonce recovery (40 records, waiver 58 -> 18).** Mechanically sound and
