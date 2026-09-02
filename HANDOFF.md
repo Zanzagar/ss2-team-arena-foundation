@@ -1080,29 +1080,47 @@ output and names the wrapper source hash it compiled.
        `CANONICAL_RESOURCE_SOURCES`, `SS2_PROJECTED_COMBATANT_KEYS`).
   4. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
 
-► **FIVE LIVE INSTRUCTIONS SIT IN `ss2-item-tables.md` §9 THAT THIS LIST HAS
-  NEVER CARRIED, AND AT LEAST TWO ARE STILL UNFIXED (checked 2026-09-02).**
-  The head's own rule is that a live instruction which is not represented up
-  here gets HOISTED, and that rule was written about the archive line — but a
-  side document freezes the same way a handoff does. §9 was written 2026-08-30
-  and says "not made — other tracks own these files". Two I checked directly:
+► ~~**FIVE LIVE INSTRUCTIONS SIT IN `ss2-item-tables.md` §9 THAT THIS LIST HAS
+  NEVER CARRIED, AND AT LEAST TWO ARE STILL UNFIXED (checked 2026-09-02).**~~
+  **RETRACTED THE SAME NIGHT, BY THE WAVE I HAD LAUNCHED. BOTH OF THE TWO I
+  "CHECKED DIRECTLY" WERE WRONG, AND THE FIRST ONE WAS WRONG BECAUSE OF MY OWN
+  TRUNCATED GREP.** The general point survives — §9 is a side document carrying
+  instructions this list never hoisted, and a side document freezes the way a
+  handoff does — but every specific claim below it was mine and is corrected
+  here rather than deleted.
 
-  - **§9.1 — `ss2-capture-wrapper.as`'s `shop-open` must call
-    `shop["item" + shopItem].onRollOver()` before `.onRelease()`.** It still
-    does not; `onRollOver` appears nowhere in the wrapper. Without it
-    `itemnumber`, `itemtype` and `itemcost` are never written, and §9.1 names
-    the observed consequences in this project's OWN capture logs: `itemcost`
-    `NaN`, `itemnumber` stuck at 20, `hero.weapon` set to 20 whichever id was
-    pressed, and staged gold repaired down by `check_for_nan`. **This is a
-    wrapper edit, so it belongs to a supervised window with
-    `validate-vehicle.ps1` re-run — not to an unattended session.**
-  - **§9.3 — `ARMOUR_PAGES = ["browse"]`** is still exactly that (`:852`), and
-    §1 of the same document shows `browse` carries no item handlers, so
-    `-ShopArmour` can only ever reach `shop-unreachable`.
+  - **§9.1 — the wrapper must call `onRollOver()` before `.onRelease()`.**
+    ~~It still does not; `onRollOver` appears nowhere in the wrapper.~~
+    **FALSE. It does, and has since before §9.1 was written.**
+    `ss2-capture-wrapper.as:1200-1201` is `chosen.onRollOver(); chosen.onRelease();`
+    inside the `shop-open` block, with a guard at `:1193` that refuses and
+    reports `hasRollOver`/`hasRelease` if either handler is missing.
+    `onRollOver` appears on lines 1177, 1193, 1195 and 1200. It landed in
+    `2df4ba0` at 2026-08-30 22:46:58 -0400 — **four minutes and 41 seconds
+    before `df3a122` created §9.1 asking for it**, so that instruction was
+    stale at the moment it was written.
 
-  §9.2, §9.4 and §9.5 are unchecked here. (§9.5 asked the battle map to record
-  the `[3]`/`[4]` indices, which it now does at `:447-452`, so that one looks
-  closed.)
+    **HOW I GOT IT WRONG, because the mechanism matters more than the fact.**
+    I ran `grep -n "onRollOver\|onRelease" <file> | head -10`. The first ten
+    matches are all `onRelease`, at lines 384 through 1137; `head` cut the
+    output off forty lines before the first `onRollOver`. I then read the
+    absence of a match as the absence of a call. **`docs/overnight-agent-plan.md`
+    already names this exact failure** — "whenever you filter it, print what
+    the filter REMOVED" — after `git ls-files test | grep -v fixtures` silently
+    ate three real test files. It is the same mistake with `head` instead of
+    `grep -v`, made by the session that had read the rule that morning. **A
+    truncating pipe is a filter.**
+  - **§9.3 — `ARMOUR_PAGES = ["browse"]`.** The line is still there (`:852`),
+    but the conclusion drawn from it is wrong: `-ShopArmour` does NOT silently
+    reach `shop-unreachable`. `:828-831` refuses up front and emits
+    `{"at":"arena","step":"shop-armour-unimplemented"}`. That is a declared
+    not-implemented with an honest refusal, not a lurking defect, and it should
+    be read as scope rather than as a bug.
+
+  §9.2, §9.4 and §9.5 remain unchecked here. (§9.5 asked the battle map to
+  record the `[3]`/`[4]` indices, which it now does at `:447-452`.)
+  **Treat the rest of §9 as unverified: two for two of the ones I checked were
+  stale, which is what a three-day-old instruction list is worth.**
 
 ► **ITEMS 1 AND 2 OF THE 2026-09-01 BRIEF ARE DONE (2026-09-02).**
   `src/team/ss2-rules.js` exists and the 22 goldens replay through the resolver.
