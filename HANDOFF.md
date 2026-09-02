@@ -21,6 +21,31 @@ Start there.
   **Stamp handoffs in LOCAL time and check with `git log --date=iso-local`
   before you commit one.**
 
+  ► **IT IS NOW ENFORCED, so a third occurrence fails the suite rather than
+    reaching the next reader (2026-09-02).** `test/handoff-navigation.test.js`
+    derives each handoff's FIRST commit instant with
+    `git log --follow --diff-filter=A --format=%at` and asserts three things:
+    the head's `**LATEST:` pointer names the handoff that entered git most
+    recently; that file is not one some other handoff declares it supersedes;
+    and the filename stamps sort in commit order, with the two KNOWN inversions
+    (`2026-09-01-0030`, `2026-09-02-0130`) listed with their reasons and
+    asserted MINIMAL — an allowance that stops inverting fails as unnecessary.
+    Where git history is not derivable the git-free half still runs and the
+    assertion message SAYS which check it made.
+
+    **And the test that was supposed to catch this could not.** The old
+    assertion was `linked.includes(newest)` over EVERY handoff link in the
+    head, and the head links five. Measured, not argued: with the LATEST
+    pointer deliberately aimed at the superseded `-0130` brief, the old
+    assertion still returned PASS, because the newest FILENAME was linked
+    lower down the page as "the brief that opened the items the newest one
+    closes". It was blind to the exact defect it was named for — the project's
+    signature failure, found for the seventh time. Four mutants now die:
+    repointing LATEST at the superseded brief kills two tests, deleting a
+    known inversion kills the third, adding an allowance for a file that does
+    not invert kills it as stale, and flipping the ordering comparison kills
+    it too.
+
 *(The brief that opened the items the newest one closes:)*
 [2026-09-02 — the corpus got a consumer, and the wave broke ten of twelve claims](docs/handoffs/2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it.md).**
 **`src/team/ss2-rules.js` exists**: SS2's own attack arithmetic
