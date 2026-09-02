@@ -8,8 +8,11 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-02 00:07 — the wave refuted more than it confirmed](docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md).**
+[2026-09-02 13:40 — the first armoured golden](docs/handoffs/2026-09-02-1340--the-first-armoured-golden.md).**
 Start there.
+
+*(The brief it supersedes:)*
+[2026-09-02 00:07 — the wave refuted more than it confirmed](docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md).
 
 ► **`ls docs/handoffs/` PUTS THE NEWEST BRIEF SECOND-TO-LAST, NOT LAST, AND WILL
   UNTIL SOMEONE RENAMES A FILE.** `2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it`
