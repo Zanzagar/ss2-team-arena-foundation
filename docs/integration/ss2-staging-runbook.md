@@ -1514,9 +1514,16 @@ not because it is likely.
     staged champion sessions in the archive used a different, shorter string.
     Its failure mode is a `capture-refused-unstaged` or `stage-refused` line
     rather than a bad trace, so it fails visibly — but it is inferred. §2A.
-12. **`-WatchFields` on `run-arena.ps1` has never been exercised.** No capture
-    in the archive has run with a non-empty `-WatchFields` at all, on any
-    vehicle. Static reading of the eleven champion names says none of them is
-    written inside the armed window, so no extra mutation line should appear;
-    if one does, treat it as a finding about the build rather than a failed run.
+12. ~~**`-WatchFields` on `run-arena.ps1` has never been exercised.**~~
+    **REFUTED BY THE ARCHIVE, 2026-09-02.** Both sentences were false. Five
+    rufflelogs — three under `session-champ-n1`, two under `arena-champ-2` —
+    carry `{"t":"dbg","at":"watch-extended","added":11}`, which is exactly the
+    eleven names `run-arena.ps1:66` passes, and their `-aN` observation ids are
+    minted only by `run-arena.ps1:312/315`. Re-derive with
+    `grep -oh '{"t":"dbg","at":"watch-extended"[^}]*}' /mnt/c/ss2-capture/captures/*/*.rufflelog`.
+
+    The hedge attached to it — "if an extra mutation line appears, treat it as a
+    finding" — is a risk already retired by those five live runs, not an open
+    one. **The static reading it rested on was right, and that is the point: it
+    had already been confirmed at runtime and nobody had looked.**
     §2A.

@@ -1717,13 +1717,18 @@ struck here rather than deleted so the ask and the answer stay together.
 
 ### New, from the 2026-08-31 `battlevalues` re-derivation
 
-9. **[`ss2-capture-staging.md`](ss2-capture-staging.md), the launcher-capability
-   table.** Its table (§"Which script carries which flag") still records
-   `run-arena.ps1 | -WatchFields | no` and tells the reader that a fixture
-   staging a `<piece>_defence` and needing a staged opponent "has to go through
-   `launch-capture.ps1`, which has no snapshot guard — take the snapshot by hand
-   first". That is now false, and the stale advice points at the unguarded
-   vehicle, which is the one thing the flag exists to avoid.
+9. ~~**[`ss2-capture-staging.md`](ss2-capture-staging.md), the launcher-capability
+   table.** Its table still records `run-arena.ps1 | -WatchFields | no`…~~
+   **ALREADY DONE — CLOSED 2026-09-02. Do not action this item.** The table at
+   `ss2-capture-staging.md:411` reads `**yes — new**` and has since before this
+   worklist entry was read. This was an open request to redo finished work,
+   which costs a session more than a missing item does: it sends someone to
+   "fix" a file that is already right, and the natural way to check is to
+   re-derive the flag surface from the scripts, which is the expensive part.
+
+   **Check the target before actioning a worklist item**, and when an item is
+   closed, strike it here rather than deleting it — a silently vanished item is
+   indistinguishable from one nobody read.
    [`ss2-staging-runbook.md`](ss2-staging-runbook.md) §1 has already been
    corrected and is the model; `campaign.mjs` derives the same columns from the
    scripts and was never wrong.

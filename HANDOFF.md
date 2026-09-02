@@ -169,6 +169,27 @@ universal.
     cannot carry gitignored traces. So it is two copies, not three, and the
     second one is normally unplugged.
 
+  ► **`/mnt/d` FAILING DOES NOT MEAN `D:` IS UNPLUGGED, AND THIS FILE HAS NOW
+    DRAWN THAT WRONG INFERENCE TWICE. Measured 2026-09-02.** `ls /mnt/d` returns
+    `cannot access '/mnt/d': No such device` while the drive is **attached and
+    healthy**: `powershell.exe -NoProfile -Command "Get-PSDrive -PSProvider
+    FileSystem"` reports `D` with 4.79 TB free, and `D:\ss2-backups` holds all
+    seven expected directories (`captures-2026-08-31`, `captures-2026-09-01`,
+    both `ss2-capture-snapshots-*`, both `ruffle-SharedObjects-*`,
+    `ui-shots-2026-09-01`) plus `README.txt`. **The evidence mirror is intact.**
+
+    The failure is a STALE WSL 9p mount, not a missing disk — the mount entry
+    still exists (`mount | grep /mnt/d` shows `D:\ on /mnt/d type 9p`), it just
+    no longer resolves, which is what happens when the drive is attached after
+    the WSL instance starts. Repairing it needs `wsl --shutdown`, which kills
+    every running WSL session, so it is the owner's call and not something an
+    agent should do mid-session.
+
+    **So: check `D:` from Windows, never from `/mnt/d`.** A session that reads
+    `/mnt/d` and concludes the backup is gone will report a data-loss scare that
+    is not real — which is exactly what this file did, and the bullet below is
+    left standing only because its OTHER measurements hold.
+
   ► **AND THE ARCHIVE HAS ONE REACHABLE COPY TODAY, NOT THREE.** The head says
     below that three exist (live tree, retired OneDrive tree, `D:`). Measured:
     `D:` is not attached (`/mnt/d` is an empty mount point), the OneDrive
@@ -535,9 +556,29 @@ byte-for-byte; manifests, digests and cited observations all resolve.
 | --- | --- | --- |
 | `run-campaign.ps1 -Concurrency N` | capture families in parallel | refuses `N>1` for any navigator but `prisoner` |
 | `run-arena.ps1` | the save-mutating arena route | refuses to start without a fresh snapshot, takes it itself, hashes before/after |
-| `launch-capture.ps1` | one session; the ONLY script with both `-WatchFields` and `-Stage*` | **no snapshot guard** — see Open items |
+| `launch-capture.ps1` | one session; the only script with `-Autopilot` **and** `-ArenaPolicy ''` together | **no snapshot guard** — see Open items |
 | `validate-vehicle.ps1` | wrapper gate after any edit | prints the source hash it compiled, and what it does not prove |
 | `save-state.ps1` | snapshot/restore | refuses an empty tree, and refuses to restore a WIPED save |
+
+► **THE "ONLY SCRIPT WITH BOTH `-WatchFields` AND `-Stage*`" CLAIM WAS STALE AND
+  IS CORRECTED ABOVE (2026-09-02).** `run-arena.ps1` declares
+  `[string] $WatchFields = ''` at `:137` and forwards it to `launch-capture.ps1`
+  at `:295` (appended only when non-empty), alongside `-StageHero`/
+  `-StageVillain` at `:100-101`. So **`run-arena.ps1` carries staging, watch
+  fields AND its own snapshot guard together**, and the armoured removal pair
+  does NOT have to go through the unguarded vehicle.
+
+  **It is exercised, not merely declared:** five rufflelogs in the archive
+  (`arena-champ-2`, `session-champ-n1`) emit
+  `{"t":"dbg","at":"watch-extended","added":11}` — the eleven names in
+  `run-arena.ps1`'s own header at `:66`. Verify with
+  `grep -oh '{"t":"dbg","at":"watch-extended"[^}]*}' /mnt/c/ss2-capture/captures/*/*.rufflelog`.
+
+  What is still TRUE of `launch-capture.ps1`, and must not be swept up in this
+  correction: it remains the only script that can pass `-ArenaPolicy ''` with
+  `-Autopilot` (`run-arena.ps1:267-269` does not forward those). That is why
+  only the two DIRECTION-5 armoured members clear the guarded vehicle; a
+  non-normal-band member still needs the unguarded one.
 
 Snapshots: **`level4-vitality-tournament-gate`** (vitality 13, 5723 gold,
 `current_tournament` 1 — `hitpointsmax` reads 220 in the level-up log because
