@@ -1,10 +1,15 @@
 /**
  * The seam: what a rule set must provide to drive the shared team resolver.
  *
- * This module contains no formulas. It is the typed injection point that a
- * runtime-verified rule set is dropped into once the capture campaign promotes
- * goldens, and the gate that keeps an unverified formula from *claiming* to be
- * verified.
+ * This module contains no formulas. It is the typed injection point a rule set
+ * is dropped into, and the gate that keeps an unverified formula from
+ * *claiming* to be verified.
+ *
+ * Three tiers, and the middle one carries the weight: `placeholder` is invented,
+ * `map-derived` was read out of the licensed build's bytecode with partial
+ * golden backing, and `runtime-verified` was observed running. **Only
+ * `runtime-verified` may set `runtimeVerified: true`** — a map-derived rule set
+ * declares `false` and cites its map sections and goldens instead.
  *
  * A rule set owns: the action vocabulary, legality, the outcome of one action
  * (including which RNG draws it makes, in what order), the derived maximum
@@ -21,6 +26,22 @@ export const TEAM_RULE_SET_CONTRACT_VERSION = 1;
 export const RuleSetVerification = Object.freeze({
   /** A documented approximation. Never presented as SS2 behaviour. */
   PLACEHOLDER: "placeholder",
+  /**
+   * Reconstructed from the byte-level battle map, with partial golden backing.
+   *
+   * Stronger than a placeholder: the arithmetic was read out of the licensed
+   * build's bytecode, and some of it is checked against promoted goldens.
+   * Weaker than runtime-verified: no capture session observed the paths this
+   * rule set actually runs, so `runtimeVerified` is false and stays false.
+   *
+   * THE TIER EXISTS BECAUSE ITS ABSENCE WAS BLOCKING THE PROJECT. SS2's real
+   * arithmetic fits neither neighbour: calling it `placeholder` understates
+   * evidence that was read out of the build, and calling it
+   * `runtime-verified` is a lie about what was observed. With only two tiers
+   * the honest move was to write nothing, so nothing was written — a corpus of
+   * 22 goldens sat unused while the resolver ran invented formulas.
+   */
+  MAP_DERIVED: "map-derived",
   /** Backed by promoted goldens from the licensed build. */
   RUNTIME_VERIFIED: "runtime-verified"
 });
@@ -93,6 +114,52 @@ function assertProvenance(verification, provenance) {
     if (provenance.goldenFixtureIds !== undefined) {
       throw new TeamRuleSetError("A placeholder rule set must not cite golden fixtures.");
     }
+    // Found 2026-09-01 while adding the map-derived tier: this validator and
+    // `assertRuleSetProvenance` in src/campaign/record.js are documented as
+    // mirrors and were not. record.js REFUSES a placeholder that pins a build
+    // hash; this one allowed it, so such a rule set was constructible here and
+    // its battles were then unrecordable at settlement — a failure that
+    // surfaces only after a fight is fought.
+    if (provenance.buildSha256 !== undefined) {
+      throw new TeamRuleSetError(
+        "A placeholder rule set must not pin a build SHA-256: it is not derived from that build."
+      );
+    }
+    return;
+  }
+  if (verification === RuleSetVerification.MAP_DERIVED) {
+    // Every requirement here is the difference between this tier and the
+    // placeholder it would otherwise collapse into. An unenforced "may cite
+    // evidence" becomes "does not", and the tier would be a nicer word for
+    // guesswork — which is precisely the substitution this project exists to
+    // refuse.
+    if (provenance.runtimeVerified !== false) {
+      throw new TeamRuleSetError(
+        "A map-derived rule set must declare runtimeVerified: false. Deriving arithmetic from the " +
+        "build's bytecode is not observing the build run."
+      );
+    }
+    if (!SHA256.test(String(provenance.buildSha256 ?? ""))) {
+      throw new TeamRuleSetError(
+        "A map-derived rule set must pin the licensed build SHA-256 it was derived from: a derivation " +
+        "with no build behind it is a derivation from nothing."
+      );
+    }
+    if (!Array.isArray(provenance.mapSourceRefs) || provenance.mapSourceRefs.length === 0) {
+      throw new TeamRuleSetError(
+        "provenance.mapSourceRefs must cite at least one battle-map section; it is this tier's whole claim."
+      );
+    }
+    if (provenance.mapSourceRefs.some((ref) => typeof ref !== "string" || ref.trim().length === 0)) {
+      throw new TeamRuleSetError("Every provenance.mapSourceRefs entry must be a non-empty string.");
+    }
+    assertTokenList(provenance.goldenFixtureIds, "provenance.goldenFixtureIds");
+    if (provenance.goldenFixtureIds.length === 0) {
+      throw new TeamRuleSetError(
+        "A map-derived rule set must cite at least one promoted golden. Partial runtime backing is what " +
+        "separates this tier from a placeholder."
+      );
+    }
     return;
   }
   if (provenance.runtimeVerified !== true) {
@@ -123,7 +190,7 @@ export function assertTeamRuleSet(rules) {
   }
   if (!Object.values(RuleSetVerification).includes(rules.verification)) {
     throw new TeamRuleSetError(
-      `A rule set must declare verification as ${Object.values(RuleSetVerification).join(" or ")}.`
+      `A rule set must declare verification as one of: ${Object.values(RuleSetVerification).join(", ")}.`
     );
   }
   assertTokenList(rules.actionTypes, "actionTypes");
@@ -173,6 +240,7 @@ export function describeTeamRuleSet(rules) {
     verification: rules.verification,
     runtimeVerified: rules.provenance.runtimeVerified === true,
     goldenFixtureIds: Object.freeze([...(rules.provenance.goldenFixtureIds ?? [])]),
+    mapSourceRefs: Object.freeze([...(rules.provenance.mapSourceRefs ?? [])]),
     buildSha256: rules.provenance.buildSha256 ?? null,
     note: rules.provenance.note
   });

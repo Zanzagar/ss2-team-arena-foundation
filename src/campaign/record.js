@@ -68,12 +68,13 @@ export const CAMPAIGN_WRITER_VERSION = "1";
 /**
  * How much is known about the maths behind a record.
  *
- * The first two mirror `src/team/rule-set.js` exactly. `UNKNOWN` is this
+ * The first three mirror `src/team/rule-set.js` exactly. `UNKNOWN` is this
  * layer's own third state and can only arrive by migration: it means the
  * evidence is gone, and it is emphatically **not** a synonym for placeholder.
  */
 export const RecordedRuleSetVerification = Object.freeze({
   PLACEHOLDER: RuleSetVerification.PLACEHOLDER,
+  MAP_DERIVED: RuleSetVerification.MAP_DERIVED,
   RUNTIME_VERIFIED: RuleSetVerification.RUNTIME_VERIFIED,
   UNKNOWN: "unknown"
 });
@@ -610,6 +611,25 @@ function assertRuleSetProvenance(ruleSet, migration) {
     }
     if (ruleSet.goldenFixtureIds.length > 0) {
       throw new CampaignRecordError("A placeholder rule set must not cite golden fixtures.");
+    }
+    return;
+  }
+  if (ruleSet.verification === RecordedRuleSetVerification.MAP_DERIVED) {
+    // Written as its own branch even though it would FALL THROUGH to the
+    // runtime-verified checks below and happen to pass them, because every
+    // error message down there says "runtime-verified" — and a record refused
+    // with the wrong reason is how an operator learns the wrong lesson.
+    //
+    // `mapSourceRefs` is deliberately NOT persisted here. Adding a key to
+    // RULE_SET_PROVENANCE_KEYS is a schema-3 change needing a 2->3 migration,
+    // because assertExactKeys would reject every already-persisted schema-2
+    // record. The citation travels in `note` until that migration is worth
+    // making on its own terms.
+    if (typeof ruleSet.buildSha256 !== "string" || !SHA256_PATTERN.test(ruleSet.buildSha256)) {
+      throw new CampaignRecordError("A map-derived rule set must pin the licensed build SHA-256.");
+    }
+    if (ruleSet.goldenFixtureIds.length === 0) {
+      throw new CampaignRecordError("A map-derived rule set must cite at least one promoted golden.");
     }
     return;
   }
