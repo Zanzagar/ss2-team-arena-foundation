@@ -218,3 +218,50 @@ test("the secondary weapon derives its own pair, at the build's strength scaling
   // And it does not disturb the primary.
   assert.deepEqual([derived.min_damage, derived.max_damage], [20, 20]);
 });
+
+/**
+ * Enchantment damage: the `battlevalues` arithmetic, and only that.
+ *
+ * `+0x320c` / `+0x3326`. Both read `weapon_max_damage`, NOT the strength-scaled
+ * `max_damage`, and both run BEFORE the min/max pair — so the operand is the
+ * table's raw column and a model that used `max_damage` would be wrong by
+ * `round(strength * 2)` on every enchanted weapon.
+ *
+ * What is deliberately NOT tested here, because it is not implemented: applying
+ * the damage. In the build the tick lands on the afflicted combatant's next
+ * turn and REPLACES it, which the resolver has no channel for. That is an open
+ * decision recorded in the battle map, not an omission this test should paper
+ * over.
+ */
+test("enchantment damage is ceil(weapon_max_damage / 3 * potency), off the raw column", async () => {
+  const { ss2BattleValues } = await import("../src/team/ss2-rules.js");
+  // weapon 24's max is 32, and strength 10 would make `max_damage` 52 — so a
+  // model reading the wrong operand gives ceil(52/3*3) = 52, not 32.
+  // Mutation: swap `weapon_max_damage` for `max_damage` — this fails with 52.
+  const potent = ss2BattleValues({ ...HERO, weapon: 24, weapon_enchantment_potency: 3 });
+  assert.equal(potent.weapon_enchantment_damage, 32);
+  assert.notEqual(potent.weapon_enchantment_damage, potent.max_damage, "the operand is the raw column, not the scaled pair");
+
+  // The ceil is real: 32/3 is 10.67, so potency 1 gives 11 and not 10.
+  // Mutation: `Math.floor` — this fails with 10.
+  assert.equal(ss2BattleValues({ ...HERO, weapon: 24, weapon_enchantment_potency: 1 }).weapon_enchantment_damage, 11);
+
+  // Unenchanted is zero, not absent: `battlevalues` assigns unconditionally.
+  assert.equal(ss2BattleValues({ ...HERO, weapon: 24 }).weapon_enchantment_damage, 0);
+
+  // The secondary is computed from its OWN column and potency (+0x3326).
+  const secondary = ss2BattleValues({ ...HERO, secondary_weapon: 24, secondary_weapon_enchantment_potency: 2 });
+  assert.equal(secondary.secondary_weapon_enchantment_damage, 22);
+  assert.equal(secondary.weapon_enchantment_damage, 0, "the primary is untouched by a secondary enchantment");
+});
+
+test("the adapter catalogue carries both enchantment-damage fields, not just the primary", async () => {
+  const fields = await import("../src/adapter/vanilla-fields.js");
+  const flat = JSON.stringify(fields);
+  // Mutation: drop the secondary from `derivedCombat` — this fails.
+  assert.ok(flat.includes("weapon_enchantment_damage"), "the primary is catalogued");
+  assert.ok(
+    flat.includes("secondary_weapon_enchantment_damage"),
+    "the secondary is catalogued too — `battlevalues` writes both, four instructions apart"
+  );
+});

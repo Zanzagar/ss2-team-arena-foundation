@@ -459,6 +459,21 @@ export function ss2BattleValues(character, { battleStarted = false } = {}) {
     derived.secondary_weapon = source.secondary_weapon;
   }
 
+  // `+0x320c` and `+0x3326`, and they run BEFORE the min/max pair below — the
+  // build's own order, which matters because both read `weapon_max_damage`
+  // rather than the strength-scaled `max_damage`.
+  //
+  // This is the ARITHMETIC half of enchantment damage. What it does NOT do is
+  // apply it: in the build the tick lands on the afflicted combatant's next
+  // turn and REPLACES that turn (battle map § "The enchantment effect is a
+  // SKIPPED TURN"), which the resolver has no channel for and which is an open
+  // decision, not an omission. Computing the field here is free of that: it is
+  // a `battlevalues` output the module was silently dropping.
+  derived.weapon_enchantment_damage =
+    Math.ceil(number("weapon_max_damage") / 3 * number("weapon_enchantment_potency"));
+  derived.secondary_weapon_enchantment_damage =
+    Math.ceil(number("secondary_weapon_max_damage") / 3 * number("secondary_weapon_enchantment_potency"));
+
   derived.min_damage = Math.round(strength * 2) + number("weapon_min_damage");
   derived.max_damage = Math.round(strength * 2) + number("weapon_max_damage");
   derived.secondary_min_damage = Math.round(strength * 1) + number("secondary_weapon_min_damage");

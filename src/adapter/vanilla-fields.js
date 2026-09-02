@@ -147,7 +147,12 @@ export const VANILLA_FIELD_GROUPS = Object.freeze({
     "movement_speed",
     "attack_type",
     "attack_speed",
-    "weapon_enchantment_damage"
+    "weapon_enchantment_damage",
+    // Added 2026-09-02. Its absence was an asymmetry rather than a decision:
+    // `battlevalues` writes BOTH, four instructions apart (`+0x320c` and
+    // `+0x3326`), and the map's own "Derived combat" row names both. Every
+    // other field in this group that has a `secondary_` twin carries it.
+    "secondary_weapon_enchantment_damage"
   ]),
   chanceCache: group("battle-map: Hit and damage path / Chance calculation", [
     "power_percentage",
