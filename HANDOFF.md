@@ -1132,6 +1132,48 @@ output and names the wrapper source hash it compiled.
        villain's stamina is the single binding constraint — its observed mass
        sits at 85-99, not at 105.
 
+     ► **Refined by a verifier wave, 2026-09-02. Every count above reproduces;
+       three things are added and one confident correction was REFUTED.**
+
+       - **`attack_direction` is the only real draw, and its rate is exactly
+         1/4** — not the ~31% observed. `normal_attack` assigns
+         `randomBetween(5, 8)` at `+0x61f1`, so the band is `{5,6,7,8}` by
+         construction. Pooled over 243 rounds the split is 70/53/60/60,
+         χ² = 2.416 on 3 df: uniform is not rejected, and no direction outside
+         the band has ever been observed.
+       - **Hero stamina is not a draw at all: `heroStam = 110 − walk steps`,
+         holding in 249 of 251 pooled rounds.** So `heroStam == 105` is exactly
+         "the approach took five steps" — which is what "pin the approach-step
+         count" above would fix, and it would fix two constraints at once,
+         because `P(hero hitpoints intact | 5 walks) = 0.718`.
+       - **A FIFTH axis nobody had listed:** `gladiator_dir` flipped in
+         `obs-ondc143` — hero `left`, villain `right` — 1 round in 150. The
+         protocol occasionally starts the gladiators on swapped sides.
+       - **The denominator is wrong by one:** 151 sessions were launched, 150
+         are usable, and `session-ondc224` aborted (one `meta` record, log dies
+         at root frame 164). Not a hidden success, but "150 rounds → 150
+         reports" should read "151 launched, 150 usable, 1 aborted".
+
+       ► **REFUTED, and it is the one that would have changed the protocol:**
+         the wave concluded that villain stamina is "written into the campaign
+         driver, not drawn by the game", that its 1-in-31 rate is a harness
+         setting, and that staging `villain.staminaleft=105` would cut the cost
+         to one success per 5.6 rounds. **It read the `"t":"end"` record's
+         `staged:` string as the driver's staging INPUT. It is the CURRENT
+         value.** Measured on `session-ondc100`: the `{"at":"staged"}` record —
+         which IS the input — says `staminaleft=105`, the `{"t":"state"}`
+         record at arming says **97**, and the `end` record's `staged:` string
+         says 97. Every round of this batch already stages a constant 105; the
+         villain then takes phases and walks it down before the hero's armed
+         action. **The recommendation was to do what the driver has been doing
+         all along.**
+
+         So the binding constraint stands, and it is not settable by staging.
+         Getting 105 at ARMING needs zero villain drift, which means arming
+         before the villain has taken a phase — and `initbattle` puts the
+         villain at `staminamax` = 110 there, not 105. That is the same
+         contradiction recorded below, and it is still the open question.
+
        **So "run more rounds" is now a real strategy where it was not, but the
        PROTOCOL is still what decides it.** `initbattle` (`+0xb8a`-`+0xbb6` of
        `sprite:2249/frame:1/DoAction@0x6e421b`, re-read 2026-09-02) sets

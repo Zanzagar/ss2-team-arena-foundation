@@ -1686,9 +1686,18 @@ breastplate-based stamina gain applies to hitpoint-applicable damage.
 `+0x1bf1`, `+0x1c09..+0x1c22` — writes **one boolean on `game_defender`**
 (register 3: the same object `check_stats` is called on at `+0x193c` and whose
 `hitpoints` the death gate reads at `+0x194a`). **The block `+0x1bf1..+0x1dd2`
-contains no damage arithmetic and no call to `magic_damage_character` at all** —
-it is four `SetMember`s of `true`. Types map 2 → `burning`, 3 → `frozen`,
-4 → `poison`, 5 → `life_stolen`.
+contains no call to `magic_damage_character`** — its only writes are four
+`SetMember`s of `true`. Types map 2 → `burning`, 3 → `frozen`, 4 → `poison`,
+5 → `life_stolen`.
+
+*(An earlier draft of this paragraph said the block "contains no damage
+arithmetic … it is four `SetMember`s of `true`", and a verifier broke it the
+same night. The block DOES contain arithmetic: `magicweapon_percentage =
+randomBetween(1,100)` is a real `CallFunction` at `+0x1c07`, the proc gate
+multiplies at `+0x1c1f` and compares at `+0x1c20`, and each of the four arms is
+a two-limb test on `equipped_weapon` and the matching type field. What is true
+is the narrower claim now written above: **no damage is computed or applied
+here**, and the only thing that leaves the block is a boolean.)*
 
 The damage arrives on the AFFLICTED COMBATANT'S NEXT TURN, and costs them the
 turn.
@@ -1762,6 +1771,17 @@ invert all four. **That is required, not broken.** The callee damages its own
 `game_defender` PARAMETER, so a spell hits the victim and an enchantment hits
 the phase's ACTOR — and in a status phase the actor *is* the victim. Anyone who
 "fixes" the ordering moves the damage onto the wrong gladiator.
+
+**And only HALF the inversion is live, which is the more precise statement.**
+`magic_damage_character`'s parameters `attacker` and `game_attacker` are bound
+to **register 0** — name-only, no register allocated — and the body reads
+neither: it touches only R1-R6, and its complete string set contains neither
+`"attacker"` nor `"game_attacker"`. So slots 2 and 4 are INERT, and what the
+inversion actually does is redirect the victim (`game_defender`, R2, the object
+that takes `armourclass -= damage`, `hitpoints -= damage` and `check_stats`)
+and the animated clip (`defender`, R4) onto the current attacker. Reading it as
+a four-way exchange overstates it; two of the four crossings are dead operands.
+**No attacker stat can influence any number this function produces.**
 
 **What IS odd, and survives that explanation:** the primary/secondary SELECTOR
 at `+0x530e` reads `game_attacker.equipped_weapon` — the VICTIM's slot — while
