@@ -39,19 +39,26 @@ there never reaches the next reader.
 - **Derive candidates from the battle map, never from a capture.** When a fixture
   disagrees with the runtime, re-derive it from the map. Do NOT edit the fixture
   to the observed value. This is the single most tempting wrong move here.
-- **Licensed SWFs are read-only** and hash-verified before and after every
-  capture. Never copy, export or commit game assets or extracted scripts.
-- **NEVER SACRIFICE ANY INTEGRITY OF THE RECORD BECAUSE THE REPO IS PUBLIC.**
-  These are two different rules and confusing them would be the worst mistake
-  available here. The rule above is about LICENCE AND ETHICS — do not reproduce
-  game content — and it holds whether this repository is public or private.
-  Publication is not a reason to trim, soften, round, omit or delay a
-  measurement, a failure, a retraction or a number. **If something must be
-  recorded and cannot safely be public, the repo goes private; the record does
-  not get weaker.** Audited 2026-09-02: nothing withheld to date is
-  load-bearing — display names, set labels and refusal bubble text are content
-  no arithmetic reads, and where a "raw literal is not reproduced" its every
-  value is tabulated beside the note.
+- **BUILD THE BEST VERSION OF THE GAME. Nothing here forbids that, and this
+  block used to read as though it did.** New art, new UI, new systems, a new
+  progression curve, new opponents, new screens — all yours, all unblocked, all
+  shippable. If a rule ever seems to stand between you and a better game, it is
+  either miscalibrated or misread; say so and it gets fixed. Owner, 2026-09-02:
+  *"We want to create the BEST version of the game we can. If we need to dial
+  things back later we note that and do it when we have to."*
+- **Two narrow operational facts remain, and NEITHER is an ethics boundary:**
+  1. **The installed SWF stays byte-identical, because it is the MEASUREMENT
+     ORACLE.** All 23 promoted goldens, 70 observation records and every capture
+     manifest cite its sha256. Change the install by one byte and the corpus
+     stops describing anything — not a licence problem, an evidence problem.
+     **When modding the build becomes the work, put the modded copy in a SECOND
+     install with its own fingerprint lane.** That costs a directory and keeps
+     both.
+  2. **Ship no SS2 asset.** The project is intended to be shared, so the repo is
+     a distribution channel: someone who clones it must still need their own
+     licensed copy to play. Same model as a Doom source port shipping no WAD.
+     This is about what leaves the repo, never about what you may build in it.
+     Never distributed FOR PROFIT.
 - **Never shortcut the game's own frames.** Skipping the prologue tripped the
   game's own character-tampering screen.
 - `validate-vehicle.ps1` must PASS after ANY wrapper edit — but read what it does
