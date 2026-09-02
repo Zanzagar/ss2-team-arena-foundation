@@ -2447,9 +2447,26 @@ the analysis that established it is below the line. **Correct these HERE.**
 - **The 81 divergence-report digests are unverified**, and the obvious repair is
   an assertion that cannot fail. A second code path produces them; until it is
   traced there is nothing to compare against.
-- **`src/adapter/battle-host.js:155` collapses an array `aiFill` to one object**,
-  reproduced end to end, pinned by NO test. Source edit and test rewrite must
-  land together in one owner's hands.
+- ~~**`src/adapter/battle-host.js:155` collapses an array `aiFill` to one
+  object**, reproduced end to end, pinned by NO test. Source edit and test
+  rewrite must land together in one owner's hands.~~
+  ► **CLOSED — BOTH CLAUSES ARE STALE, re-derived 2026-09-02.** The defect is
+  gone and the "pinned by NO test" clause is now false, which is the more
+  dangerous half: it invites a session to spend a window writing a test that
+  exists. Line 155 is no longer `{ ...declared, resources: first }`; the site
+  is `declaredFillResources(declared, index)` (`:150-156`), which returns
+  `declared.resources` for an object and `declared[index].resources` for an
+  array, so no array is spread into an object literal at all. Two tests pin
+  it through the REAL host — `test/ss2-adapter-integration.test.js:584` ("a
+  per-slot array aiFill's own resources outrank the template bag, per slot")
+  and `:631` ("a per-slot aiFill array reaches the roster whole") — plus
+  `test/team-resolver.test.js:708` on the resolver entry point. Verified by
+  MUTATION, not by reading: restoring the collapse (`const entry = {
+  ...declared }`) fails 2 tests. The workaround retirement the item was found
+  under is also done — `aiFillWithResources` appears nowhere in `src/`.
+  **This is the third open item in this list to decay the same way; an open
+  list is a claim, and it needs re-deriving before it is actioned.** The
+  frozen copy at ~line 2745 is wrong too and stays there as history.
 - **One `isNum` site survives at `ss2-capture-wrapper.as:1407`**, with a
   demonstrably NaN operand. Fail-closed, so diagnosability rather than
   corruption — but the claim that the guard is used everywhere is false.
