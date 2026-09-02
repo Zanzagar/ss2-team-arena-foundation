@@ -1522,6 +1522,94 @@ the one fact that would settle it.
   `captures/` and 1 skipped is CORRECT. Nothing to do; the item outlived its
   fix.**
 
+### Found 2026-09-02 (overnight): what a CAPPED verification wave established
+
+Seven questions, 50 verifiers, **50 returned, 0 dead — status VERIFIED**, after
+the previous four waves died at 119 verdicts of 1,069. Each item below was
+re-derived by the wave and the load-bearing ones re-derived again by the main
+session before anything was written.
+
+- **THE WEAPON TABLE IS NOT RUNTIME-CORROBORATED, AND THE TEST THAT SEEMED TO
+  SHOW IT IS NEAR-TAUTOLOGICAL.** An investigator claimed that inverting
+  `min_damage − round(strength*2)` over the archive lands on a real table pair
+  for 26 of 28 triples, which would have lifted the table above `map-derived`.
+  Broken four ways:
+  1. **The test cannot fail for an honest record.** `battlevalues` derives
+     `min_damage` and `max_damage` from the SAME table row (`+0x31be`, `+0x31da`)
+     and adds the same `round(strength*k)` to both (`+0x3356`, `+0x3386`). So
+     any record the game itself produced inverts back onto a table pair BY
+     CONSTRUCTION. It measures that arithmetic is arithmetic.
+  2. **Measured false-match rate is high.** Perturbing every observed triple by
+     ±1 in min and max — 423 deliberately WRONG triples — still passes 6.1%.
+  3. **No observation carries a weapon-identifying field at all.** `weapon`,
+     `whichweapon`, `using_bow`, `weapon_min_damage`, `secondary_min_damage`
+     and `attack_type` occur ZERO times across all 447 `.jsonl` and 57 `.json`
+     records. Only `ammo_left` appears. So nothing pins WHICH row a match used.
+  4. **Coverage is 10%.** The matching triples collapse to 7 distinct
+     `(min,max)` pairs of the table's 69, compatible with 9 ids of 90 —
+     **81 rows corroborated by nothing.**
+  Also: the inversion formula is wrong in bow mode, where `+0x3416` overwrites
+  the primary pair with the secondary one at `round(strength * 1)`.
+  **The table stays `map-derived`, and `tools/item-table-transcription.mjs`
+  against the build remains the only thing that backs it.**
+
+- **THE THIRD FORGERY IS OPEN, AND WIDER THAN THE HEAD DESCRIBES. The vehicle
+  is `capture.method`, not `callSite`.**
+  - **A purely synthetic `simulateSs2CaptureTrace` output, with only
+    `meta.method` re-stamped to `injected-tape-runtime`, PROMOTED TO A GOLDEN
+    through the unmodified CLI.** That is the vehicle every one of these rides.
+  - `passive-runtime` is **unreachable by the honest pipeline** — the wrapper's
+    only `t:"roll"` emitter is guarded by `config.injected`, so a passive trace
+    has zero samples and ingest refuses a zero-sample trace. Every
+    passive-runtime record is therefore, by construction, not from the wrapper —
+    and only `synthetic-simulator` is refused at promotion. **The promoted
+    golden carries no capture-method field at all.**
+  - The co-forgery must also forge the manifest's `sessions[].method`, or
+    promotion refuses with "disagrees with its manifest session about the
+    capture method". That is the one guard that fires.
+  - ► **"and the suite stays green" is FALSE, and the true statement is worse.**
+    Promoting any new golden from `candidate-lethal-result` fails 15 of 715
+    tests whether or not anything is forged — but the forged and honest suite
+    outputs normalise to a **0-line diff**. The suite is not green; it is
+    BLIND. Do not quote the green form.
+  - The committed forgery probe (`test/capture-campaign.test.js:~903`) forges
+    exactly ONE cited record per iteration, so **the two-sided case — both
+    records agreeing on the same fabrication — is covered by no test.** That is
+    precisely the case the head says still promotes.
+  - `hook` IS caught (DIVERGE at `/mutationTrace/0/hook`, refused at
+    promotion), and `injected` alone is refused at ingest in both directions.
+    So of the head's three named channels, one is closed and one is only open
+    with `method` co-forged.
+
+- **THE CLAMP ITEM IS WRONG IN ITS COUNT, ITS CAUSE AND ITS PREMISE.**
+  The head says "three clamp sites can each be deleted with the replay file
+  green because no value ever reaches a bound".
+  - **The premise is false.** All 22 goldens stage villain `hitpoints` and
+    `hitpointsmax` at 10 against hero `min_damage` 21 / `max_damage` 23 — so
+    damage is NOT "exactly equal to the defender's hitpoints", it hugely
+    exceeds them, and values DO reach bounds: instrumented,
+    `src/team/resolver.js:259` takes 141 arrivals of which 120 land exactly on
+    the floor.
+  - **The count is far worse.** At the head's own bar (the replay file green)
+    **15 of 16** clamp sites delete green. Against the FULL suite, **exactly
+    seven** whole-site deletions stay green: `ss2-rules.js:490`, `:707`,
+    `resolver.js:261`, `roster.js:168`, `ss2-attack-candidate.js:228`, `:237`
+    and `:575`. Only ONE of the head's three is among them.
+  - **`ss2-attack-candidate.js:339` is the only clamp the replay defends**, so
+    that file's own header claim at lines 32-35 that it "proves NO CLAMPING" is
+    false and should be corrected there.
+  - **`ss2-rules.js:784`'s stamina FLOOR is dead code**: deleting just the floor
+    stays green even though `test/ss2-team-rules.test.js:456` drives −38
+    through it, because `src/team/resources.js:252` re-clamps every resource
+    write to the entry's minimum. A guard behind a guard reads as coverage.
+
+- **A METHODOLOGY HAZARD, found by two agents independently and worth keeping:
+  the session scratchpad is SHARED between a wave's agents.** One agent's
+  `dump.mjs` was clobbered mid-run by a sibling; another copied the repo into a
+  path that already held a sibling's copy and got a nested checkout reporting a
+  doubled **1425 tests / 1423 pass**. Agents must namespace into their own
+  subdirectory, and a doubled test count is the symptom.
+
 ### Found 2026-09-01 (evening): the armoured family measured at n=38, and what it is actually waiting on
 
 **Read this before the block below it, which it corrects in its ranking.** All 38
