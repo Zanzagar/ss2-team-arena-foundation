@@ -274,9 +274,34 @@ Note the shape of the first two: a source file and *all* the tests it can
 redden. Slices that split a source file from its pinning test are the ones that
 fail.
 
-**Adversarial verifiers have no such cap, because they write nothing.** They
-cannot conflict with a writer or with each other, so they can be run as widely
-as there are sharp questions to ask — and running SEVERAL independent auditors
+~~**Adversarial verifiers have no such cap, because they write nothing.**~~
+► **CORRECTED 2026-09-02, AFTER THIS SENTENCE COST A FIVE-HOUR USAGE LIMIT.**
+The reasoning below is about FILE CONFLICTS, and it is correct about those. It
+says nothing about COST, and `.claude/workflows/question-fanout-audit.js`
+implemented it literally: one verifier per claim, unbounded.
+
+**Measured that night: 29 investigators emitted 20 / 37 / 51 claims each
+(min / median / max) — 1,069 claims, therefore 1,069 verifiers.** 119 returned
+before the limit stopped every wave. The claims were not 1,069 findings; the
+schema asked for "each load-bearing claim" without a ceiling, so agents
+enumerated environment facts too, and *"the SWF sha256 was 77cb545c…"* got its
+own adversarial verifier. **A verifier is free of the file graph and is not
+free of anything else.**
+
+**And the ordering compounded it.** Claims were flattened in question order, so
+q1's fifty-one claims consumed the budget before q7 got one: the capture-prep
+wave returned **1 verdict out of 295 started**, and a wave with dead verifiers
+is UNVERIFIED. Fan the budget ACROSS questions round-robin, never in claim
+order.
+
+**The rule that replaces this one: cap the verifier wave, interleave it across
+questions, and LOG WHAT WAS DROPPED.** A silent cap reads as "everything was
+checked". The workflow now takes `verifierBudget` (default 24), which is the
+project's own "10-11 is comfortable" scaled to a multi-question wave.
+
+What survives unchanged, and is still right:
+verifiers cannot conflict with a writer or with each other, so they can be run
+as widely as the BUDGET allows — and running SEVERAL independent auditors
 against the SAME target is a quality technique rather than duplication. Run 2
 proved the overlap is the check: two auditors given different claims arrived
 independently at the same critical fact about `game_attacker` — that the read

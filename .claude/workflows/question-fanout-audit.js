@@ -35,7 +35,14 @@ export const meta = {
 //                                      //   Keep this field to paths, commands and read-only
 //                                      //   boundaries; anything a verifier could be asked to BREAK
 //                                      //   belongs in groundBrief, where verifiers never see it.
-//   entryPointQuestion?: string,       // end-to-end check via the REAL entry point (strongly recommended)
+//   entryPointQuestion?: string,       // end-to-end check via the REAL entry point (strongly recommended).
+//                                      //   It is verified FIRST and survives any cap.
+//   verifierBudget?: number,           // max verifiers to spawn (default 24). THIS FIELD EXISTS BECAUSE ITS
+//                                      //   ABSENCE COST A FIVE-HOUR USAGE LIMIT on 2026-09-02: one verifier
+//                                      //   per claim, uncapped, meant 29 investigators asked for 1,069 of
+//                                      //   them. Claims are interleaved across questions and the count NOT
+//                                      //   verified is logged and returned as `unverifiedClaims` — a capped
+//                                      //   wave is complete-as-run, never complete-as-asked.
 // }
 
 if (!args || !args.topic || !Array.isArray(args.questions) || args.questions.length === 0) {
@@ -48,7 +55,19 @@ const FINDINGS = {
   type: 'object', required: ['answer', 'claims'],
   properties: {
     answer: { type: 'string', description: 'Dense findings for this question' },
-    claims: { type: 'array', items: { type: 'string' }, description: 'Each load-bearing claim as ONE checkable sentence' },
+    // maxItems is load-bearing, not tidiness. Without it agents returned a
+    // median of 37 claims each and a maximum of 51, because "each load-bearing
+    // claim" reads as "everything you measured" — environment facts included.
+    // Every claim becomes a verifier, so 29 investigators asked for 1,069 of
+    // them and the run died on a usage limit with 119 back. See the Sizing
+    // section of docs/overnight-agent-plan.md, corrected 2026-09-02.
+    claims: {
+      type: 'array', maxItems: 6, items: { type: 'string' },
+      description: 'AT MOST 6 claims, ranked most load-bearing first. A claim is something that would change ' +
+        'code, a document or a decision if it were false — NOT an environment fact you checked along the way. ' +
+        'Each becomes one adversarial verifier, so a claim nobody would act on wastes the whole budget for it. ' +
+        'Put everything else in `answer`.'
+    },
   },
 }
 const VERDICT = {
@@ -71,9 +90,27 @@ const answers = await parallel(briefs.map((b, i) => () => agent(b, { label: `q${
 const dead = answers.map((a, i) => (a ? null : i + 1)).filter(Boolean)
 if (dead.length) log(`WARNING: question agents died: q${dead.join(', q')} — their questions are UNANSWERED, not empty`)
 
-const claims = answers.flatMap((a, i) => (a ? a.claims.map((c) => ({ from: `q${i + 1}`, claim: c })) : []))
-if (args.entryPointQuestion) claims.push({ from: 'entry-point', claim: args.entryPointQuestion })
-log(`${claims.length} claims to verify.`)
+// INTERLEAVED, NOT FLATTENED. Flattening in question order let q1's fifty-one
+// claims eat the whole budget: on 2026-09-02 the capture-prep wave returned 1
+// verdict of 295 started, and a wave with dead verifiers is UNVERIFIED. Taking
+// one claim per question per pass means a budget cut anywhere still leaves
+// every question with its most load-bearing claim checked.
+const perQuestion = answers.map((a, i) => (a ? a.claims.map((c) => ({ from: `q${i + 1}`, claim: c })) : []))
+const interleaved = []
+for (let rank = 0; rank < Math.max(0, ...perQuestion.map((q) => q.length)); rank += 1) {
+  for (const q of perQuestion) if (q[rank]) interleaved.push(q[rank])
+}
+// The entry point goes FIRST: it is the only claim that exercises the real
+// thing end to end, so it must survive any cap.
+if (args.entryPointQuestion) interleaved.unshift({ from: 'entry-point', claim: args.entryPointQuestion })
+
+const budget = Number.isInteger(args.verifierBudget) ? args.verifierBudget : 24
+const claims = interleaved.slice(0, budget)
+const dropped = interleaved.length - claims.length
+// NO SILENT CAPS. A cap nobody is told about reads as "everything was checked",
+// which is the same lie as a dead verifier reported as a pass.
+log(`${interleaved.length} claims emitted; verifying ${claims.length} (budget ${budget})` +
+  (dropped > 0 ? ` — ${dropped} NOT VERIFIED, lowest-ranked first, per question` : ''))
 
 phase('Verify')
 const verdicts = await parallel(
@@ -92,6 +129,10 @@ if (status !== 'VERIFIED') log(`Wave status: ${status} — ${dead.length} questi
 
 return {
   status,
+  // `unverifiedClaims` is reported even when the wave is VERIFIED, because a
+  // capped wave is complete-as-run and NOT complete-as-asked. Reporting only
+  // `status` would let a budget cut read as full coverage.
+  unverifiedClaims: dropped,
   started: { questions: briefs.length, verifiers: claims.length },
   returned: { questions: briefs.length - dead.length, verifiers: claims.length - deadVerifiers.length },
   answers: answers.map((a, i) => ({ question: args.questions[i], ...(a || { answer: 'AGENT DIED — unanswered' }) })),
