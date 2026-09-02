@@ -11,6 +11,28 @@ copied or exported; no save was touched. Every claim carries a
 offset within that block, and every number is either an authored numeric
 literal or arithmetic derived from one.
 
+**§2.3 and §2.4 are now RE-DERIVABLE rather than trusted, and this document is
+load-bearing enough that they had to be.** Run
+
+```
+node tools/item-table-transcription.mjs
+```
+
+on a machine that has the licensed build. It walks the nested action bodies,
+finds every `_root.weapon<N> = Array(...)` literal by shape rather than by
+address, and diffs all **540 fields of all 90 rows** — the instruction offset
+included, so a silently renumbered row fails rather than passes. It then checks
+the part a diff alone cannot: that the **index convention is the build's**, by
+reading the `Push <n>; GetMember` at each `battlevalues` reader site rather than
+assuming §2.1's `[e, name, d, c, b, a]`. Measured 2026-09-02 against
+`77cb545c…`: 540 of 540 fields agree, and all five reader indices agree
+(`weapon_type` 0 at `+0x3134`, `weapon_weight` 2 at `+0x3186`,
+`weapon_min_damage` 3 at `+0x31d0`, `weapon_max_damage` 4 at `+0x31ec`,
+`weapon_range` 5 at `+0x31aa`).
+
+It is a tool rather than a test because a fresh clone has no licensed build, and
+this project's rule is that for build DATA the only honest oracle is the build.
+
 **Inspection boundary note.** Each weapon and armour item also carries a
 **display-name string literal**. Names are game content, not structure, so this
 document does not reproduce any of them — items are identified by **id** only,

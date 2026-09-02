@@ -1058,15 +1058,25 @@ output and names the wrapper source hash it compiled.
        licensing boundary this work needs: **display-name string literals are
        game content and are not reproduced; items are identified by id only.**
        I re-read two rows from the bytes independently — id 22 at `+0x4174`
-       and id 24 at `+0x41c6` — and both match the document exactly. **The
-       other 88 are unchecked by anyone**, so the real first step is a
-       MECHANICAL diff of the document against the build, not a transcription.
+       and id 24 at `+0x41c6` — and both match the document exactly.
        Neither `ss2-rules.js`'s gap 3 nor this list mentioned that the file
        exists; both said "the table is not transcribed".
 
-       What is genuinely left: verify the 90 rows mechanically, get the table
-       into a code module with a mechanism that keeps it honest, and make
-       `weapon` declarable (`SS2_RESOURCE_NAMES`, `SS2_RESOURCE_DEFAULTS`,
+     ► **AND ALL 90 ROWS ARE NOW MECHANICALLY VERIFIED, so that half is done
+       too.** `node tools/item-table-transcription.mjs` diffs **540 of 540
+       fields** — the per-row instruction offset included — and separately
+       confirms the INDEX CONVENTION from the build rather than assuming it,
+       by reading the `Push <n>; GetMember` at each `battlevalues` reader site
+       (`weapon_type` 0 at `+0x3134`, `weapon_weight` 2 at `+0x3186`,
+       `weapon_min_damage` 3 at `+0x31d0`, `weapon_max_damage` 4 at `+0x31ec`,
+       `weapon_range` 5 at `+0x31aa`). All agree against `77cb545c…`. Without
+       that second check the first proves only that the document's numbers are
+       the build's numbers UNDER THE DOCUMENT'S OWN CONVENTION, which is the
+       shape of an oracle computed from the table under test.
+
+       What is genuinely left: get the table into a code module with a
+       mechanism that keeps it honest, and make `weapon` declarable
+       (`SS2_RESOURCE_NAMES`, `SS2_RESOURCE_DEFAULTS`,
        `CANONICAL_RESOURCE_SOURCES`, `SS2_PROJECTED_COMBATANT_KEYS`).
   4. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
 
