@@ -251,17 +251,70 @@ function removeArmourCandidate(defender, direction, rolls, requestIndex, mutatio
   };
 }
 
+/**
+ * Which enchantment the attacker's equipped weapon applies.
+ *
+ * ## The potency is the PRIMARY field in both branches, and that is correct
+ *
+ * This reads like a bug and is not one. It has now been flagged as a bug once,
+ * so the bytes are recorded here rather than left to be re-derived by whoever
+ * flags it next. In `damagecharacter`
+ * (`sprite:862[overlay]/frame:52/DoAction@0x240c7f`) the build does:
+ *
+ * ```
+ * +0x1bf1  magicweapon_percentage = randomBetween(1, 100)
+ * +0x1c09  push magicweapon_percentage
+ * +0x1c0f  push game_attacker.weapon_enchantment_potency   <-- PRIMARY, always
+ * +0x1c17  push 10 ; Multiply
+ * +0x1c20  Less2 ; Not
+ * +0x1c22  If -> +0x1dd3                                   (skip all four arms)
+ * ```
+ *
+ * The potency gate is HOISTED OUT of, and evaluated BEFORE, the first
+ * `equipped_weapon` test at `+0x1c27`. `secondary_weapon_enchantment_potency`
+ * is read **nowhere** in `damagecharacter` — verified by census: the variable
+ * `magicweapon_percentage` occurs exactly twice in the whole build, one write
+ * and one read, so there is exactly one enchantment roll and it is this one.
+ * `docs/integration/ss2-battle-map.md` says the same in prose.
+ *
+ * Re-derive with:
+ * `node tools/inspect-swf.mjs <ss2.swf> --references 'weapon_enchantment_potency' --around 34`
+ *
+ * (`secondary_weapon_enchantment_potency` IS used by the build, but for magic
+ * DAMAGE, not for this proc: `battlevalues +0x3326` sets
+ * `secondary_weapon_enchantment_damage = ceil(secondary_weapon_max_damage / 3 *
+ * secondary_weapon_enchantment_potency)`. That whole damage path is unmodelled
+ * here — see the gap noted in `src/team/ss2-rules.js`'s header.)
+ *
+ * ## What WAS wrong: the fallback
+ *
+ * Each of the four status arms is
+ * `(equipped_weapon == 1 && weapon_enchantment_type == N) ||
+ *  (equipped_weapon == 2 && secondary_weapon_enchantment_type == N)`
+ * — `+0x1c27`/`+0x1c58` for N=2 burning, and the same pair again at
+ * `+0x1cab`/`+0x1cdc` (3, frozen), `+0x1d16`/`+0x1d47` (4, poison) and
+ * `+0x1d81`/`+0x1db2` (5, life_stolen). Both conjuncts are false for any other
+ * `equipped_weapon`, so the build applies NO status.
+ *
+ * This function used to treat every value other than 2 as the primary weapon,
+ * so `equipped_weapon` 0 or 3 applied the primary enchantment where the build
+ * applies nothing. Corrected 2026-09-02. No fixture reaches it — all 12
+ * `equipped_weapon` values in the corpus are 1, and `numberField` defaults the
+ * rest to 1 — so this changes no measured evidence; it removes a divergence
+ * that a future armoured or enchanted capture could have hit.
+ *
+ * The caller draws the roll unconditionally either way, so the RNG stream is
+ * unaffected by returning a null type here.
+ */
 function activeEnchantment(attacker) {
-  if (attacker.equipped_weapon === 2) {
-    return {
-      type: attacker.secondary_weapon_enchantment_type,
-      potency: attacker.weapon_enchantment_potency
-    };
+  const potency = attacker.weapon_enchantment_potency;
+  if (attacker.equipped_weapon === 1) {
+    return { type: attacker.weapon_enchantment_type, potency };
   }
-  return {
-    type: attacker.weapon_enchantment_type,
-    potency: attacker.weapon_enchantment_potency
-  };
+  if (attacker.equipped_weapon === 2) {
+    return { type: attacker.secondary_weapon_enchantment_type, potency };
+  }
+  return { type: null, potency };
 }
 
 function clearDeathState(scenario, mutationTrace) {

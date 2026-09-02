@@ -510,6 +510,71 @@ test("secondary enchantment type still uses primary potency", () => {
   assert.equal(outcome.state.villain.burning, false);
 });
 
+/**
+ * The positive half of the test above. Without it, "statusApplied is null"
+ * could be passing because the secondary branch is broken rather than because
+ * the potency gate refused — and those are opposite conclusions.
+ */
+test("the secondary weapon's TYPE is what fires, gated on the primary potency", () => {
+  const scenario = physicalScenario({
+    hero: {
+      equipped_weapon: 2,
+      // Primary potency 10 -> threshold 100, so the roll of 50 clears it.
+      weapon_enchantment_potency: 10,
+      // Primary type 5 (life_stolen) must NOT be the one applied.
+      weapon_enchantment_type: 5,
+      secondary_weapon_enchantment_type: 2,
+      secondary_weapon_enchantment_potency: 0
+    }
+  });
+  const { outcome } = runPhysicalScenario(scenario, enchantmentTape());
+  assert.equal(outcome.mutation.statusApplied, "burning");
+  assert.equal(outcome.state.villain.burning, true);
+  assert.equal(outcome.state.villain.life_stolen, false, "the PRIMARY type must not fire on a secondary weapon");
+});
+
+/**
+ * `damagecharacter` tests `equipped_weapon == 1` and `equipped_weapon == 2`
+ * explicitly (`+0x1c27` / `+0x1c58`, repeated per status arm), so any other
+ * value satisfies neither conjunct and applies NO status. This module used to
+ * treat "not 2" as "primary", which applied one.
+ *
+ * Nothing in the corpus stages such a value today; these pin the branch so a
+ * future armoured or enchanted capture cannot silently diverge on it.
+ */
+for (const equipped of [0, 3]) {
+  test(`equipped_weapon ${equipped} applies no enchantment, as the build does not`, () => {
+    const scenario = physicalScenario({
+      hero: {
+        equipped_weapon: equipped,
+        weapon_enchantment_potency: 10,
+        weapon_enchantment_type: 2,
+        secondary_weapon_enchantment_type: 2,
+        secondary_weapon_enchantment_potency: 10
+      }
+    });
+    const { outcome } = runPhysicalScenario(scenario, enchantmentTape());
+    assert.equal(outcome.mutation.statusApplied, null);
+    assert.equal(outcome.state.villain.burning, false);
+    // The roll is still DRAWN — the build draws it before any weapon test — so
+    // the RNG stream must not depend on which weapon is equipped.
+    assert.equal(outcome.mutation.enchantmentRoll, 50);
+  });
+}
+
+/** The seven samples the physical scenarios above consume, in order. */
+function enchantmentTape() {
+  return [
+    betweenSample("hit-roll", 1, 100, 50),
+    betweenSample("normal-damage-roll", 12, 20, 12),
+    betweenSample("normal-critical-roll", 1, 20, 7),
+    betweenSample("critical-deflection-roll", 1, 100, 42),
+    betweenSample("armour-removal-roll", 1, 100, 66),
+    betweenSample("knockback-roll", 1, 4, 1),
+    betweenSample("enchantment-potency-roll", 1, 100, 50)
+  ];
+}
+
 test("the result bridge delivers the final pending result only once", () => {
   const resultEvent = fixturesById.get("candidate-lethal-result").expected.resultEvent;
   const delivered = [];

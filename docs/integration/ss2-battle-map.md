@@ -423,7 +423,7 @@ Observed data fields include:
 | Primary weapon | `weapon`, `weapon_type`, `weapon_weight`, `weapon_range`, `weapon_min_damage`, `weapon_max_damage`, `weapon_enchantment_type`, `weapon_enchantment_potency`, `equipped_weapon`, `using_bow` |
 | Secondary weapon | `secondary_weapon` plus the corresponding type, weight, range, min/max damage, and enchantment fields |
 | Armour | `breastplate`, `helmet`, `shinguard`, `greaves`, `shoulderguard`, `gauntlet`, `boot`, `shield` and per-piece `_defence` fields |
-| Derived combat | `physical_size`, `min_damage`, `max_damage`, `secondary_min_damage`, `secondary_max_damage`, `movement_speed`, `attack_type`, `attack_speed`, `weapon_enchantment_damage` |
+| Derived combat | `physical_size`, `min_damage`, `max_damage`, `secondary_min_damage`, `secondary_max_damage`, `movement_speed`, `attack_type`, `attack_speed`, `weapon_enchantment_damage`, `secondary_weapon_enchantment_damage` |
 | Chance cache | `power_percentage`, `normal_percentage`, `quick_percentage`, `bash_percentage`, `taunt_percentage`, `bombard_percentage`, `snipe_percentage`, `magicka_percentage` |
 | Conditions | `psyche_up`, `taunted1`, `taunted2`, `burning`, `frozen`, `poison`, `life_stolen`, and timed `spell_*` fields |
 | Inventory | `inventory1` through `inventory6` |
@@ -444,6 +444,25 @@ breastplate_defence  = round(breastplate * _global.breastplate_dval)  // +0x3480
 helmet_defence       = helmet > 25 ? round(herolevel * 0.5 * 10)      // +0x34eb
                                    : round(helmet * 10)               // +0x34bf
   (…the other six pieces likewise, +0x351f onward)
+weapon_min_damage    = _root["weapon" + <char>.weapon][3]              // +0x31be
+weapon_max_damage    = _root["weapon" + <char>.weapon][4]              // +0x31da
+  (…and the secondary pair likewise from `secondary_weapon`, +0x32f4 onward.
+   `_root.weapon<N>` is a STATIC literal table declared in this same root
+   frame-35 block — e.g. `weapon24 = Array(3, "Hatchet", 4, 8, 32, 1)` at
+   +0x41c6 — so the damage pair IS derivable from a character record plus a
+   transcription of that table. ADDED 2026-09-02: the block below recorded
+   `min_damage` while never saying where `weapon_min_damage` came from, which
+   read as "it is an input" and was repeated as such in
+   `src/team/ss2-rules.js`. That is the table-omits-what-the-derivation-needs
+   failure again.)
+weapon_enchantment_damage = ceil(weapon_max_damage / 3 * weapon_enchantment_potency)
+                                                                       // +0x320c
+secondary_weapon_enchantment_damage
+                     = ceil(secondary_weapon_max_damage / 3
+                            * secondary_weapon_enchantment_potency)     // +0x3326
+  (This is the ONLY reader of `secondary_weapon_enchantment_potency` on this
+   path; the enchantment PROC in `damagecharacter` reads the PRIMARY potency
+   for both weapons — see the `damagecharacter` bullet below.)
 min_damage           = round(strength * 2) + weapon_min_damage        // +0x3356
 max_damage           = round(strength * 2) + weapon_max_damage        // +0x3386
 secondary_min_damage = round(strength * 1) + secondary_weapon_min_damage  // +0x33b6
@@ -1484,8 +1503,40 @@ still passed to `knockback`; 80 is not a force clamp.
 - can set `burning`, `frozen`, `poison`, or `life_stolen` from weapon
   enchantment types 2–5 after a potency roll. When the secondary weapon is
   active, the type comes from its secondary field but the comparison still
-  reads the primary weapon potency field in this build;
-- ends with the byte-verified defeat gate described below.
+  reads the primary weapon potency field in this build.
+
+  **Offsets added 2026-09-02.** This bullet was the map's whole account of the
+  enchantment arithmetic and it carried no offset, no formula and no comparison
+  direction, so an implementer had nothing to check against. The block is
+  `+0x1bf1..+0x1dd2`:
+
+  ```text
+  magicweapon_percentage = randomBetween(1, 100)                    // +0x1bf1
+  if (magicweapon_percentage < game_attacker.weapon_enchantment_potency * 10) {
+                                                    // +0x1c09..+0x1c22, strict <
+    // PRIMARY potency, unconditionally: the gate is hoisted OUT of and
+    // evaluated BEFORE the first equipped_weapon test at +0x1c27, and
+    // secondary_weapon_enchantment_potency is read NOWHERE in damagecharacter.
+    // Census: `magicweapon_percentage` occurs exactly twice in the build,
+    // one write and one read, so there is exactly one enchantment roll.
+    if ((equipped_weapon == 1 && weapon_enchantment_type           == N)
+     || (equipped_weapon == 2 && secondary_weapon_enchantment_type == N))
+        game_defender.<status> = true;
+    // N = 2 burning +0x1c88, 3 frozen +0x1cf3, 4 poison +0x1d5e,
+    //     5 life_stolen +0x1dc9
+  }
+  ```
+
+  **Both arms test an explicit value, so an `equipped_weapon` outside {1, 2}
+  applies NO status.** `src/golden/ss2-attack-candidate.js` treated "not 2" as
+  "primary" until 2026-09-02 and so applied one; corrected there, with these
+  offsets quoted at the site.
+- **ends with the enchantment write at `+0x1dd2`, not with the defeat gate.**
+  (Corrected 2026-09-02; this bullet and the section below both said the
+  function "ends with" the gate at `+0x194a..+0x1a71`. The gate is not last —
+  the knockback miss-path at `+0x1aa5` jumps forward to `+0x1be4`, which is
+  what makes the enchantment roll run on every call.) The defeat gate is
+  described below and is byte-verified; only its POSITION was mis-stated.
 
 ### Defeat gate and death dispatch (byte-verified 2026-08-30)
 

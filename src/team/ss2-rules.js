@@ -78,15 +78,38 @@
  * source and bounds, so getting it wrong desyncs a tape rather than merely
  * moving a number.
  *
- * ## The adapter path does not work, and that is stated rather than hidden
+ * ## The adapter path works for AI-filled slots and not for supplied ones
  *
- * `CANONICAL_RESOURCE_SOURCES` (`src/adapter/state-bridge.js`) is a closed
- * list that carries none of the eight armour piece ids, `min_damage`,
- * `max_damage`, `character_level`, `equipped_weapon` or `herolevel`. A battle
- * built through `src/adapter/` therefore cannot feed this rule set, and
- * `maximumHealth` refuses loudly rather than running on defaults. Widening
- * that list is real work with its own evidence requirements; it is not done
- * here.
+ * **Corrected 2026-09-02. This section previously said "A battle built through
+ * `src/adapter/` therefore cannot feed this rule set", and that is FALSE** — a
+ * verifier built one and fought a 28-step battle through it. The claim was
+ * mine and it was over-general in the direction that discourages someone from
+ * trying; it is corrected here rather than deleted because it was cited as a
+ * known limitation in `HANDOFF.md`.
+ *
+ * What is true: `CANONICAL_RESOURCE_SOURCES` (`src/adapter/state-bridge.js`) is
+ * a closed list carrying none of the eight armour piece ids, `min_damage`,
+ * `max_damage`, `character_level`, `equipped_weapon` or `herolevel`. What that
+ * blocks is the **supplied-gladiator** path only, because
+ * `toCanonicalCombatantSource` hard-codes the bag and takes no `resources`
+ * option.
+ *
+ * An **AI-filled slot** has no combat object, so its bag comes from the
+ * caller's own template, and `declaredFillResources`
+ * (`src/adapter/battle-host.js`) reads `resources` straight off `team.aiFill`
+ * — bypassing `CANONICAL_RESOURCE_SOURCES` entirely. So
+ * `createVanillaBattleHost({ teams: [...aiFill.resources from ss2Combatant()],
+ * rules: ss2TeamRules })` constructs, resolves actions, and emits real vanilla
+ * writes with `unmapped: []`.
+ *
+ * Also corrected: the refusal is NOT `maximumHealth`'s. On the supplied path
+ * the throw that actually fires is `assertRequiredResources`, and it names
+ * `max_damage, min_damage` — `staminaleft` and `staminamax` ARE in
+ * `CANONICAL_RESOURCE_SOURCES`, so only two of the four required names are
+ * missing. Anyone debugging this from the old wording went to the wrong throw.
+ *
+ * Widening the canonical list is still real work with its own evidence
+ * requirements; it is not done here.
  *
  * ## Two honest gaps, named because a silent one would be a lie
  *
@@ -110,13 +133,45 @@
  *    `villainChooseAction`'s unconditional `staminaleft > 10` is byte-decoded.
  *    Target choice and the choice among the three verbs are this module's own.
  *
- * 3. **`weapon_min_damage` / `weapon_max_damage` are unmodelled.** In the
- *    build they are `battlevalues`'s own lookups into `_root.weapon[...]`
- *    (`+0x31be`, `+0x31da`); `ss2BattleValues` takes them as caller-supplied
- *    inputs, so it cannot produce a gladiator's damage pair from a character
- *    record alone. `weapon_enchantment_damage` (`+0x320c`) is dropped
- *    entirely, so an enchanted weapon here applies a status and deals no magic
- *    damage. Both found by a verifier reading `battlevalues` in full.
+ * 3. **`weapon_min_damage` / `weapon_max_damage` are unmodelled — but NOT
+ *    because they are underivable.** `ss2BattleValues` takes them as
+ *    caller-supplied inputs.
+ *
+ *    **Corrected 2026-09-02.** This gap used to end "so it cannot produce a
+ *    gladiator's damage pair from a character record alone", which is wrong,
+ *    and wrong in a way that made the gap look closed by nature rather than
+ *    open by omission. The build's lookup is
+ *    `_root["weapon" + whichcharacter.weapon][3]` and `[4]` (`+0x31be`,
+ *    `+0x31da`) — keyed on `weapon`, a field ON the character record, into a
+ *    STATIC literal table declared in the same root-frame-35 block
+ *    (`weapon24 = Array(3, "Hatchet", 4, 8, 32, 1)` at `+0x41c6`, one entry per
+ *    weapon id). So the pair IS derivable from a character record plus a
+ *    transcription of build-constant data — data no different in status from
+ *    the `_global.<piece>_dval` constants this module already transcribes.
+ *
+ *    What actually blocks it is two omissions, both closable: `weapon` is not
+ *    a declarable field in `SS2_RESOURCE_NAMES`, `CANONICAL_RESOURCE_SOURCES`
+ *    or `COMBATANT_KEYS`; and the table is not transcribed.
+ *
+ *    Note the battle map has the same hole and is what made the error
+ *    reachable: it records `min_damage = round(strength*2) + weapon_min_damage`
+ *    and never records where `weapon_min_damage` itself comes from, so anyone
+ *    following the standing "derive from the map" rule concludes it is an
+ *    input. Corrected there too.
+ *
+ * 4. **Enchantment DAMAGE is dropped entirely, on both weapons.**
+ *    `weapon_enchantment_damage` (`+0x320c`) and
+ *    `secondary_weapon_enchantment_damage` (`+0x3326`) are each
+ *    `ceil(<max_damage> / 3 * <potency>)`, and neither is computed here — so an
+ *    enchanted weapon applies a status and deals no magic damage. The
+ *    secondary field is absent from the adapter catalogue too
+ *    (`src/adapter/vanilla-fields.js` carries only the primary), which is an
+ *    asymmetry rather than a deliberate exclusion.
+ *
+ *    Do NOT confuse this with the enchantment PROC, which is modelled and is
+ *    correct: the proc gate reads the PRIMARY potency for both weapons, and
+ *    `src/golden/ss2-attack-candidate.js`'s `activeEnchantment` documents the
+ *    bytes. That pairing has been flagged as a bug once already and is not one.
  *
  * Node builtins only.
  */
