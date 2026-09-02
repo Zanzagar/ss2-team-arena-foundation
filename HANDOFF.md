@@ -248,14 +248,17 @@ identity from merged PR #1.
 
 ## Working agreement for parallel agents
 
-Exclusive file ownership stated in every prompt; no agent runs a state-mutating
-git command; no agent launches Ruffle or touches the installation, the save or
-the snapshots; adversarial verifiers write nothing at all.
+**Corrected 2026-09-02:** Pocock's decision discipline is the default, Codex
+adversarial review checks a material diff, and a fan-out wave is the last resort
+for an otherwise unpinned binary/archive claim. Run one wave at a time through
+the committed capped workflow: at most six question agents and six
+write-nothing verifiers, one named claim per verifier, with the planned spawn
+count stated first. The older uncapped rule here spent roughly 30% of a week's
+usage in twenty minutes and is superseded.
 
-**The limit is the file graph, not the budget.** Writers are capped at ten to
-twelve coherent slices. Auditors have no cap, because they write nothing and
-cannot conflict — and several independent auditors on the same target is a
-quality technique, not duplication. Give each one ONE named claim to break.
+For every permitted subagent, state exclusive file ownership; no subagent runs
+a state-mutating git command, launches Ruffle, or touches the installation,
+save, or snapshots. A dead verifier leaves the claim unverified.
 
 ## Keep the project lawful and reversible
 

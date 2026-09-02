@@ -66,9 +66,10 @@ there never reaches the next reader.
 - **Snapshot before every save-mutating run.** `run-arena.ps1` does it for you.
 - **Git and GitHub: follow `claude-harness/docs/git-hygiene.md`** — thirteen
   rules on branches, commits, pushing, PRs and merge eligibility. They are
-  ENFORCED, not advisory: `.claude/settings.json` carries them as
-  `permissions.deny`/`ask`, so they bind Claude, Codex and a human here
-  identically.
+  repository policy for Claude, Codex and humans, but enforcement is
+  actor-specific: a branch's `.claude/settings.json` mediates Claude Code only;
+  Codex permissions and a human shell are separate. Never claim one tool's
+  settings enforce another actor.
   **This project TIGHTENS rule 7 (push feature branches freely) to ASK BEFORE
   EVERY PUSH**, because the fixtures derive from a licensed game and what
   leaves this machine is the owner's call. `main` is denied outright.
@@ -81,8 +82,8 @@ and Plan agents), so these rules bind you as well:
 - **No agent launches Ruffle**, touches the installation, the save or the
   snapshots, or runs a state-mutating git command. Those are the main session's,
   serial and supervised.
-- **Adversarial verifiers write nothing at all.** They have been the
-  highest-value agents on this project; run more of them than feels necessary.
+- **Adversarial verifiers write nothing at all.** In the rare audit permitted
+  below, give each verifier one named claim and stay inside the committed cap.
 - **Treat every fact in your brief as a hypothesis** — tables, counts and quoted
   file contents included. Re-derive anything you rely on. A premise that turns
   out to be wrong is a finding that outranks the task, and must be reported
@@ -94,18 +95,20 @@ and Plan agents), so these rules bind you as well:
 
 Standing rules to paste into every agent prompt are in
 `docs/overnight-agent-plan.md` — **ABOVE its `## THE ARCHIVE LINE` only**;
-below that line is the frozen record of two runs in August, not guidance. The
-runnable form is in `.claude/workflows/`. *(This pointer used to name the whole
-file, which is how a plan written for ONE night in August became doctrine
-loaded by every agent. See that file's own header for what the omission cost.)*
+below that line is the frozen record of two runs in August, not guidance. A
+branch that carries `.claude/workflows/` has the Claude-only runnable form;
+absence is not permission to recreate it inline. *(This pointer used to name
+the whole file, which is how a plan written for ONE night in August became
+doctrine loaded by every agent. See that file's own header for what the
+omission cost.)*
 
 - **PRECEDENCE, decided by the owner 2026-09-02 (harness `docs/adr/0001`):
-  Pocock's skills are the default workflow, Codex adversarial review is the
-  check on any diff that matters, and a fan-out wave is the LAST resort —
-  only for breaking a claim about the game's bytes or the capture archive
-  that no test pins and no diff review reaches. ONE wave at a time, never
-  concurrent; the committed script hard-caps questions and verifiers at 6
-  each, and authoring an inline workflow to get past that is a rule
+  Pocock's decision discipline is the default workflow, Codex adversarial
+  review is the check on any diff that matters, and a fan-out wave is the LAST
+  resort — only for breaking a claim about the game's bytes or the capture
+  archive that no test pins and no diff review reaches. ONE wave at a time,
+  never concurrent; the committed script hard-caps questions and verifiers at
+  6 each, and authoring an inline workflow to get past that is a rule
   violation. Say what a wave will spawn BEFORE launching it. Three concurrent
   12-verifier waves spent ~30% of a week's usage in twenty minutes.**
 - **Fan out on QUESTIONS, not replicas.** Measured here 2026-08-31: two
@@ -138,6 +141,11 @@ loaded by every agent. See that file's own header for what the omission cost.)*
 
 Installed skills are invoked on judgment; there is no forced-invocation rule.
 Provenance for the shared rules and workflows is the `claude-harness` repo.
+
+For dedicated Endless progression design, use the repo-local
+`$ss2-progression-design` skill. It adapts Pocock's decision-tree/frontier
+discipline to the existing owner packet and decision record; it does not
+replace them with issue tickets and does not apply to vanilla evidence work.
 
 ## Running the tests
 
