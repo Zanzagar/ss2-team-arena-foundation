@@ -9,7 +9,9 @@ agentRuns:    wf_9f0108b5-fb5 (adversarial verification of src/team/ss2-rules.js
               were evidence-level; both were then re-derived from the licensed
               SWF by the main session before anything was changed.
 branch:       arena/champion-capture
-suite:        692 tests / 691 passed / 0 failed / 1 skipped (WSL, fresh-clone profile)
+commits:      831bcdc (1 commit, NOT pushed — `github/arena/champion-capture`
+              is still at 2f8e4b8, and pushing needs the owner)
+suite:        693 tests / 692 passed / 0 failed / 1 skipped (WSL, fresh-clone profile)
 environment:  WSL2, node v26.3.1, ~/projects/swords-and-sandals-2-multiplayer
 supersedes:   2026-09-01-2112--the-project-became-playable (its ranked items 1 and 2)
 ---
