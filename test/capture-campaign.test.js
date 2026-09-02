@@ -25,6 +25,8 @@ import path from "node:path";
 import test, { after } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { byCodeUnit } from "../src/common/stable-order.js";
+
 import {
   SS2_PROJECTED_COMBATANT_KEYS,
   SS2_SIMULATED_CAPTURE_METHOD,
@@ -483,8 +485,12 @@ test("session order is chronological, so the digest does not depend on record or
   assert.ok(order.length >= 4, `too few sessions (${order.length}) to test ordering`);
   assert.deepEqual(reversed.manifest.sessions.map((session) => session.sessionId), order);
   assert.deepEqual(
+    // The oracle must NOT use the comparator under test. It did until
+    // 2026-09-02 — `left.localeCompare(right)` — which made this assertion
+    // structurally incapable of catching the locale-dependence it looks like
+    // it is checking, because both sides moved together.
     [...order].sort((left, right) =>
-      Date.parse(observedAtOf(left)) - Date.parse(observedAtOf(right)) || left.localeCompare(right)),
+      Date.parse(observedAtOf(left)) - Date.parse(observedAtOf(right)) || byCodeUnit(left, right)),
     order,
     "sessions are not ordered by capture time with sessionId breaking ties"
   );

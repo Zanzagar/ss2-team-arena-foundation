@@ -71,6 +71,7 @@
 import { ControllerKind, createControllerRegistry } from "./controllers.js";
 import { BattleError } from "./errors.js";
 import { normaliseResourceBag } from "./resources.js";
+import { byCodeUnit } from "../common/stable-order.js";
 
 export const MIN_TEAM_SLOTS = 1;
 export const MAX_TEAM_SLOTS = 3;
@@ -362,11 +363,29 @@ export function buildRoster({ teams, rules }) {
   return { teams: built, controllers };
 }
 
-/** Stable initiative: agility descending, then combatant id ascending. */
+/**
+ * Stable initiative: agility descending, then combatant id ascending.
+ *
+ * The tiebreak used `localeCompare` until 2026-09-02, and the consequence was
+ * worse than the desync it was reported as. `battle.initiative` is read by
+ * `currentCombatant` (`resolver.js`) and drives `advanceTurn`, so two peers in
+ * different locales did not merely hash differently — **a different fighter
+ * acted first**. Measured on one blueprint with two agility-tied fighters and
+ * the same seed: the RNG stream stayed bit-identical, 21 draws with the same
+ * final state, and the WINNER still flipped, because identical draws were
+ * applied to different actors. The order also reaches a sealed campaign record
+ * (`src/campaign/from-battle.js`), so it is persisted, not only transient.
+ *
+ * The suite could not have caught this: every id pair in the committed fixtures
+ * collates identically in every locale tested, so a green run was never
+ * evidence either way. See `src/common/stable-order.js` for the census, and
+ * note it does NOT case-fold — `["alpha", "Beta"]` orders differently here than
+ * under en-US collation, which the test below this pins.
+ */
 export function initiativeOrder(teams) {
   return teams
     .flatMap((team) => team.combatants)
     .slice()
-    .sort((a, b) => b.stats.agility - a.stats.agility || a.id.localeCompare(b.id))
+    .sort((a, b) => b.stats.agility - a.stats.agility || byCodeUnit(a.id, b.id))
     .map((combatant) => combatant.id);
 }

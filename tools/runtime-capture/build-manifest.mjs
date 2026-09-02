@@ -32,6 +32,7 @@ import {
 } from "../../src/golden/promote-1v1-golden.js";
 import { validateSs2Observation } from "../../src/golden/observation.js";
 import { SS2_BUILD_SHA256, SS2_STEAM_BUILD_ID } from "../../src/golden/run-1v1-fixture.js";
+import { byCodeUnit } from "../../src/common/stable-order.js";
 
 async function readJson(filePath) {
   const text = await readFile(filePath, "utf8");
@@ -131,9 +132,17 @@ export function buildSs2CaptureManifest(observationRecords, { createdAt } = {}) 
   // in readdir order, so without this a different filesystem would mint a
   // different, equally "correct" digest for the same evidence. Ties break on
   // sessionId so the ordering is total.
+  //
+  // The tiebreak used `localeCompare` until 2026-09-02, which reintroduced the
+  // exact defect the paragraph above exists to prevent, one layer down: a
+  // different LOCALE would mint a different, equally "correct" digest for the
+  // same evidence. Measured over the 86 committed sessionIds, az-AZ orders 682
+  // of the 3,655 pairs differently from every other locale tested. No committed
+  // digest moves, because en-US — what they were all minted under — agrees with
+  // `byCodeUnit` on all 3,655 (`node tools/stable-order-locale-census.mjs`).
   const orderedSessions = [...sessions.values()].sort((left, right) =>
     Date.parse(left.observedAt) - Date.parse(right.observedAt) ||
-    left.sessionId.localeCompare(right.sessionId)
+    byCodeUnit(left.sessionId, right.sessionId)
   );
 
   const manifest = {

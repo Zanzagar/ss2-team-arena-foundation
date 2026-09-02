@@ -16,6 +16,7 @@
  */
 
 import { defineTeamRuleSet, EffectKind, RuleSetVerification } from "./rule-set.js";
+import { byCodeUnit } from "../common/stable-order.js";
 
 /** Placeholder action vocabulary. Not the licensed build's vocabulary. */
 export const ActionType = Object.freeze({
@@ -68,7 +69,10 @@ export function looksLikeClassicFormulas(candidate) {
 }
 
 const healthRatio = (combatant) => combatant.health / combatant.maxHealth;
-const byHealthThenId = (a, b) => healthRatio(a) - healthRatio(b) || a.id.localeCompare(b.id);
+// `localeCompare` here made target selection locale-dependent, and since every
+// foe starts at full health the tiebreak IS the common path. Replaced
+// 2026-09-02; see `src/common/stable-order.js` for the measurement.
+const byHealthThenId = (a, b) => healthRatio(a) - healthRatio(b) || byCodeUnit(a.id, b.id);
 
 /**
  * Wraps a bare classic-style formula object in the team rule-set contract.

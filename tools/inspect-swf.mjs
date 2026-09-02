@@ -763,8 +763,14 @@ export function buildFrameLabelTimelines(analysis, swf = null) {
       };
     });
   }
+  // Code-unit order, not `localeCompare`: this listing is how byte derivations
+  // are read out of the licensed build, so two machines must produce the same
+  // one. Swapped 2026-09-02 with the rest of the class; the reason and the
+  // locale census are in `src/common/stable-order.js`. Kept local rather than
+  // imported so this disassembler stays dependency-free.
+  const byCodeUnit = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
   timelines.sort((a, b) => {
-    if (a.spriteId === b.spriteId) return a.timeline.localeCompare(b.timeline);
+    if (a.spriteId === b.spriteId) return byCodeUnit(a.timeline, b.timeline);
     if (a.spriteId === null) return -1;
     if (b.spriteId === null) return 1;
     return a.spriteId - b.spriteId;
