@@ -851,6 +851,71 @@ real test"; this was it, and it needed five things nothing had written down.
   after a wrapper edit — not `launch-capture.ps1`, `run-arena.ps1`,
   `run-campaign.ps1` or `run-capture.ps1`, none of which accept it.
 
+- ► **THE TWO THINGS THAT MADE A WSL-DRIVEN `run-arena.ps1` CAPTURE ACTUALLY
+  WORK, found 2026-09-02 on the first attempt to run one. Neither was written
+  down, because the 2026-09-01 session only ever ran `validate-vehicle.ps1`,
+  which uses `--save-directory` and therefore never touches the licensed
+  store.**
+
+  1. **RUFFLE READS A DIFFERENT SAVE STORE FROM THE ONE `save-state.ps1`
+     MANAGES, AND THE GUARDS WATCH THE WRONG ONE.** Setting
+     `$env:LOCALAPPDATA=C:\ss2la` makes `save-state.ps1` snapshot and restore
+     `C:\ss2la\ruffle\SharedObjects` — the licensed store. Ruffle resolves its
+     profile through the Windows Known Folder API and ignores the variable
+     entirely, so it read `C:\Users\corey\AppData\Local\ruffle\SharedObjects`,
+     found nothing, and **created a fresh 267-byte empty save**. The route
+     aborted at `new_or_continue` with `level: null` and
+     `ABORT:time-of-day-ceiling` after 188 s — a symptom that reads like a
+     navigator defect and is not one. **The gladiator was simply not in the
+     save Ruffle opened.**
+
+     Worse than the failure: `run-arena.ps1`'s snapshot guard AND its
+     before/after save tripwire both read the `C:\ss2la` store, so the run
+     printed `UNCHANGED (byte-identical)` — **truthfully, about a file it never
+     touched, while the file Ruffle did write was unguarded.** A save-mutating
+     run whose guard watches the wrong store is worse than no guard.
+
+     **Fix, applied 2026-09-02:** make the two stores one, with a directory
+     junction, so `save-state.ps1`, the tripwire and Ruffle all address the same
+     bytes:
+
+     ```
+     mklink /J "C:\Users\corey\AppData\Local\ruffle\SharedObjects" ^
+               "C:\ss2la\ruffle\SharedObjects"
+     ```
+
+     After it, the route loaded the hero (`level 4`, `gold 5723`,
+     `currentTournament 1`), reached `versus` and `battle-ready`, and returned
+     `Route outcome: CAPTURED`. The 267-byte stub Ruffle had minted is backed up
+     in this session's scratchpad; it was a fresh-new-game artefact, not
+     evidence.
+
+  2. **`campaign.mjs ingest-round` CANNOT RUN UNDER WSL NODE, AND IT FAILS WITH
+     A LICENCE-INTEGRITY SCARE.** `capture-session.mjs`'s `DEFAULT_INSTALL_DIR`
+     is the literal Windows path `C:\Program Files (x86)\Steam\...`, and
+     `ingestAgainst` calls `verifyInstallAgainstFingerprint()` with no
+     arguments. Under WSL node that path is `ENOENT`, `check.ok` is false, and
+     the thrown message is **"Post-session hash verification FAILED: the
+     installed build no longer matches the pinned fingerprint"**. Nothing is
+     wrong with the build — `verify-install` under Windows node reports both
+     SWFs OK against the current pin. **The message names the wrong cause and
+     the cause it names is the most alarming one available.** Run ingest under
+     Windows node:
+
+     ```
+     & 'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' `
+        tools\runtime-capture\campaign.mjs ingest-round --family <f> --session <s> --observation <o>
+     ```
+
+     Note also that `--observation` takes the ATTEMPT-suffixed id (`obs-x-a1`),
+     not the id passed to `-ObservationId`; the un-suffixed form is an `ENOENT`
+     on the `.rufflelog`.
+
+  3. **A round costs 14 seconds end to end** (restore, route, capture, ingest),
+     measured over the first rounds of 2026-09-02. The armoured route is
+     therefore far cheaper than "a supervised window" implies, and a few hundred
+     rounds is an evening rather than a campaign.
+
 - ► **`powershell.exe` DRIVEN FROM WSL INHERITS A WORKING DIRECTORY INSIDE THE
   REPO, so a malformed destination WRITES INTO THE REPO. Found the hard way
   2026-09-01, by me, in this file's own session.** A stray
@@ -1813,12 +1878,28 @@ ones that change what the next session should DO are marked ►.
   joint pair `(105,105)` never occurs (33 distinct pairs in 38 rounds; hero 105
   in 13, villain 105 in 1, both in 0). Re-derived independently three ways.
 
-  **Read that 0/38 narrowly, though — it is not a gate's success rate.** All 38
-  `adc` rounds ran with NO autopilot: `launcher.log` says "Stage the scenario
-  yourself, perform the one controlled action". A HUMAN chose the arming moment.
-  So 0/38 measures an ungated MANUAL protocol. **The measurement that would
-  actually settle this has never been taken: arm on the hero's FIRST action of
-  the staged bout rather than on an operator-chosen turn.** `initbattle`
+  **Read that 0/38 narrowly, though — it is not a gate's success rate.**
+  ~~All 38 `adc` rounds ran with NO autopilot: `launcher.log` says "Stage the
+  scenario yourself, perform the one controlled action". A HUMAN chose the
+  arming moment. So 0/38 measures an ungated MANUAL protocol.~~
+  ► **FALSE, AND IT IS THE `launcher.log` BANNER THAT MISLED US. Measured
+    2026-09-02 from the traces themselves.** Every one of the 38 armed `adc`
+    traces records the autopilot DRIVING: `{"t":"dbg","at":"autopilot",
+    "step":"walkright","n":1..5,...,"controller":"longrange_warrior",
+    "policy":"aggressive"}` then `"step":"normal_attack","n":6`, with 5-14
+    autopilot entries per round and the same shape as the `arena-staged`
+    sessions. The banner that says "Launching the instrumented session with NO
+    autopilot. Stage the scenario yourself" is printed by the launcher and is
+    NOT a record of what the wrapper did. **A log line that describes an
+    intention is not evidence of a behaviour** — the same lesson as the
+    `-WatchFields` docs, from the other direction.
+
+    So 0/38 measures an AUTOPILOT protocol, and the conclusion drawn from it —
+    that the real measurement has never been taken — collapses. It has been
+    taken 38 times.
+  **The measurement that genuinely has not been taken is narrower: arm on the
+  hero's FIRST action of the staged bout rather than after the approach.**
+  `initbattle`
   (`+0x0b8a`–`+0x0bb6`) assigns `villain.staminaleft = villain.staminamax`
   unconditionally, so before the villain has taken a phase its value IS
   determined. Every villain turn after that walks it away from the pin.
