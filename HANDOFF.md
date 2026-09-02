@@ -8,16 +8,28 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-01 17:33 — the armoured family measured, and the schema question](docs/handoffs/2026-09-01-1733--armoured-family-measured-and-the-schema-question.md).**
-Start there. It RETRACTS the previous handoff's ranked item 1 — "run the armoured
-family under the arming gate" — by measurement: that gate would have armed **0
-times in 38**, its hero predicate CONTRADICTS all eight target fixtures, and a
-new branch in it is dead code under `validate-vehicle.ps1`. What it puts in its
-place is better news: **35 of 38 archived rounds already reproduce the fixture on
-every pinned field except `staminaleft`**, and `hero.staminaleft == 110 − (walk
-count)` holds 38 of 38, so the hero side is deterministic and unused. Wave
-VERIFIED (6/6 questions, 18/18 write-nothing verifiers, 0 errors) — with **9 of
-18 verdicts BROKEN**, so read the corrections, not just the claims.
+[2026-09-01 21:12 — the project became playable](docs/handoffs/2026-09-01-2112--the-project-became-playable.md).**
+Start there. **`node tools/hotseat.mjs` now plays a fight** — two humans, one
+keyboard, to a winner — the first playable thing in this project's history, and
+the answer to a question from the owner that outranks every measurement below:
+**the verification machinery had become the project.** 22 runtime-verified
+goldens fed nothing, the resolver ran invented formulas, and this file's own note
+that "the corpus is an asset nothing consumes, and breadth is buying less than
+use would" had been ranked LAST every session since it was written. **When a true
+observation keeps being ranked last, that ranking is the finding.**
+
+It also adds the `map-derived` verification tier — whose absence, not effort, is
+what kept SS2's real arithmetic from ever being wired in — retracts the previous
+handoff's ranked items 1 and 3 by measurement, and makes the raw archive
+verifiable (`captures/ARCHIVE-MANIFEST.sha256`) and mirrored. Three waves, all
+VERIFIED, **28 of 48 verdicts BROKEN**: read the corrections, not just the claims.
+
+Its retraction of the 15:50 ranked item 1 still stands and is worth the summary:
+an arming gate keyed on the fixtures would have armed **0 times in 38**, its hero
+predicate CONTRADICTS all eight target fixtures, and a new branch in it is dead
+code under `validate-vehicle.ps1`. But **35 of 38 archived rounds already
+reproduce the fixture on every pinned field except `staminaleft`**, and
+`hero.staminaleft == 110 − (walk count)` holds 38 of 38.
 
 **Still current, and superseded only in its ranking:**
 [2026-09-01 15:50 — Codex independence, and what the corpus actually proves](docs/handoffs/2026-09-01-1550--codex-independence-and-the-corpus-archetype.md).

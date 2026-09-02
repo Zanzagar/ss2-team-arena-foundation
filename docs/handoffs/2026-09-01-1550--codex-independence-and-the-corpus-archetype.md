@@ -18,7 +18,7 @@ supersedes:   2026-09-01-1250--wsl-capture-pipeline-and-armoured-fixture-defect
 **Supersedes `2026-09-01-1250`, which is stale in its wave status (it called
 wave 2 partial), its counts, and its top-ranked item.** ~~Read this one.~~
 **SUPERSEDED IN TURN by
-[`2026-09-01-1733--armoured-family-measured-and-the-schema-question`](2026-09-01-1733--armoured-family-measured-and-the-schema-question.md),
+[`2026-09-01-2112--the-project-became-playable`](2026-09-01-2112--the-project-became-playable.md),
 which RETRACTS this handoff's ranked item 1 by measurement.** Everything else
 here stands.
 
