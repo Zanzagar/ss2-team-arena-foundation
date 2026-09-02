@@ -1,30 +1,37 @@
-# Overnight agent plan
+# Agent fan-out rules, and the runs they were derived from
 
-A ready-to-run fan-out for a large parallel session. Rewritten 2026-08-31 after
-two such runs actually happened — **23 agents, then 20** — so the sizing, the
-track list and the claim list below are records rather than estimates. Read
-[`HANDOFF.md`](../HANDOFF.md) first; everything here assumes its state.
+**THIS FILE IS SPLIT, the way `HANDOFF.md` is.** Everything above
+`## THE ARCHIVE LINE` is STANDING GUIDANCE: it applies to any multi-agent run,
+it is corrected in place, and it is what `AGENTS.md` points at. Everything
+below that line is the frozen record of the two runs of 2026-08-30/31 that the
+guidance was derived from — read it to check where a rule came from, never to
+learn what to do next.
 
-The two runs are recoverable, and every number in this file was derived from
-them rather than remembered:
+**The split was added 2026-09-02, and it was added because the absence of one
+cost a five-hour usage limit.** This file was created on 2026-08-30 as *"a
+ready-to-run fan-out for an unattended session"* — a plan for ONE night, eighty
+lines, eight tracks. It then accumulated measurements, kept its lessons after
+those eight tracks closed, grew brief-authoring rules, and reached 427 lines;
+and one line in `AGENTS.md` — "Standing rules to paste into every agent prompt
+are in `docs/overnight-agent-plan.md`" — promoted the whole of it to doctrine
+loaded by every agent in every session. Nobody ever decided that, and nobody
+re-derived whether all of it had earned the standing.
 
-These two runs were made from the OneDrive tree, which has since been retired,
-so the project directory below is the one that tree's path produced. **Derive
-the directory rather than copying this one** — Claude Code names it after the
-absolute path of the tree it was launched in, with separators flattened, so it
-moved when the tree moved (Windows now `C:\ss2-capture`, WSL
-`~/projects/swords-and-sandals-2-multiplayer`). See
-[`handoffs/README.md`](handoffs/README.md) § Frontmatter for the rule.
+**What that cost.** § Sizing generalised from two runs into "adversarial
+verifiers have no such cap, because they write nothing" — reasoning about FILE
+CONFLICTS, applied to a question about COST — and
+`.claude/workflows/question-fanout-audit.js` implemented it literally. On
+2026-09-02 that produced 1,069 verifiers from 29 investigators and stopped four
+waves dead. **A one-night plan that becomes doctrine without anyone deciding it
+is the same failure as an open list that decays: the document keeps its
+authority after its scope has changed.**
 
-```
-%USERPROFILE%\.claude\projects\C--Users-corey-OneDrive-Documents-ChatGPT-SS2-Multiplayer-Mod\
-  5132b52c-36d1-4d07-830e-7fb04e25e78e\subagents\workflows\
-    wf_9ade3160-946\   23 agents, 2026-08-31 04:40Z-05:40Z
-    wf_e692e46d-461\   20 agents, 2026-08-31 10:12Z-
-```
+Read [`HANDOFF.md`](../HANDOFF.md) first; everything here assumes its state.
 
-Each `agent-*.jsonl` holds that agent's whole transcript, first message
-(its brief) included.
+**There is no worklist above this line, deliberately.** `HANDOFF.md`'s open
+lists are the maintained queue; a second one here competed with it and lost —
+the claim list below is frozen at 2026-08-31 and several of its entries were
+re-derived and broken on 2026-09-02.
 
 ## The two points that survive unchanged
 
@@ -62,123 +69,6 @@ ownership**. Two writers on one file corrupt each other's work, and the moment
 tracks are invented to fill a quota their briefs go vague — and a vague brief is
 where the value collapses. Both runs bear this out; see *Sizing* below for what
 the graph actually measures.
-
-## What became of the eight original tracks
-
-All eight are closed as written. Six landed; two were overtaken by better
-evidence. The column that matters is the third one.
-
-| # | Original track | Landed as | What replaced it |
-| --- | --- | --- | --- |
-| 1 | Spell ingress hook | `7601888` | Done and **not sufficient**, which the commit said at the time. The hook label and the `magic-damage` event are correct; the family is still unreachable because `attack_chances` is not reachable on a hero cast turn and `spell_id` does not exist in the build, so the emit sits on a permanently dead path. Run 2 added that `campaign.mjs plan` cannot even *express* this: it reports only flag-fixable blockers for all eight spell members. Successor work is a blocker vocabulary that can say "the ingress cannot arm", plus the byte-backed arming point (`cast_spell_icon`). |
-| 2 | Per-slot AI fill | `193e54d` | Done. The retirement half — dropping `battle-host.js`'s `aiFillWithResources` workaround — is the track a wrong file path cost, twice over; see *Briefs* below. Re-issued in run 2 with the correct three-file slice. |
-| 3 | Audit of the golden pipeline | `cc42503` | Done, and it keeps paying. Two forgeries closed there; a third (hook attribution stripped from both sides) is open in HANDOFF; run 2 found a fourth that needs **no forgery at all** — a miss-family fixture has an empty mutation trace, and every remaining compared channel is side-blind. |
-| 4 | Audit of capture attestation | `cc42503` | Done. It found the launch-nonce gate was opt-out. |
-| 5 | Test-suite hardening sweep | `320451e`, `test/ss2-assertion-quality.test.js` | Landed, and **do not treat the class as closed**. Run 2 found three more assertions that cannot fail *in the file a hardening pass had just rewritten*, plus one digest check left behind a branch that is still dead by construction. This is a standing track, not a completed one. |
-| 6 | `ss2-capture-staging.md` reconciliation | `0a3076c` | Done, re-issued in run 2 for the arena-era facts. |
-| 7 | Battle-map completion | `0a3076c` | Done, re-issued in run 2. |
-| 8 | Isolated capture campaign (throughput) | — | **Overtaken.** Twenty-two supervised `run-arena.ps1` rounds ran instead, and they produced the session's biggest finding. Throughput was never the binding constraint; *attribution* is. More prisoner-family rounds would have added nothing that twenty-two arena rounds did not. |
-
-## What two real runs cost
-
-Both runs were `claude-opus-5` throughout. Token counts are the four API
-counters summed; the fourth (cache read) dominates, which is exactly why the old
-estimate in this file was wrong by two orders of magnitude.
-
-| | Run 1 | Run 2 (auditor wave) |
-| --- | --- | --- |
-| Agents | 23, in three waves (11 / 6 / 6) | 10, one wave |
-| Wall clock, first byte to last | **59.8 min** | **24.9 min** |
-| Per-agent duration, min / median / max | 7.0 / 13.8 / 25.8 min | 9.0 / 16.0 / 24.8 min |
-| Per-agent turns, min / max | 63 / 212 | 38 / 131 |
-| Unique tokens per agent (cache-create + output) | 170k / 425k / 649k | 233k / 411k / 517k |
-| Unique tokens, whole run | **9.41M** | 3.76M |
-| Billed tokens per agent, min / median / max | 4.3M / 13.5M / 47.8M | 3.0M / 15.3M / 17.9M |
-| Billed tokens, whole run | **343.2M** | 121.3M |
-| Of which cache reads | 333.8M (97.3%) | 117.6M (96.9%) |
-
-Run 2's writer wave (10 agents, launched 25 minutes after its auditors) was
-still in flight when this file was written, so its totals are not recorded here.
-At 7 minutes in it had spent 79.8M billed tokens across the ten.
-
-Three things follow.
-
-- **The old figure — "150k–380k tokens each, so twenty is roughly 3–6M" — was
-  measuring only unique tokens, and it was roughly right about those** (measured
-  170k–649k, median 425k). It ignored cache reads entirely, and cache reads are
-  97% of the volume. Plan with both numbers: unique tokens track how much
-  *thinking* was done; billed tokens track what the run costs.
-- **Wall clock is set by the slowest agent in a wave, not by the count.** Run 1's
-  first wave was 11 agents in 17.9 minutes; its second was 6 agents in 25.9,
-  because one agent ran 25.8 minutes alone. Adding agents to a wave is close to
-  free in time. Adding waves is not.
-- **Agent count is a weak predictor of cost.** Run 1's three waves cost 134.1M
-  (11 agents), 141.1M (6) and 68.0M (6); run 2's auditor wave cost 121.3M (10).
-  Depth of investigation is the strong predictor: the single most expensive
-  agent in run 1 spent 47.8M over 212 turns, more than the whole six-agent
-  verifier wave.
-
-## What the two runs taught about briefs
-
-This is where the value was won and lost, and it is the part of this document
-most worth reading before writing any agent prompt.
-
-**1. A brief naming ONE specific claim is the whole technique.** Every
-substantive finding in both runs came from a brief of the form "here is one
-sentence someone asserted; try to break it". Run 2's ten auditors returned two
-HOLDS, three PARTIALLY-BROKEN and five BROKEN, and the eight non-clean verdicts
-each named a defect nobody had suspected: a guard reading a path the game never
-writes, a comparison channel that compares the fixture to itself, three more
-assertions that cannot fail, a planner that refuses to read evidence it wrote
-itself. The two HOLDS were worth as much as the breaks: one unblocked eight
-fixtures the project was about to give up on, and the other upheld its claim
-only after discovering that the guard it defends reads an object the game never
-writes. **A verdict of HOLDS is not a wasted agent.**
-
-**2. Check every path in the brief against the tree before launch.** In run 1 a
-writer was briefed with `src/team/battle-host.js`. That file does not exist; the
-file is `src/adapter/battle-host.js`. The agent did the right thing — it
-verified the premise, found the path wrong, refused to edit a file outside its
-stated ownership, and reported. But the track produced one test instead of the
-change, and the whole slice had to be re-issued in run 2. One `git ls-files`
-before launch would have bought it back. **A wrong path in a brief costs the
-whole track, and a well-behaved agent cannot rescue it** — the better the agent,
-the more certainly it stops.
-
-**3. A writer slice must contain every file the change makes red.** The same
-track failed a second way: `test/team-resolver.test.js` was handed over as the
-paired test, but it does not import `battle-host.js` at all, and the three
-assertion sites that pin the workaround all live in
-`test/ss2-adapter-integration.test.js` — one of them an entire test that pins the
-defect being removed. A source edit and the test rewrite it forces have to land
-in one owner's hands. Run 2's re-issue owns all three files.
-
-**4. A brief's premise is a hypothesis, and the agent must be free to overturn
-it.** Run 2's direction-5 brief asked its deciding question as "of the 124
-observations carrying `attack_direction` 5, how many are live hero attacks *as
-opposed to injected-tape simulations*". Both halves were wrong: the auditor could
-not reproduce 124 (41 of the archive's direction-5 traces are stub runs where
-`stub-game.as:51` hard-codes the value), and the opposition does not exist,
-because the direction is drawn *before* the tape's arming latch and so is a live
-draw in every trace. **Answered on the brief's own terms the check returns zero
-and blocks eight reachable fixtures on a false negative.** It returned 17.
-State a brief's premises as premises, and say in the prompt that overturning one
-is a finding.
-
-**5. Update the claim list at the moment claims are handed out.** The brief for
-this rewrite proposed four claims to add to the auditor list — mislabelled
-traces reaching a golden, direction-5 reachability, the save-state guards, and
-`campaign.mjs plan` completeness. All four had been dispatched to auditors in
-the same wave and their verdicts are recorded below. No harm done here, but a
-list that lags the dispatch by one wave is how two agents get the same question.
-
-**6. Add a verifier wave.** Run 1 ran six writers and then one adversarial
-verifier per writer, each told to check ownership, re-run the suite, and attack
-the writer's central claim. **All six returned PARTIALLY-BROKEN** — every writer
-output had something wrong in it — while confirming zero ownership violations
-across the whole run. A verifier wave costs about half a writer wave (68.0M
-billed tokens for six, 16.0 minutes) and it caught something six times out of
-six. It is the cheapest quality step in the run.
 
 ## Standing rules — paste into every agent prompt
 
@@ -247,6 +137,68 @@ above:
   unverified reports — the exact shape of a result you would act on. Check
   per-agent state, not just the run's status; resume with `resumeFromRunId`,
   which replays the completed agents from cache for free.
+
+## What the two runs taught about briefs
+
+This is where the value was won and lost, and it is the part of this document
+most worth reading before writing any agent prompt.
+
+**1. A brief naming ONE specific claim is the whole technique.** Every
+substantive finding in both runs came from a brief of the form "here is one
+sentence someone asserted; try to break it". Run 2's ten auditors returned two
+HOLDS, three PARTIALLY-BROKEN and five BROKEN, and the eight non-clean verdicts
+each named a defect nobody had suspected: a guard reading a path the game never
+writes, a comparison channel that compares the fixture to itself, three more
+assertions that cannot fail, a planner that refuses to read evidence it wrote
+itself. The two HOLDS were worth as much as the breaks: one unblocked eight
+fixtures the project was about to give up on, and the other upheld its claim
+only after discovering that the guard it defends reads an object the game never
+writes. **A verdict of HOLDS is not a wasted agent.**
+
+**2. Check every path in the brief against the tree before launch.** In run 1 a
+writer was briefed with `src/team/battle-host.js`. That file does not exist; the
+file is `src/adapter/battle-host.js`. The agent did the right thing — it
+verified the premise, found the path wrong, refused to edit a file outside its
+stated ownership, and reported. But the track produced one test instead of the
+change, and the whole slice had to be re-issued in run 2. One `git ls-files`
+before launch would have bought it back. **A wrong path in a brief costs the
+whole track, and a well-behaved agent cannot rescue it** — the better the agent,
+the more certainly it stops.
+
+**3. A writer slice must contain every file the change makes red.** The same
+track failed a second way: `test/team-resolver.test.js` was handed over as the
+paired test, but it does not import `battle-host.js` at all, and the three
+assertion sites that pin the workaround all live in
+`test/ss2-adapter-integration.test.js` — one of them an entire test that pins the
+defect being removed. A source edit and the test rewrite it forces have to land
+in one owner's hands. Run 2's re-issue owns all three files.
+
+**4. A brief's premise is a hypothesis, and the agent must be free to overturn
+it.** Run 2's direction-5 brief asked its deciding question as "of the 124
+observations carrying `attack_direction` 5, how many are live hero attacks *as
+opposed to injected-tape simulations*". Both halves were wrong: the auditor could
+not reproduce 124 (41 of the archive's direction-5 traces are stub runs where
+`stub-game.as:51` hard-codes the value), and the opposition does not exist,
+because the direction is drawn *before* the tape's arming latch and so is a live
+draw in every trace. **Answered on the brief's own terms the check returns zero
+and blocks eight reachable fixtures on a false negative.** It returned 17.
+State a brief's premises as premises, and say in the prompt that overturning one
+is a finding.
+
+**5. Update the claim list at the moment claims are handed out.** The brief for
+this rewrite proposed four claims to add to the auditor list — mislabelled
+traces reaching a golden, direction-5 reachability, the save-state guards, and
+`campaign.mjs plan` completeness. All four had been dispatched to auditors in
+the same wave and their verdicts are recorded below. No harm done here, but a
+list that lags the dispatch by one wave is how two agents get the same question.
+
+**6. Add a verifier wave.** Run 1 ran six writers and then one adversarial
+verifier per writer, each told to check ownership, re-run the suite, and attack
+the writer's central claim. **All six returned PARTIALLY-BROKEN** — every writer
+output had something wrong in it — while confirming zero ownership violations
+across the whole run. A verifier wave costs about half a writer wave (68.0M
+billed tokens for six, 16.0 minutes) and it caught something six times out of
+six. It is the cheapest quality step in the run.
 
 ## Sizing
 
@@ -319,6 +271,103 @@ a total capture outage on every route.
 Twenty to twenty-five agents total is comfortable and takes about an hour of
 wall clock. Forty is possible if the extra ones are auditors with genuinely
 distinct questions, and pointless if they are auditors with the same question.
+
+## What NOT to give an unattended agent
+
+- Anything using `run-arena.ps1`, `-Navigate arena`, `-StageGold`,
+  `-ShopWeapon` or `-StageHero`. That path writes the licensed save.
+- `tools/runtime-capture/ss2-capture-wrapper.as` while a supervised capture
+  session is in progress — the main session edits it and re-validates the
+  vehicle after every change. Both runs froze it, and both produced wrapper
+  findings that had to be reported rather than fixed. That is the correct
+  trade, but it means a wrapper fix wave has to be scheduled deliberately,
+  between capture sessions, with the gate re-run.
+- Authoring a candidate fixture from anything other than the map. The
+  discipline is absolute: a candidate fitted to an observation makes its own
+  confirmation meaningless.
+- Any brief whose paths have not been checked against `git ls-files`.
+
+---
+
+## THE ARCHIVE LINE
+
+Everything below is the frozen record of the two runs of 2026-08-30 and
+2026-08-31. **Do not append here, and do not read it to learn what is
+current** — it is kept because every number in the guidance above was derived
+from it, and a rule whose measurement cannot be checked is an assertion.
+
+The two runs are recoverable. They were made from the OneDrive tree, which has
+since been retired, so the project directory below is the one that tree's path
+produced. **Derive the directory rather than copying this one** — Claude Code
+names it after the absolute path of the tree it was launched in, with
+separators flattened, so it moved when the tree moved (Windows now
+`C:\ss2-capture`, WSL `~/projects/swords-and-sandals-2-multiplayer`). See
+[`handoffs/README.md`](handoffs/README.md) § Frontmatter for the rule.
+
+```
+%USERPROFILE%\.claude\projects\C--Users-corey-OneDrive-Documents-ChatGPT-SS2-Multiplayer-Mod\
+  5132b52c-36d1-4d07-830e-7fb04e25e78e\subagents\workflows\
+    wf_9ade3160-946\   23 agents, 2026-08-31 04:40Z-05:40Z
+    wf_e692e46d-461\   20 agents, 2026-08-31 10:12Z-
+```
+
+Each `agent-*.jsonl` holds that agent's whole transcript, first message
+(its brief) included.
+
+## What became of the eight original tracks
+
+All eight are closed as written. Six landed; two were overtaken by better
+evidence. The column that matters is the third one.
+
+| # | Original track | Landed as | What replaced it |
+| --- | --- | --- | --- |
+| 1 | Spell ingress hook | `7601888` | Done and **not sufficient**, which the commit said at the time. The hook label and the `magic-damage` event are correct; the family is still unreachable because `attack_chances` is not reachable on a hero cast turn and `spell_id` does not exist in the build, so the emit sits on a permanently dead path. Run 2 added that `campaign.mjs plan` cannot even *express* this: it reports only flag-fixable blockers for all eight spell members. Successor work is a blocker vocabulary that can say "the ingress cannot arm", plus the byte-backed arming point (`cast_spell_icon`). |
+| 2 | Per-slot AI fill | `193e54d` | Done. The retirement half — dropping `battle-host.js`'s `aiFillWithResources` workaround — is the track a wrong file path cost, twice over; see *Briefs* below. Re-issued in run 2 with the correct three-file slice. |
+| 3 | Audit of the golden pipeline | `cc42503` | Done, and it keeps paying. Two forgeries closed there; a third (hook attribution stripped from both sides) is open in HANDOFF; run 2 found a fourth that needs **no forgery at all** — a miss-family fixture has an empty mutation trace, and every remaining compared channel is side-blind. |
+| 4 | Audit of capture attestation | `cc42503` | Done. It found the launch-nonce gate was opt-out. |
+| 5 | Test-suite hardening sweep | `320451e`, `test/ss2-assertion-quality.test.js` | Landed, and **do not treat the class as closed**. Run 2 found three more assertions that cannot fail *in the file a hardening pass had just rewritten*, plus one digest check left behind a branch that is still dead by construction. This is a standing track, not a completed one. |
+| 6 | `ss2-capture-staging.md` reconciliation | `0a3076c` | Done, re-issued in run 2 for the arena-era facts. |
+| 7 | Battle-map completion | `0a3076c` | Done, re-issued in run 2. |
+| 8 | Isolated capture campaign (throughput) | — | **Overtaken.** Twenty-two supervised `run-arena.ps1` rounds ran instead, and they produced the session's biggest finding. Throughput was never the binding constraint; *attribution* is. More prisoner-family rounds would have added nothing that twenty-two arena rounds did not. |
+
+## What two real runs cost
+
+Both runs were `claude-opus-5` throughout. Token counts are the four API
+counters summed; the fourth (cache read) dominates, which is exactly why the old
+estimate in this file was wrong by two orders of magnitude.
+
+| | Run 1 | Run 2 (auditor wave) |
+| --- | --- | --- |
+| Agents | 23, in three waves (11 / 6 / 6) | 10, one wave |
+| Wall clock, first byte to last | **59.8 min** | **24.9 min** |
+| Per-agent duration, min / median / max | 7.0 / 13.8 / 25.8 min | 9.0 / 16.0 / 24.8 min |
+| Per-agent turns, min / max | 63 / 212 | 38 / 131 |
+| Unique tokens per agent (cache-create + output) | 170k / 425k / 649k | 233k / 411k / 517k |
+| Unique tokens, whole run | **9.41M** | 3.76M |
+| Billed tokens per agent, min / median / max | 4.3M / 13.5M / 47.8M | 3.0M / 15.3M / 17.9M |
+| Billed tokens, whole run | **343.2M** | 121.3M |
+| Of which cache reads | 333.8M (97.3%) | 117.6M (96.9%) |
+
+Run 2's writer wave (10 agents, launched 25 minutes after its auditors) was
+still in flight when this file was written, so its totals are not recorded here.
+At 7 minutes in it had spent 79.8M billed tokens across the ten.
+
+Three things follow.
+
+- **The old figure — "150k–380k tokens each, so twenty is roughly 3–6M" — was
+  measuring only unique tokens, and it was roughly right about those** (measured
+  170k–649k, median 425k). It ignored cache reads entirely, and cache reads are
+  97% of the volume. Plan with both numbers: unique tokens track how much
+  *thinking* was done; billed tokens track what the run costs.
+- **Wall clock is set by the slowest agent in a wave, not by the count.** Run 1's
+  first wave was 11 agents in 17.9 minutes; its second was 6 agents in 25.9,
+  because one agent ran 25.8 minutes alone. Adding agents to a wave is close to
+  free in time. Adding waves is not.
+- **Agent count is a weak predictor of cost.** Run 1's three waves cost 134.1M
+  (11 agents), 141.1M (6) and 68.0M (6); run 2's auditor wave cost 121.3M (10).
+  Depth of investigation is the strong predictor: the single most expensive
+  agent in run 1 spent 47.8M over 212 turns, more than the whole six-agent
+  verifier wave.
 
 ## Claims already handed to an auditor
 
@@ -410,18 +459,3 @@ attacked. The first four were generated by the audits above and are the sharpest
     pass at a time. Ask what fraction of it would still pass against a stub
     implementation of `src/golden/**`, the way the pipeline audit asked it of
     the golden tests alone.
-
-## What NOT to give an unattended agent
-
-- Anything using `run-arena.ps1`, `-Navigate arena`, `-StageGold`,
-  `-ShopWeapon` or `-StageHero`. That path writes the licensed save.
-- `tools/runtime-capture/ss2-capture-wrapper.as` while a supervised capture
-  session is in progress — the main session edits it and re-validates the
-  vehicle after every change. Both runs froze it, and both produced wrapper
-  findings that had to be reported rather than fixed. That is the correct
-  trade, but it means a wrapper fix wave has to be scheduled deliberately,
-  between capture sessions, with the gate re-run.
-- Authoring a candidate fixture from anything other than the map. The
-  discipline is absolute: a candidate fitted to an observation makes its own
-  confirmation meaningless.
-- Any brief whose paths have not been checked against `git ls-files`.

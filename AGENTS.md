@@ -69,7 +69,11 @@ and Plan agents), so these rules bind you as well:
 ## Multi-agent runs
 
 Standing rules to paste into every agent prompt are in
-`docs/overnight-agent-plan.md`; the runnable form is in `.claude/workflows/`.
+`docs/overnight-agent-plan.md` — **ABOVE its `## THE ARCHIVE LINE` only**;
+below that line is the frozen record of two runs in August, not guidance. The
+runnable form is in `.claude/workflows/`. *(This pointer used to name the whole
+file, which is how a plan written for ONE night in August became doctrine
+loaded by every agent. See that file's own header for what the omission cost.)*
 
 - **Fan out on QUESTIONS, not replicas.** Measured here 2026-08-31: two
   independent implementations agreed on every number and were both incomplete in
