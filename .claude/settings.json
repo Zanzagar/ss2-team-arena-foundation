@@ -33,8 +33,10 @@
       "Bash(gh pr create *)",
       "Bash(gh pr merge *)",
       "Bash(gh repo delete *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Workflow"
     ]
   },
-  "_ss2_tightening": "SS2 tightens rule 7. `Bash(git push *)` is in ASK, not allowed, because AGENTS.md says 'Ask before pushing anything' \u2014 this repository derives its fixtures from a licensed game, so what leaves the machine is the owner's call, not a convenience. Deny still beats ask, so main stays blocked outright and every other push prompts. Nothing is DENIED that has a legitimate form: a first draft also denied pushes to the working branch, which would have blocked work the owner had explicitly authorised."
+  "_ss2_tightening": "SS2 tightens rule 7. `Bash(git push *)` is in ASK, not allowed, because AGENTS.md says 'Ask before pushing anything' \u2014 this repository derives its fixtures from a licensed game, so what leaves the machine is the owner's call, not a convenience. Deny still beats ask, so main stays blocked outright and every other push prompts. Nothing is DENIED that has a legitimate form: a first draft also denied pushes to the working branch, which would have blocked work the owner had explicitly authorised.",
+  "_ss2_workflow": "`Workflow` is in ASK so the owner approves each fan-out wave and sees what it spawns (harness docs/adr/0001). Bypass-permissions mode skips ASK rules by design, so under bypass the hard cap inside .claude/workflows/question-fanout-audit.js is the only deterministic guard."
 }

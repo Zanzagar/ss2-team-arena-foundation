@@ -37,7 +37,8 @@ export const meta = {
 //                                      //   belongs in groundBrief, where verifiers never see it.
 //   entryPointQuestion?: string,       // end-to-end check via the REAL entry point (strongly recommended).
 //                                      //   It is verified FIRST and survives any cap.
-//   verifierBudget?: number,           // max verifiers to spawn (default 24). THIS FIELD EXISTS BECAUSE ITS
+//   verifierBudget?: number,           // max verifiers to spawn (default 6, HARD-CAPPED at 6 below; a larger
+//                                      //   request is clamped and logged). THIS FIELD EXISTS BECAUSE ITS
 //                                      //   ABSENCE COST A FIVE-HOUR USAGE LIMIT on 2026-09-02: one verifier
 //                                      //   per claim, uncapped, meant 29 investigators asked for 1,069 of
 //                                      //   them. Claims are interleaved across questions and the count NOT
@@ -47,6 +48,18 @@ export const meta = {
 
 if (!args || !args.topic || !Array.isArray(args.questions) || args.questions.length === 0) {
   throw new Error('args required: {topic, questions[], groundBrief?, entryPointQuestion?}')
+}
+
+// HARD CAPS, enforced here so that no brief, caller or session setting can
+// exceed them through this script. Decided 2026-09-02 and recorded in
+// claude-harness docs/adr/0001-verification-precedence.md: three CONCURRENT
+// waves of 6 investigators + 12 verifiers spent ~30% of a week's model usage
+// in under twenty minutes. A wave is the LAST resort after Pocock's skills and
+// Codex review; run ONE at a time; say what it will spawn before launching it.
+const MAX_QUESTIONS = 6
+const MAX_VERIFIERS = 6
+if (args.questions.length > MAX_QUESTIONS) {
+  throw new Error(`question-fanout-audit refuses ${args.questions.length} questions: the hard cap is ${MAX_QUESTIONS} (docs/adr/0001). Reshape the wave; do not split it into concurrent waves.`)
 }
 
 const PREMISE_RULE = `Treat every fact in this brief as a hypothesis, including counts and quoted file contents. A premise that turns out to be wrong is a finding that OUTRANKS the task. Do not soften findings. Never run a state-mutating git command; scratch files go in the session scratchpad, never the repo.`
@@ -104,7 +117,9 @@ for (let rank = 0; rank < Math.max(0, ...perQuestion.map((q) => q.length)); rank
 // thing end to end, so it must survive any cap.
 if (args.entryPointQuestion) interleaved.unshift({ from: 'entry-point', claim: args.entryPointQuestion })
 
-const budget = Number.isInteger(args.verifierBudget) ? args.verifierBudget : 24
+const requestedBudget = Number.isInteger(args.verifierBudget) ? args.verifierBudget : MAX_VERIFIERS
+const budget = Math.min(requestedBudget, MAX_VERIFIERS)
+if (requestedBudget > MAX_VERIFIERS) log(`verifierBudget ${requestedBudget} requested; CLAMPED to the hard cap ${MAX_VERIFIERS} (docs/adr/0001)`)
 const claims = interleaved.slice(0, budget)
 const dropped = interleaved.length - claims.length
 // NO SILENT CAPS. A cap nobody is told about reads as "everything was checked",

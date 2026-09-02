@@ -99,6 +99,15 @@ runnable form is in `.claude/workflows/`. *(This pointer used to name the whole
 file, which is how a plan written for ONE night in August became doctrine
 loaded by every agent. See that file's own header for what the omission cost.)*
 
+- **PRECEDENCE, decided by the owner 2026-09-02 (harness `docs/adr/0001`):
+  Pocock's skills are the default workflow, Codex adversarial review is the
+  check on any diff that matters, and a fan-out wave is the LAST resort —
+  only for breaking a claim about the game's bytes or the capture archive
+  that no test pins and no diff review reaches. ONE wave at a time, never
+  concurrent; the committed script hard-caps questions and verifiers at 6
+  each, and authoring an inline workflow to get past that is a rule
+  violation. Say what a wave will spawn BEFORE launching it. Three concurrent
+  12-verifier waves spent ~30% of a week's usage in twenty minutes.**
 - **Fan out on QUESTIONS, not replicas.** Measured here 2026-08-31: two
   independent implementations agreed on every number and were both incomplete in
   the same way, because they shared one brief that carried one wrong fact. The
