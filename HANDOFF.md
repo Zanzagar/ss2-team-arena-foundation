@@ -182,6 +182,28 @@ This omission is mine: the rule was in the previous handoff and I dropped it
 when rewriting this file, at exactly the moment the design track grew from a
 brief into a full proposal.
 
+## 2026-08-31 Endless readiness update
+
+The docs-only branch `design/endless-progression-readiness` adds the
+[six-decision owner record](docs/design/endless-progression-decisions.md) and
+[MVP readiness record](docs/design/endless-mvp-readiness.md), refreshes the
+reference-game and SS2 mod-scene research, and red-teams the stable proposal.
+It implements no Endless mechanics and does not authorize implementation.
+
+Before any Endless code, the owner must accept EP-D01–EP-D06 and EP-A01–EP-A03,
+or supersede any of them with a fully normative, explicitly accepted replacement.
+A rejection or open revision remains blocking. The audit also requires complete
+designed combat and Pressure specifications, a JSON/u64 encoding decision, rule-contract
+v2/provenance, canonical active-battle state, collision-resistant durable
+digests, one atomic progression boundary, crash-safe settlement, and separate
+headless/playable gates. Playable work additionally needs an evidenced
+per-action animation-completion signal. The branch did not run capture tools,
+launch Ruffle, or touch parity evidence, candidates, classic rules, or the
+licensed installation. Its fresh-worktree verification profile is 584 tests:
+583 passed, one expected raw-trace archive check skipped, and zero failed.
+
+*(Rescued 2026-09-01 when `main` was merged into this branch: this section reached `main` through PR #2 and had never been on `arena/champion-capture`, so the branch would have carried a HANDOFF.md that silently lacked it.)*
+
 **Repository naming.** The GitHub repo was renamed to
 `Zanzagar/swords-and-sandals-2-multiplayer`; the `github` remote already points
 at the new URL. The local worktree directories and the `origin` bundle keep the

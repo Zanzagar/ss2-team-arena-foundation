@@ -5,7 +5,7 @@
 requirements for sections D/E but does not propose the progression system and
 does not authorize implementation.
 
-**Research date:** 2026-08-30.
+**Research date:** 2026-08-30; repository/link refresh 2026-08-31.
 
 ## Evidence discipline and research boundary
 
@@ -18,8 +18,9 @@ and design inference separate:
   `static/byte-mapped`, and `candidate` qualifiers still apply; **[V] does not
   promote a candidate to a golden**.
 - **[O] Official external:** a Classic Collection developer/publisher
-  announcement or store description. Official inclusion establishes that a
-  mod was distributed, not that its balance was verified.
+  announcement, store description, or verified developer forum reply. Official
+  inclusion establishes that a mod was distributed, not that its balance was
+  verified.
 - **[P] Primary mod source:** a mod author describing intent or responding to
   feedback. This can establish intended design, but not measured behaviour in
   this repository's fingerprinted build.
@@ -562,19 +563,22 @@ unknown.” Our cost model must come from this repository's contracts. [V/A]
 The rule set owns action vocabulary and legality, health formula, action
 outcome and RNG order, and AI action choice. The resolver owns team/slot
 structure, controller identity, turn order, effect application, knockout,
-result, and once-only settlement. Campaign progression and persistence
-semantics live in campaign state/settlement, outside action resolution; their
-inventory, reward, and save interfaces remain presentation-layer work. [V]
+result, and once-only settlement. Campaign progression, inventory/reward state,
+and persistence semantics live outside action resolution; only their screens
+and interaction surfaces are presentation-layer work. [V]
 
 “Preserves parity” below always names the scope. New opponents can preserve
 **combat-rule parity** while intentionally changing **campaign parity**.
 Nothing becomes runtime-verified merely because it resembles a mapped formula;
 the provenance gate still applies. [V]
 
-The relative layer classifications below assume the prerequisite canonical SS2
-adapter fields exist. They do **not** describe the repository's current state
-as content-ready; the missing equipment/resource/inventory/status/RNG/result
-fields are restated immediately after the table. [V/A]
+The relative layer classifications below assume the prerequisite structured SS2
+item/status/action state exists. They do **not** describe the repository's
+current state as content-ready. The adapter now emits a fixed twenty-entry
+projected/hashed numeric resource set with unbounded numeric declarations, and
+the resolver supports absolute resource writes, but
+structured equipment identity, carried item instances, timed/counted statuses,
+and the complete action-semantic surface remain incomplete. [V/A]
 
 | Change | Minimum layer in this repository | Parity decision | Degeneracy invited and required counter/test |
 | --- | --- | --- | --- |
@@ -592,11 +596,14 @@ fields are restated immediately after the table. [V/A]
 | Difficulty variants sharing one character | Save schema, mode/ruleset provenance, reward policy | Each fight declares its rules; classic and designed modes remain distinguishable. | Farm low-risk mode for high-mode power; risk-normalize or tag rewards without creating incompatible saves. |
 
 There is no honest “content-only prototype” of the full requested progression
-system yet. The battle map states that canonical state still lacks complete SS2
-equipment, stamina, magicka, spell/item inventory, status, RNG, and result
-fields. Even with an existing-semantics item drop, resulting combats need that
-adapter/state work before they can be tested for combat-rule parity; the drop
-already changes campaign parity. [V]
+system yet. Current canonical state already carries generic stats, authoritative
+RNG, and adapter-emitted numeric stamina/ammunition/armour resources; the rule
+effect protocol supports numeric resource writes. It still lacks complete
+structured SS2 equipment/item identity, carried spell/item instances,
+timed/counted status lifecycle, and the complete action-specific semantic
+surface. Even an existing-semantics item drop needs the missing structured
+state before its resulting combat can be tested for combat-rule parity; the
+drop already changes campaign parity. [V]
 
 ### 5.3 Relative implementation bands for sections D/E
 
@@ -627,17 +634,17 @@ nothing new to award. [A]
 
 ## 6. Q10 — exploit and degeneracy register
 
-### 6.1 A repository evidence conflict that must remain visible
+### 6.1 Current promotion boundary
 
-The brief says four normal-band directions are promoted goldens. The current
-[roadmap](../roadmap.md) says only
-`golden-prisoner-normal-kill-dir6` is runtime-verified and says golden breadth
-remains limited. This survey does not resolve that conflict by inspecting or
-editing forbidden measurement records. [V]
+The brief records four promoted normal directions; the maintained
+[roadmap](../roadmap.md) now records 22 promoted goldens, including all twelve
+normal-band melee directions. This survey relies on that maintained public
+status and does not inspect or edit forbidden measurement records. [V]
 
 The conservative gate is:
 
-- at least one normal-band path is golden-confirmed; [V]
+- all twelve normal-band melee directions are promoted for their exact fixtures;
+  that breadth does not verify other actions or state interactions; [V]
 - no shield, bash, armour-equality, deflection, grievous-removal, or
   enchantment quirk below is called golden-confirmed on that basis; [V]
 - byte/static candidates remain candidates until promoted through the
@@ -806,7 +813,7 @@ For later authors, these statements are **not** supported by this survey:
   ownership.
 - [Roadmap](../roadmap.md) and
   [golden harness](../integration/ss2-golden-harness.md) — current promotion
-  gate and the golden-count documentation conflict recorded above.
+  count, scope, and gate.
 - [Progression diagnosis](progression-diagnosis.md) — quantitative flattening,
   reference-game principles, and derived cap thresholds.
 
@@ -912,17 +919,18 @@ For later authors, these statements are **not** supported by this survey:
   scaling/kiting apply to current distributed builds.
 - Representative reception data. Public videos/comments establish examples,
   not population preference or completion rates.
-- Resolution of the brief/roadmap promoted-golden count by the measurement
-  owner. This document conservatively relies on the roadmap's one explicitly
-  named golden and does not touch forbidden records.
 - Runtime promotion/rejection of attacker-shield ranged accuracy, armour
   equality, bash transient critical inheritance, secondary potency, critical
   deflection operands, and grievous armour removal.
 - Fingerprinted-build full campaign opponent/loadout/economy data and current
   dominance of Charisma, ranged kiting, control enchants, or retry policies.
-- Complete adapter state for equipment, resources, spell/item inventory,
-  statuses, ordered RNG, and result settlement before a parity-bearing loot
-  prototype can be claimed.
+- Complete structured adapter/canonical state for equipment identity, carried
+  spell/item instances, timed/counted statuses, and action-specific semantics;
+  plus durable active-battle/progression settlement, before a parity-bearing
+  loot prototype can be claimed. Generic numeric resources, ordered RNG, and
+  an in-memory once-only terminal gate, and an immutable final-record path
+  already exist and should be extended rather than duplicated. Durable
+  progression settlement does not yet exist.
 - An explicit legal/distribution route for a future Collection entry. Fixed
   public paths establish the launcher boundary, not authorization to modify an
   installed title.
