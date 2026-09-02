@@ -2057,6 +2057,61 @@ different goldens. This is how all 22 committed manifests were made and was NOT
 changed here; reproducibility runs through the committed manifest file, which
 carries its own `createdAt`. Worth fixing, deliberately, as its own change.
 
+### DECIDED 2026-09-01 (evening): two questions this file kept re-asking
+
+Both were put to the owner, who delegated them. **Recorded as decisions with
+their reasons so they stop consuming a session each time they surface** — which
+is the documented pathology here: a true observation that gets re-ranked every
+session and never acted on.
+
+► **THE SCHEMA QUESTION IS DEFERRED, NOT OPEN. Do not re-litigate it without
+  the trigger below.** Should `COMBATANT_KEYS` admit the derived stats
+  (`stamina`, `speed`, `vitality`, `herolevel`) and inventory, so a scenario can
+  declare what the game derives from? **Not now**, for three reasons:
+
+  1. **It is not on the path to a playable mod.** It pays off only for verifying
+     a SECOND opponent archetype to golden standard. The corpus already covers
+     one archetype twenty-two ways and feeds nothing; use beats breadth until
+     something consumes it.
+  2. **The remedy may not work even with the schema change.** Byte-verified this
+     session: `cast_swiftsandals` writes `speed = 10 + backup_speed*2`,
+     `cast_colossus` `strength = backup_strength*3`, `cast_bloodlust`
+     `+ round(backup_strength*1.5)`. All three are villain-selectable through
+     `villain_cast_spells`, and they inflate the COST side of the stamina
+     inequality while regeneration stays fixed. **No stat vector chosen before a
+     fight is invariant during it** unless the villain is also sent in empty —
+     which needs inventory declared too, i.e. a second schema addition and a
+     staging question on top.
+  3. **Better information is about to arrive.** Once `ss2-rules.js` exists and
+     fights are played, which parity actually MATTERS becomes an observation
+     rather than a guess. Deciding the schema first spends the decision before
+     the evidence.
+
+  **The trigger to reopen it:** a played fight shows behaviour that needs the
+  second archetype, OR someone states a concrete reason to need it at golden
+  standard. Absent either, this is closed.
+
+► **NO 98-COMMIT PR WAS OPENED, DELIBERATELY — and the divergence that would
+  have blocked one is now gone.** The branch is 98 commits / 95 files /
+  +17,190 −2,398 ahead. **A PR that size is not reviewable, and opening one
+  creates the APPEARANCE of a review gate while providing none** — which is
+  worse than no PR, because the rubber stamp is then on the record.
+
+  What was actually blocking a clean merge was fixed instead: `main` had
+  diverged, and merging it in surfaced content this branch was silently missing
+  (`.mailmap`, two design docs, README improvements, and a HANDOFF section that
+  reached `main` through PR #2). **The branch is now a clean superset of `main`
+  and merges without conflict whenever the owner wants it.**
+
+  **The owner's live options, and this is a decision for them, not an agent:**
+  (a) merge the branch wholesale as one foundation merge, accepting it is
+  unreviewable and saying so in the merge message; (b) keep working on the
+  branch and merge later, which costs nothing now that the divergence is gone;
+  (c) split it into reviewable PRs, which is real work and buys review of code
+  that is already green and already in use. **Recommended: (b) until
+  `ss2-rules.js` lands, then (a).** There is no third party to review this, so
+  a PR's only real function here is a changelog.
+
 ### Nothing states when a branch should reach `main`
 
 Found 2026-09-01 while correcting the two stale `main` SHAs above. The only

@@ -98,13 +98,34 @@ about USE, not breadth.
 4. **Pin the approach-step count.** `hero.staminaleft == 110 − walkcount` holds
    38 of 38, so the hero's value is deterministic and controllable — and unused.
 
-5. **The schema question, still the owner's** — should `COMBATANT_KEYS` admit the
-   derived stats (`stamina`, `speed`, `vitality`, `herolevel`) and inventory? See
-   the head. Check the spell caveat first: `cast_swiftsandals` writes
-   `speed = 10 + backup_speed*2`, `cast_colossus` `strength = backup_strength*3`,
-   `cast_bloodlust` `+round(backup_strength*1.5)` — all villain-selectable, all
-   byte-verified this session. No fixed stat vector is invariant while those are
-   reachable, and they need inventory items the fixture cannot currently declare.
+5. ~~**The schema question, still the owner's.**~~ **DECIDED AND DEFERRED — do
+   not reopen it without the trigger.** The owner delegated both standing
+   questions; see `HANDOFF.md` § "DECIDED 2026-09-01 (evening): two questions
+   this file kept re-asking" for the reasoning and the reopen trigger. Short
+   version: it pays off only for a second opponent archetype, which is not on
+   the path to a playable mod; the remedy may not work anyway, because three
+   villain-selectable spells rewrite the caster's own stats mid-fight
+   (byte-verified: `cast_swiftsandals` `speed = 10 + backup_speed*2`,
+   `cast_colossus` `strength = backup_strength*3`, `cast_bloodlust`
+   `+round(backup_strength*1.5)`); and playing `ss2-rules.js` will turn "which
+   parity matters" from a guess into an observation.
+
+## The branch, and why there is still no PR
+
+**Decided, not overlooked.** The branch is 98 commits / 95 files /
++17,190 −2,398 ahead of `main`. **A PR that size is not reviewable, and opening
+one would create the appearance of a review gate while providing none.**
+
+What WAS blocking a clean merge is fixed: `main` had diverged, and merging it in
+recovered content this branch was silently missing — `.mailmap`, two design
+docs, README improvements our branch had never touched, and a HANDOFF section
+that reached `main` via PR #2. **The branch is now a clean superset of `main`
+and merges without conflict whenever the owner wants it.**
+
+Recommendation in the head: keep working on the branch until `ss2-rules.js`
+lands, then merge it wholesale as one foundation merge that says plainly it was
+not reviewed commit-by-commit. Splitting it into reviewable PRs is real work
+that buys review of code already green and already in use.
 
 ## Traps from this session
 
