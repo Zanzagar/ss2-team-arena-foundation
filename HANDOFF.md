@@ -1107,6 +1107,42 @@ output and names the wrapper source hash it compiled.
      diverge. Raise the odds first by pinning the approach-step count and
      extending `-StageVillain` to `speed` and `strength` (`applyStageSide` has
      no whitelist, so it can already write them).
+
+     ► **IT IS NOT A "WINDOW" ANY MORE. A ROUND COSTS 14 SECONDS, AND 150 OF
+       THEM RAN UNATTENDED ON 2026-09-02.** Driven from WSL with the store
+       junction in place (see § "Driving the capture pipeline FROM WSL"),
+       restore → `run-arena.ps1` → ingest is one command and takes 14 s. 150
+       rounds against `candidate-armoured-deflection-threshold-cleared`: 149
+       CAPTURED, 0 matched, 150 divergence reports filed. **The whole framing
+       of this item as a scarce supervised window was a cost estimate nobody
+       had re-measured since the protocol changed.**
+
+       **The yield, measured over those 150 rounds rather than argued:**
+
+       | pinned field | rounds that CLEARED it | rate |
+       | --- | ---: | ---: |
+       | `attackDirection` 5 | 46 | 31% |
+       | hero `staminaleft` 105 | 47 | 31% |
+       | villain `staminaleft` 105 | **5** | **3.3%** |
+       | hero `hitpoints` | 107 | 71% |
+
+       The other 104 directions split 33 / 37 / 34 across 6 / 7 / 8 and never
+       landed outside that band. **Zero rounds cleared direction-5 and
+       villain-105 together**, so the joint rate is at most ~1 in 450 and the
+       villain's stamina is the single binding constraint — its observed mass
+       sits at 85-99, not at 105.
+
+       **So "run more rounds" is now a real strategy where it was not, but the
+       PROTOCOL is still what decides it.** `initbattle` (`+0xb8a`-`+0xbb6` of
+       `sprite:2249/frame:1/DoAction@0x6e421b`, re-read 2026-09-02) sets
+       `villain.staminaleft = villain.staminamax` unconditionally, so arming on
+       the hero's FIRST action — the change this file recommends two paragraphs
+       up — would put the villain at **110, not the 105 both fixtures pin.** It
+       would make the villain side deterministic and deterministically WRONG
+       against these fixtures. Whether they assert a villain state the build can
+       reach at all is the open question, and it is the same class as "fifteen
+       fixtures assert a hero the build cannot produce". Re-derive from the map;
+       never edit a fixture to fit.
   2. **Model enchantment DAMAGE** — `+0x320c` and `+0x3326`, both dropped, so an
      enchanted weapon applies a status and deals no magic damage.
   3. ~~**Transcribe the static weapon table and make `weapon` declarable**,
@@ -1139,10 +1175,30 @@ output and names the wrapper source hash it compiled.
        the build's numbers UNDER THE DOCUMENT'S OWN CONVENTION, which is the
        shape of an oracle computed from the table under test.
 
-       What is genuinely left: get the table into a code module with a
-       mechanism that keeps it honest, and make `weapon` declarable
-       (`SS2_RESOURCE_NAMES`, `SS2_RESOURCE_DEFAULTS`,
-       `CANONICAL_RESOURCE_SOURCES`, `SS2_PROJECTED_COMBATANT_KEYS`).
+     ► **AND THE REST IS NOW DONE TOO (2026-09-02). RANKED ITEM 3 IS CLOSED.**
+       `src/team/ss2-weapon-table.js` carries the ninety rows, generated from
+       the build's own literals, and `ss2BattleValues` derives the damage pair
+       from a `weapon` id — weapon 24 gives 28 / 52, weapon 0 gives 21 / 23,
+       which is the live save's own gladiator derived rather than read.
+       `secondary_weapon` likewise, at the build's `round(strength * 1)`.
+
+       **An explicit pair OUTRANKS the table, and that is load-bearing, not
+       defensive.** All 22 goldens supply `min_damage`/`max_damage` and none
+       supplies `weapon`, so deriving first would re-datum runtime evidence
+       from a map-derived table. Derivation fills a hole; it never overwrites a
+       measurement.
+
+       **And the corpus cannot defend that rule.** Mutating the derivation to
+       overwrite instead of fill fails ONE test of 718 — the new precedence
+       assertion — and the golden replay does not notice, because no golden
+       carries a `weapon` id for the derivation to fire on. One assertion is
+       all that stands between the table and 22 measured damage pairs.
+
+       Still genuinely open, and NOT needed for the above: `weapon` as a
+       declarable RESOURCE (`SS2_RESOURCE_NAMES`, `SS2_RESOURCE_DEFAULTS`,
+       `CANONICAL_RESOURCE_SOURCES`, `SS2_PROJECTED_COMBATANT_KEYS`). It is
+       read straight off the character object today, because `ss2BattleValues`
+       opens with `const source = { ...character }`.
   4. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
 
 ► ~~**FIVE LIVE INSTRUCTIONS SIT IN `ss2-item-tables.md` §9 THAT THIS LIST HAS
