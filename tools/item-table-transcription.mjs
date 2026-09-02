@@ -50,6 +50,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { analyseSwfBuffer } from "./inspect-swf.mjs";
+import { SS2_WEAPON_IDS, ss2WeaponEntry } from "../src/team/ss2-weapon-table.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DOC_PATH = path.join(REPO_ROOT, "docs", "integration", "ss2-item-tables.md");
@@ -276,6 +277,27 @@ function main(argv) {
   }
   console.log(`compared ${comparisons} fields`);
 
+  // The CODE MODULE, against the same literals. The document and the module are
+  // two independent transcriptions of one source, and only the build arbitrates
+  // between them — comparing them to EACH OTHER would be the oracle-computed-
+  // from-the-table-under-test mistake this project has already paid for once.
+  console.log(`\ncode module: ${SS2_WEAPON_IDS.length} ids from src/team/ss2-weapon-table.js`);
+  if (SS2_WEAPON_IDS.length === 0) problems.push("the code module exports no ids; its check below is vacuous");
+  let moduleComparisons = 0;
+  for (const id of [...new Set([...table.keys(), ...SS2_WEAPON_IDS])].sort((a, b) => a - b)) {
+    const built = table.get(id);
+    const coded = ss2WeaponEntry(id);
+    if (!built) { problems.push(`id ${id}: in the module, not in the build`); continue; }
+    if (!coded) { problems.push(`id ${id}: in the build (${built.offset}), not in the module`); continue; }
+    for (const [field, key] of [["0", "type"], ["2", "weight"], ["3", "minDamage"], ["4", "maxDamage"], ["5", "rangeMultiplier"]]) {
+      moduleComparisons += 1;
+      if (built[field] !== coded[key]) {
+        problems.push(`id ${id} ${key}: build ${built[field]}, module ${coded[key]}`);
+      }
+    }
+  }
+  console.log(`compared ${moduleComparisons} module fields`);
+
   console.log("\nindex convention, read off `battlevalues` rather than assumed:");
   const readers = readerIndicesIn(analysis);
   for (const [field, expected] of Object.entries(READER_SITES)) {
@@ -291,7 +313,7 @@ function main(argv) {
   }
 
   if (problems.length === 0) {
-    console.log("\nOK: every documented row matches its literal, and every index matches its reader site.");
+    console.log("\nOK: the document AND the code module both match every literal, and every index matches its reader site.");
     return 0;
   }
   console.log(`\n${problems.length} PROBLEM(S):`);
