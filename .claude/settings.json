@@ -1,0 +1,40 @@
+{
+  "_source": "Merged from claude-harness settings/permissions-deny.snippet.json and settings/git-hygiene.snippet.json on 2026-09-02. The rules are documented in claude-harness docs/git-hygiene.md; the project-specific TIGHTENING below is documented in AGENTS.md, which is where rule 13 says they belong.",
+  "permissions": {
+    "deny": [
+      "Read(~/.ssh/*)",
+      "Read(~/.aws/*)",
+      "Read(~/.env)",
+      "Read(**/credentials*)",
+      "Read(**/.env*)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Write(~/.ssh/*)",
+      "Write(~/.aws/*)",
+      "Write(**/.env*)",
+      "Write(**/*.pem)",
+      "Write(**/*.key)",
+      "Write(**/credentials*)",
+      "Bash(git push * main)",
+      "Bash(git push * master)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push --force-with-lease *)",
+      "Bash(git branch -D main)",
+      "Bash(git branch -D master)"
+    ],
+    "ask": [
+      "Bash(git commit --amend *)",
+      "Bash(git rebase *)",
+      "Bash(git reset --hard *)",
+      "Bash(git push --delete *)",
+      "Bash(git push origin --delete *)",
+      "Bash(git branch -d *)",
+      "Bash(gh pr create *)",
+      "Bash(gh pr merge *)",
+      "Bash(gh repo delete *)",
+      "Bash(git push *)"
+    ]
+  },
+  "_ss2_tightening": "SS2 tightens rule 7. `Bash(git push *)` is in ASK, not allowed, because AGENTS.md says 'Ask before pushing anything' \u2014 this repository derives its fixtures from a licensed game, so what leaves the machine is the owner's call, not a convenience. Deny still beats ask, so main stays blocked outright and every other push prompts. Nothing is DENIED that has a legitimate form: a first draft also denied pushes to the working branch, which would have blocked work the owner had explicitly authorised."
+}

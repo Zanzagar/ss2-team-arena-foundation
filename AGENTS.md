@@ -46,8 +46,14 @@ there never reaches the next reader.
 - `validate-vehicle.ps1` must PASS after ANY wrapper edit — but read what it does
   not prove. It caught 0 of the 6 defects found live on this route.
 - **Snapshot before every save-mutating run.** `run-arena.ps1` does it for you.
-- **Do not push to `main`.** Work happens on feature branches. Ask before pushing
-  anything.
+- **Git and GitHub: follow `claude-harness/docs/git-hygiene.md`** — thirteen
+  rules on branches, commits, pushing, PRs and merge eligibility. They are
+  ENFORCED, not advisory: `.claude/settings.json` carries them as
+  `permissions.deny`/`ask`, so they bind Claude, Codex and a human here
+  identically.
+  **This project TIGHTENS rule 7 (push feature branches freely) to ASK BEFORE
+  EVERY PUSH**, because the fixtures derive from a licensed game and what
+  leaves this machine is the owner's call. `main` is denied outright.
 
 ## If you are a subagent
 
