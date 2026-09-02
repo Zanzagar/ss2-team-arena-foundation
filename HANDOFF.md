@@ -2544,8 +2544,20 @@ the analysis that established it is below the line. **Correct these HERE.**
   writes no SharedObject, so a PASS is the absence of a counterexample, not
   evidence of isolation. **This item is what an open item looks like after the
   code moved and nobody re-read it; an open list is a claim that decays.**
-- **`run-arena.ps1` kills every Ruffle process rather than its own pid**, which
-  sabotages any concurrent isolated session.
+- ~~**`run-arena.ps1` kills every Ruffle process rather than its own pid**,
+  which sabotages any concurrent isolated session.~~
+  ► **CLOSED — re-derived 2026-09-02 from the script.** It closes its OWN
+  window by pid: `Get-SessionRuffle` (`:229-241`) reads
+  `captures\<SessionId>\ruffle.pid`, refuses a recycled pid whose process is
+  not named `ruffle`, and `:371-379` does `CloseMainWindow()` then a 5-second
+  `WaitForExit` before forcing. The blanket kill survives only as a warned
+  fallback when the pid file is missing (`:386-387`), and the script refuses to
+  start at all while another Ruffle window is open (`:203-205`). The file's own
+  comment block at `:206-225` records the fix and both harms it closed —
+  including that the name-keyed wait accepted ANY Ruffle, so a foreign process
+  both satisfied the wait and masked this window's death.
+  **Fourth item in this list to decay. The list needs re-deriving as a unit,
+  not item by item as each one happens to be read.**
 - **The spell family (8) cannot arm**; `spell_id` does not exist in the build.
   The byte-backed candidate arming point is `cast_spell_icon`.
 - **Fifteen fixtures assert a hero the build cannot produce**, and the
