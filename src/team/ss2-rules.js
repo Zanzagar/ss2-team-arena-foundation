@@ -190,6 +190,7 @@
 import { calculateSs2AttackChances, resolveSs2PhysicalAttackCandidate } from "../golden/ss2-attack-candidate.js";
 import { SS2_BUILD_SHA256 } from "../golden/run-1v1-fixture.js";
 import { resourceValue } from "./resources.js";
+import { ss2WeaponDamageRange } from "./ss2-weapon-table.js";
 import { defineTeamRuleSet, EffectKind, RuleSetVerification, TeamRuleSetError } from "./rule-set.js";
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -432,6 +433,30 @@ export function ss2BattleValues(character, { battleStarted = false } = {}) {
     } else {
       derived[`${piece}_defence`] = Math.round(id * dval);
     }
+  }
+
+  // `weapon_min_damage` / `weapon_max_damage` are OUTPUTS of `battlevalues`,
+  // not inputs: `+0x31be` and `+0x31da` read them out of
+  // `_root["weapon" + <char>.weapon]`. This module took them as caller-supplied
+  // because the table was not in code, and gap 3 in the header said so. It is
+  // in code now (`ss2-weapon-table.js`), so a `weapon` id derives the pair.
+  //
+  // An EXPLICIT pair still wins, and that ordering is deliberate rather than
+  // defensive. Every one of the 22 promoted goldens supplies the pair and none
+  // supplies `weapon`, so deriving first would silently re-datum runtime
+  // evidence from a map-derived table — the exact move the standing rule
+  // forbids. Derivation fills a hole; it never overwrites a measurement.
+  const weaponPair = ss2WeaponDamageRange(source.weapon);
+  if (weaponPair !== null) {
+    if (source.weapon_min_damage === undefined) source.weapon_min_damage = weaponPair[0];
+    if (source.weapon_max_damage === undefined) source.weapon_max_damage = weaponPair[1];
+    derived.weapon = source.weapon;
+  }
+  const secondaryPair = ss2WeaponDamageRange(source.secondary_weapon);
+  if (secondaryPair !== null) {
+    if (source.secondary_weapon_min_damage === undefined) source.secondary_weapon_min_damage = secondaryPair[0];
+    if (source.secondary_weapon_max_damage === undefined) source.secondary_weapon_max_damage = secondaryPair[1];
+    derived.secondary_weapon = source.secondary_weapon;
   }
 
   derived.min_damage = Math.round(strength * 2) + number("weapon_min_damage");

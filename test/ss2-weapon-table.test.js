@@ -146,3 +146,75 @@ test("the table is frozen, so build data cannot be edited in place", () => {
   assert.throws(() => { entry.minDamage = 1; }, TypeError);
   assert.equal(ss2WeaponEntry(24).minDamage, 8, "the entry survived the attempted write");
 });
+
+/* ------------------------------------------------------------------ */
+/* The table reaching the rule set                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `ss2BattleValues` derives the damage pair from `weapon`, and an explicit pair
+ * still wins.
+ *
+ * The precedence is the load-bearing half. All 22 promoted goldens supply
+ * `min_damage`/`max_damage` and none supplies `weapon`, so if derivation won,
+ * a map-derived table would silently re-datum runtime evidence — the move the
+ * standing rule forbids outright. Derivation fills a hole; it never overwrites
+ * a measurement.
+ */
+const HERO = Object.freeze({
+  strength: 10, vitality: 13, stamina: 1, speed: 1,
+  herolevel: 4, attack: 1, defence: 1, charisma: 1, magicka: 1
+});
+
+test("a weapon id derives the damage pair the build would look up", async () => {
+  const { ss2BattleValues } = await import("../src/team/ss2-rules.js");
+  // round(strength*2) + table[24] = 20 + 8 / 20 + 32.
+  const derived = ss2BattleValues({ ...HERO, weapon: 24 });
+  assert.equal(derived.min_damage, 28);
+  assert.equal(derived.max_damage, 52);
+
+  // weapon 0 is the starting weapon in the `heroDNA` literal, and this is the
+  // live save's own gladiator: strength 10, weapon 0 -> 21 / 23.
+  const starting = ss2BattleValues({ ...HERO, weapon: 0 });
+  assert.deepEqual([starting.min_damage, starting.max_damage], [21, 23]);
+});
+
+test("an explicit damage pair OUTRANKS a weapon id, so evidence is never re-datumed", async () => {
+  const { ss2BattleValues } = await import("../src/team/ss2-rules.js");
+  // Mutation: make the derivation overwrite instead of fill. RUN, and it fails
+  // HERE AND NOWHERE ELSE — 717 of 718 still pass, the golden replay included.
+  //
+  // I first wrote "and so does the golden replay, which is the point". It does
+  // not, and the reason is the whole reason this test exists: no golden
+  // supplies a `weapon` id, so the derivation never fires for them and they
+  // cannot see the regression. The corpus does not defend itself here. This
+  // assertion is the only thing standing between a map-derived table and the
+  // twenty-two measured damage pairs.
+  const both = ss2BattleValues({ ...HERO, weapon: 24, weapon_min_damage: 1, weapon_max_damage: 3 });
+  assert.deepEqual([both.min_damage, both.max_damage], [21, 23], "the supplied pair must win over the table");
+
+  // Vacuity guard: the table really would have said something else here.
+  assert.deepEqual(ss2WeaponDamageRange(24), [8, 32]);
+});
+
+test("callers who supply neither are unchanged, and an unknown id derives nothing", async () => {
+  const { ss2BattleValues } = await import("../src/team/ss2-rules.js");
+  // The pre-existing contract: absent means the build's own zero.
+  const neither = ss2BattleValues({ ...HERO });
+  assert.deepEqual([neither.min_damage, neither.max_damage], [20, 20]);
+  assert.equal("weapon" in neither, false, "no weapon id was supplied, so none is projected");
+
+  // 81 sits between the shop bands and the off-shop ids; the build declares no
+  // `weapon81`, so `_root["weapon" + 81]` is undefined there too.
+  const unknown = ss2BattleValues({ ...HERO, weapon: 81 });
+  assert.deepEqual([unknown.min_damage, unknown.max_damage], [20, 20]);
+});
+
+test("the secondary weapon derives its own pair, at the build's strength scaling", async () => {
+  const { ss2BattleValues } = await import("../src/team/ss2-rules.js");
+  // `+0x33b6`/`+0x33e6`: the secondary pair scales by round(strength * 1), not 2.
+  const derived = ss2BattleValues({ ...HERO, secondary_weapon: 24 });
+  assert.deepEqual([derived.secondary_min_damage, derived.secondary_max_damage], [18, 42]);
+  // And it does not disturb the primary.
+  assert.deepEqual([derived.min_damage, derived.max_damage], [20, 20]);
+});
