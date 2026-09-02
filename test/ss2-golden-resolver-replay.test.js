@@ -298,6 +298,22 @@ test("every promoted golden replays through createTeamBattle/applyAction", () =>
     "the set of goldens this file cannot drive changed; read REPLAY_UNDRIVABLE before touching this"
   );
 
+  // And the listed goldens must ACTUALLY be undrivable. The deepEqual above
+  // compares the frozen list with the goldens that carry its keys — which is
+  // the list compared with itself, so it catches an entry naming a golden that
+  // does not exist and nothing else. Found 2026-09-02 by two independent
+  // agents: a listed golden that quietly BECAME drivable was never noticed,
+  // the project's signature defect in the assertion that claimed to prevent
+  // it. Build each one and require the refusal by name; the mutation that
+  // kills this loop is relaxing the rule set's guard while leaving the list.
+  for (const golden of goldens.filter((entry) => !isReplayable(entry))) {
+    assert.throws(
+      () => replayGolden(golden),
+      /min_damage|max_damage/,
+      `${golden.fixtureId} is listed in REPLAY_UNDRIVABLE but built a battle; remove it from the list`
+    );
+  }
+
   const replayable = goldens.filter(isReplayable);
   assert.equal(replayable.length, 22, "the replayable corpus changed size");
   for (const golden of replayable) {

@@ -8,10 +8,20 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-02 13:40 — the first armoured golden](docs/handoffs/2026-09-02-1340--the-first-armoured-golden.md).**
-Start there.
+[2026-09-02 16:59 — three waves, cut at the usage limit](docs/handoffs/2026-09-02-1659--three-waves-cut-at-the-usage-limit.md).**
+Start there. Three capped fan-out waves on the 13:40 brief's ranked items 1–3
+were stopped at 92% of the session limit; ranked item 4 is CLOSED by
+measurement (the branch was already pushed), item 3's premise is BROKEN (the
+hero's walk count is set by the villain's approach), and the one VERIFIED
+result is that nothing on the hero's one-action path reads the defender's
+damage pair — so the armoured candidate's omission is correct and the fix is a
+role-based requirement on the rule-set side. **Read its cost section before
+launching any wave.**
 
 *(The brief it supersedes:)*
+[2026-09-02 13:40 — the first armoured golden](docs/handoffs/2026-09-02-1340--the-first-armoured-golden.md).
+
+*(And the one before that:)*
 [2026-09-02 00:07 — the wave refuted more than it confirmed](docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md).
 
 ► **`ls docs/handoffs/` PUTS THE NEWEST BRIEF SECOND-TO-LAST, NOT LAST, AND WILL
@@ -1437,9 +1447,15 @@ the one fact that would settle it.
   **Still open, and it is the bigger gap: enchantment DAMAGE is unmodelled on
   both weapons.** `weapon_enchantment_damage` (`+0x320c`) and
   `secondary_weapon_enchantment_damage` (`+0x3326`) are each
-  `ceil(<max_damage>/3 * <potency>)`. The secondary is absent from the adapter
+  `ceil(<max_damage>/3 * <potency>)`. ~~The secondary is absent from the adapter
   catalogue too (`src/adapter/vanilla-fields.js` carries only the primary) —
-  an asymmetry, not a decision.
+  an asymmetry, not a decision.~~ **STALE since `52bc570` (2026-09-02 06:05),
+  corrected 2026-09-02 evening from the file:** `vanilla-fields.js:150,155`
+  carries BOTH, and `ss2BattleValues` DERIVES both at `ss2-rules.js:472-475`.
+  What is still true is the sentence that opens this bullet: the damage is
+  computed and never APPLIED, because the build applies it as a status phase
+  that replaces the afflicted combatant's next turn. See the 16:59 handoff for
+  the costed fork.
 
 - ~~**`localeCompare` is a desync hazard and survives in two files.**~~
   **DONE 2026-09-02, and it was FIVE files, not two. The one nobody had found is

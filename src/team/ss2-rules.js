@@ -170,14 +170,18 @@
  *    following the standing "derive from the map" rule concludes it is an
  *    input. Corrected there too.
  *
- * 4. **Enchantment DAMAGE is dropped entirely, on both weapons.**
+ * 4. **Enchantment DAMAGE is computed and never APPLIED, on both weapons.**
  *    `weapon_enchantment_damage` (`+0x320c`) and
  *    `secondary_weapon_enchantment_damage` (`+0x3326`) are each
- *    `ceil(<max_damage> / 3 * <potency>)`, and neither is computed here — so an
- *    enchanted weapon applies a status and deals no magic damage. The
- *    secondary field is absent from the adapter catalogue too
- *    (`src/adapter/vanilla-fields.js` carries only the primary), which is an
- *    asymmetry rather than a deliberate exclusion.
+ *    `ceil(<max_damage> / 3 * <potency>)`. Both ARE derived below (see
+ *    `ss2BattleValues`) and both are in the adapter catalogue
+ *    (`src/adapter/vanilla-fields.js`) — an earlier version of this line said
+ *    "neither is computed here" and "the catalogue carries only the primary",
+ *    which was stale the day `52bc570` landed both. What is still missing is
+ *    the APPLICATION: in the build the damage arrives as a status phase that
+ *    REPLACES the afflicted combatant's next turn (battle map § "The
+ *    enchantment effect is a SKIPPED TURN"), and this rule set has no such
+ *    phase — so an enchanted weapon applies a status and deals no magic damage.
  *
  *    Do NOT confuse this with the enchantment PROC, which is modelled and is
  *    correct: the proc gate reads the PRIMARY potency for both weapons, and
