@@ -1,6 +1,9 @@
 ---
 handoff:      2026-09-02-0007--the-wave-refuted-more-than-it-confirmed
-written:      2026-09-02 00:07 -0400
+written:      2026-09-02 00:07 -0400, last amended 00:25 -0400 (the RNG-tape
+              decision landed after the first draft; the filename keeps the
+              original stamp because renaming breaks the index row and the
+              forward pointer that now depend on it)
 sessionStart: 2026-09-01 23:10 -0400
 sessionId:    d8905702-de09-4ab4-8d71-5177f2da3cd2 (https://claude.ai/code/session_01MxEfjRa4SvMdK1WMKk8h3U)
 agentRuns:    wf_35a0c78d-005 (question-diverse investigation of ranked items 2-5 + capture prep)
@@ -10,9 +13,12 @@ agentRuns:    wf_35a0c78d-005 (question-diverse investigation of ranked items 2-
               the hash-verified SWF or by direct measurement before anything
               was changed.
 branch:       arena/champion-capture
-commits:      c22e549, b7641da, 20aab4d, 1106ccd, 118a95c, + the RNG-tape
-              commit (6). Pushed to `github/arena/champion-capture` at the
-              owner's explicit request; `main` untouched, no PR opened.
+commits:      c22e549, b7641da, 20aab4d, 1106ccd, 118a95c, 97fddaa (6).
+              Branch tip and `github/arena/champion-capture` are both 97fddaa —
+              pushed at the owner's explicit request; `main` untouched at
+              362859a, no PR opened. (Naming the sixth hash rather than "+ the
+              RNG-tape commit": a fresh reader should not have to guess which
+              commit a sentence means.)
 suite:        708 tests / 707 passed / 0 failed / 1 skipped (WSL, fresh-clone
               profile), from 693 at session start.
               **MEASURED at the end, not carried forward — and carrying it
