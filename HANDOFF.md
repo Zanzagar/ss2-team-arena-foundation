@@ -8,11 +8,28 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
+[2026-09-02 00:07 — the wave refuted more than it confirmed](docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md).**
+Start there.
+
+► **`ls docs/handoffs/` PUTS THE NEWEST BRIEF SECOND-TO-LAST, NOT LAST, AND WILL
+  UNTIL SOMEONE RENAMES A FILE.** `2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it`
+  is stamped with the UTC time under a `-0400` label — it was committed at
+  **2026-09-01 22:58 -0400**, so its true stamp is `2026-09-01-2258`. It carries
+  a forward pointer at the top so a reader who lands on it is redirected, and it
+  was NOT renamed, because every link to it would break. **This is the SECOND
+  time this bug has shipped** (see the `-1950-`/`-1550-` rename below).
+  **Stamp handoffs in LOCAL time and check with `git log --date=iso-local`
+  before you commit one.**
+
+*(The brief that opened the items the newest one closes:)*
 [2026-09-02 — the corpus got a consumer, and the wave broke ten of twelve claims](docs/handoffs/2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it.md).**
-Start there. **`src/team/ss2-rules.js` exists**: SS2's own attack arithmetic
+**`src/team/ss2-rules.js` exists**: SS2's own attack arithmetic
 runs inside the shared resolver, all 22 goldens replay through
 `createTeamBattle`/`applyAction`, and `node tools/hotseat.mjs` plays that rule
-set by default. Ranked items 1 and 2 of the brief below are DONE.
+set by default. **Its ranked items 2, 3 and 5 are now DONE or REFUTED, and item
+4 is answered but left to the owner — read the newest brief, not this one, for
+which is which.** Notably its item 2 is REFUTED: `activeEnchantment`'s
+primary-potency pairing is byte-faithful and must NOT be changed.
 
 **Read its corrections before quoting anything in it.** A 12-agent write-nothing
 wave broke **10 of 12** load-bearing claims, and two of the breaks were
@@ -981,6 +998,31 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
+► **STATE AS OF 2026-09-02 00:07. Suite is 703 / 702 / 0 / 1 (fresh-clone
+  profile), from 693.** Ranked items 2, 3 and 5 of the `…-0130` brief are DONE
+  or REFUTED and item 4 is answered; see
+  `docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md`.
+  **What is left, in order:**
+
+  1. **CAPTURE AN ARMOURED FIXTURE — still first, and the vehicle blocker was
+     never real.** `run-arena.ps1` carries `-WatchFields` (`:137` → `:295`),
+     `-StageHero`/`-StageVillain` (`:100-101`) and its own snapshot guard, and
+     it is exercised — five archived rufflelogs emit
+     `{"t":"dbg","at":"watch-extended","added":11}`. Both removal fixtures take
+     the identical flag `-WatchFields "helmet_defence,shoulderguard_defence"`.
+     **Expect no observation from one window**: both pin `staminaleft 105` on
+     both sides, which held in 0 of 38 armed rounds, and six other fields also
+     diverge. Raise the odds first by pinning the approach-step count and
+     extending `-StageVillain` to `speed` and `strength` (`applyStageSide` has
+     no whitelist, so it can already write them).
+  2. **DECIDE THE RNG-TAPE QUESTION.** Costed and byte-backed; the direction
+     this file used to prescribe is wrong. See § "Found 2026-09-02".
+  3. **Model enchantment DAMAGE** — `+0x320c` and `+0x3326`, both dropped, so an
+     enchanted weapon applies a status and deals no magic damage.
+  4. **Transcribe the static weapon table and make `weapon` declarable**, which
+     closes gap 3 in `ss2-rules.js` rather than restating it.
+  5. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
+
 ► **ITEMS 1 AND 2 OF THE 2026-09-01 BRIEF ARE DONE (2026-09-02).**
   `src/team/ss2-rules.js` exists and the 22 goldens replay through the resolver.
   What that opened, and what it did NOT close, is in
@@ -1102,24 +1144,101 @@ the one fact that would settle it.
   ZERO runtime backing.** `test/ss2-team-rules.test.js` cross-checks them
   against the arithmetic itself and says so; that is not evidence about the
   build. What closes it is a capture, not a test.
-- **`src/golden/ss2-attack-candidate.js:254-264` looks wrong and was NOT
-  touched.** `activeEnchantment` returns `attacker.weapon_enchantment_potency`
-  in BOTH branches, so the `equipped_weapon === 2` branch pairs the SECONDARY
-  enchantment type with the PRIMARY potency. Flagged by a verifier; not
-  changed, because 22 promoted goldens replay against that module and altering
-  it is an evidence decision, not a bug fix. **Give it its own named claim.**
-- **`localeCompare` is a desync hazard and survives in two files.**
-  `roster.js`'s `initiativeOrder` and `placeholder-rules.js` both tie-break on
-  `a.id.localeCompare(b.id)`, which is ICU-locale-dependent — two peers in
-  different locales order initiative differently and their `combatStateHash`
-  diverges with no other cause. `ss2-rules.js` was changed to a plain
-  comparator; the other two were NOT, because initiative order has a wider
-  blast radius than that change. One line each, plus a test.
-- **The RNG tape is not inside the hash.** `toTeamWireState` carries `rngState`
-  and `rngCursor`, but a tape channel's `state` is a constant 0, so two peers
-  with different tapes hash identically until they diverge. Projecting the
-  channel mode and a digest of the samples would close it. Resolver-contract
-  change; needs its own decision.
+- ~~**`src/golden/ss2-attack-candidate.js:254-264` looks wrong and was NOT
+  touched.**~~ **REFUTED 2026-09-02 FROM THE BYTES. The code is FAITHFUL and
+  must not be "fixed"; the flag was a false positive.** `damagecharacter`'s proc
+  gate is `randomBetween(1,100) < game_attacker.weapon_enchantment_potency * 10`
+  at `+0x1bf1`/`+0x1c09..+0x1c22` — the PRIMARY potency, read unconditionally,
+  in a gate hoisted OUT of and evaluated BEFORE the first `equipped_weapon` test
+  at `+0x1c27`. Only the TYPE branches on the weapon.
+  `secondary_weapon_enchantment_potency` is read NOWHERE in `damagecharacter`;
+  census settles it, since `magicweapon_percentage` occurs exactly twice in the
+  whole build (one write, one read), so there is exactly one enchantment roll.
+  `ss2-battle-map.md:1485` already said so in prose. Derived independently by
+  the main session and by two of three verifiers, and the offsets are now quoted
+  AT the function so the next reader has to delete a derivation rather than redo
+  one. **This is last session's `+0x51d5` lesson from the opposite direction: a
+  plausible bug report against faithful code.**
+
+  **The REAL defect was three lines below, and nobody had named it. FIXED.**
+  Each status arm is `(equipped_weapon == 1 && weapon_enchantment_type == N) ||
+  (equipped_weapon == 2 && secondary_weapon_enchantment_type == N)`
+  (`+0x1c27`/`+0x1c58`, `+0x1cab`/`+0x1cdc`, `+0x1d16`/`+0x1d47`,
+  `+0x1d81`/`+0x1db2`), so any other `equipped_weapon` applies NO status — while
+  the module treated "not 2" as "primary" and applied one. Data-neutral today
+  (all 12 corpus values are 1); it removes a divergence a future enchanted
+  capture could have hit. Three tests pin it; both mutants fail.
+
+  **Still open, and it is the bigger gap: enchantment DAMAGE is unmodelled on
+  both weapons.** `weapon_enchantment_damage` (`+0x320c`) and
+  `secondary_weapon_enchantment_damage` (`+0x3326`) are each
+  `ceil(<max_damage>/3 * <potency>)`. The secondary is absent from the adapter
+  catalogue too (`src/adapter/vanilla-fields.js` carries only the primary) —
+  an asymmetry, not a decision.
+
+- ~~**`localeCompare` is a desync hazard and survives in two files.**~~
+  **DONE 2026-09-02, and it was FIVE files, not two. The one nobody had found is
+  the one that matters.** `tools/runtime-capture/build-manifest.mjs:136` broke
+  the capture-manifest session tiebreak on `localeCompare`, and that array order
+  is inside the digest **all 22 promoted goldens cite as
+  `provenance.captureManifestSha256`** — so two machines could mint two
+  different, equally "correct" digests for byte-identical evidence. Its own
+  comment four lines up exists to prevent exactly that class one layer higher.
+
+  Measured over the 86 committed sessionIds (3,655 pairs): en-US and eleven
+  other locales order every pair as the code-unit comparator does; **haw-US
+  reorders 1 and az-AZ reorders 682.** So the fix is provably free — verified
+  directly, not inferred: all 22 committed manifests still rebuild to the digest
+  their golden cites, and 0 of 22 reorder under six locales. Re-derive with
+  `node tools/stable-order-locale-census.mjs`.
+
+  **`initiativeOrder` was worse than "the hash diverges".** It drives
+  `currentCombatant` and `advanceTurn`, so a locale difference changes WHO ACTS
+  FIRST: on one blueprint the RNG stream stayed bit-identical (21 draws, same
+  final state) and the WINNER still flipped. It also reaches a sealed campaign
+  record via `src/campaign/from-battle.js`.
+
+  The shared comparator and the whole measurement live in
+  `src/common/stable-order.js`; `test/stable-order.test.js` pins it. **Note it
+  does NOT case-fold** — `["alpha","Beta"]` orders differently from en-US
+  collation — which is pinned by a test rather than papered over.
+
+  **Two traps this produced, both worth keeping.** (1) My first draft of those
+  tests was SATURATED: restoring `localeCompare` left the tests *named for*
+  locale-independence green, because the assertions ran in an en-US process.
+  They now run the real code in a child under `LC_ALL=az-AZ`, each with a
+  vacuity guard. (2) The manifest site had NO test at all, and only a mutation
+  found it — reverting that one line and running all of
+  `capture-campaign.test.js` under `az-AZ` passed **76 of 76**.
+
+- **The RNG tape is not inside the hash — CONFIRMED, and the remedy this file
+  proposed points the WRONG WAY. Still open; it is the owner's decision.**
+  The collision is real and was reproduced directly: two battles whose tapes
+  differ only in an UNCONSUMED sample both hash to `2b429191`, with
+  `rngState 0 / rngCursor 0` on both sides (`rng.js:126` sets `#state = 0` for
+  tape mode, and `toTeamWireState` carries only `rngState`/`rngCursor`).
+
+  **This file said "projecting the channel mode and a digest of the samples
+  would close it". Projecting a digest of the REMAINING tape closes it and
+  hands every receiver a brute-forceable commitment to undrawn randomness** —
+  measured, with two samples left, recovered in 600 candidates from the labels
+  and bounds the rule set already dictates. **And splitting the wire from the
+  hash does NOT fix that**: with the digest in the hash preimage only, the same
+  search still recovered the values from the transmitted hash in 436 tries,
+  because peers must exchange the hash for a desync check to exist at all. The
+  leak is intrinsic to detecting divergence in samples nobody has drawn yet.
+
+  **The leak-free maximum is a digest of the CONSUMED PREFIX.** It cannot detect
+  a future divergence, but it closes the divergences that have already happened
+  — including the case all three candidate designs miss: two tapes whose
+  ALREADY-DRAWN sample differed while producing identical state.
+
+  So the decision is not "what to project" but **"detect future divergence early
+  and leak future rolls, or detect only past divergence and leak nothing".**
+  A tape-only projection was measured to break 0 tests: the 12 pinned hashes in
+  `test/team-resolver.test.js` are the only literal hashes in the repo and none
+  is a tape battle.
+
 - **`ss2BattleValues` reproduces a SUBSET of `battlevalues`, and two omissions
   change a fight.** `weapon_min_damage`/`weapon_max_damage` are themselves
   `battlevalues`'s lookups into `_root.weapon[...]` (`+0x31be`, `+0x31da`) and
@@ -1133,12 +1252,12 @@ the one fact that would settle it.
   exceeds expected incoming damage never dies (measured at 30,000 actions).
   This may be faithful — vanilla has the same regeneration — but the resolver
   has no draw or turn cap, so it surfaces as `AI turn limit reached`.
-- **AGENTS.md's two test profiles are stated in a way that invites a false
-  finding.** It says the 0-skipped profile is "a capture-bearing tree, holding
-  the gitignored `captures/` raw-trace archive". This tree HAS `captures/` — the
-  manifest and a README — and measures 1 skipped, correctly. The condition is at
-  least one probe session directory under `captures/`, not the directory
-  existing. Worth the one-line correction there.
+- ~~**AGENTS.md's two test profiles are stated in a way that invites a false
+  finding.**~~ **ALREADY CLOSED — verified 2026-09-02 at `AGENTS.md:153-156`,
+  which reads "holding at least one probe session directory under the gitignored
+  `captures/` archive" and says in its own parenthesis that a tree with
+  `captures/` and 1 skipped is CORRECT. Nothing to do; the item outlived its
+  fix.**
 
 ### Found 2026-09-01 (evening): the armoured family measured at n=38, and what it is actually waiting on
 

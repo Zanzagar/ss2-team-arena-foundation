@@ -15,6 +15,21 @@ suite:        693 tests / 692 passed / 0 failed / 1 skipped (WSL, fresh-clone pr
 environment:  WSL2, node v26.3.1, ~/projects/swords-and-sandals-2-multiplayer
 supersedes:   2026-09-01-2112--the-project-became-playable (its ranked items 1 and 2)
 ---
+> **⚠ THIS IS NOT THE NEWEST BRIEF, DESPITE SORTING LAST.** This file's stamp is
+> the UTC time wearing a `-0400` label: it was committed at
+> **2026-09-01 22:58 -0400** (`git log --date=iso-local`), so its true local
+> stamp is `2026-09-01-2258`. The newest brief is
+> [`2026-09-02-0007--the-wave-refuted-more-than-it-confirmed`](2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md),
+> which supersedes ranked items 2, 3 and 5 below and answers item 4.
+>
+> It also **refutes this brief's ranked item 2**: `activeEnchantment`'s
+> primary-potency pairing is byte-faithful and must not be changed. Read the
+> newer file before acting on anything here.
+>
+> *(Added 2026-09-02. Nothing was renamed — renaming a committed brief breaks
+> every link to it. Stamp handoffs in LOCAL time; this is the second time this
+> bug has shipped.)*
+
 # Handoff — the corpus got a consumer, and the wave broke ten of twelve claims
 
 **Ranked items 1 and 2 of the previous brief are DONE.** SS2's own attack
