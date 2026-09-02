@@ -49,6 +49,11 @@ fixture, or evidence claim. Novel combat behavior remains under a separate
 
 ## Cluster 1 — progression ceiling
 
+The non-authoritative
+[EP-D01 vertical-power option matrix](ep-d01-vertical-power-matrix.md) expands
+the first product choice for owner discussion. It records possibilities and
+tradeoffs, not a disposition.
+
 ### EP-A01 proposed replacement
 
 Accept EP-D01, EP-D02, and EP-D04 as above, then select this synchronized pace:
