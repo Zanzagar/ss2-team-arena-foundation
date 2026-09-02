@@ -840,3 +840,93 @@ function viewOf(battle, id) {
     status: [...combatant.status]
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Holes a mutation sweep found on 2026-09-02, and the inputs that     */
+/* close them. Each block names the mutant it kills.                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * MUTANT: any `SS2_ARMOUR_DVAL` entry set to an arbitrary number.
+ *
+ * Measured before this test existed: setting `helmet`, `shinguard`, `greaves`,
+ * `shoulderguard` or `gauntlet` to 500 left all 702 tests passing. The three
+ * oracles that touched the table computed their expected value FROM the table
+ * under test (`Math.round(derived[piece] * SS2_ARMOUR_DVAL[piece])`), so the
+ * oracle moved with the code — the project's most reliable defect signal, an
+ * assertion that cannot fail.
+ *
+ * The table is NOT reasoned into existence: all eight values are read directly
+ * out of the licensed build, `_global.<piece>_dval` assigned as literals in one
+ * straight-line run inside `battlevalues`. So the right fix here is a LITERAL
+ * pin with the offset, not a desaturated input — this is build data, and the
+ * only honest oracle for build data is the build.
+ *
+ * Re-derive every row with:
+ * `node tools/inspect-swf.mjs <ss2.swf> --references '_dval' --around 2`
+ */
+test("the armour dval table equals the build's own literals, offset by offset", () => {
+  const fromTheBuild = Object.freeze({
+    breastplate: [16, "+0x3089"],
+    helmet: [10, "+0x3096"],
+    shinguard: [6, "+0x30a3"],
+    greaves: [3, "+0x30b0"],
+    shoulderguard: [8, "+0x30bd"],
+    gauntlet: [5, "+0x30ca"],
+    boot: [2, "+0x30d7"],
+    shield: [12, "+0x30e4"]
+  });
+  for (const [piece, [value, offset]] of Object.entries(fromTheBuild)) {
+    assert.equal(
+      SS2_ARMOUR_DVAL[piece],
+      value,
+      `${piece}_dval disagrees with root:35/DoAction@0x3fa9dc/battlevalues@${offset}`
+    );
+  }
+  // The set must match too, or a piece could be dropped without failing above.
+  assert.deepEqual(
+    Object.keys(SS2_ARMOUR_DVAL).slice().sort(),
+    Object.keys(fromTheBuild).slice().sort()
+  );
+  assert.deepEqual(SS2_ARMOUR_PIECES.slice().sort(), Object.keys(fromTheBuild).slice().sort());
+});
+
+/**
+ * MUTANT: `Math.ceil(stamina / 2)` -> `Math.floor(stamina / 2)` in
+ * `phaseTransitionEffects`, and even `+ (stamina % 2) * 1000`.
+ *
+ * Both passed the whole suite. The cause was NOT stamina parity but the
+ * maxHealth clamp: of 326 invocations across the suite, 265 had zero headroom
+ * and wrote nothing at all — and that included every odd-stamina one. The 22
+ * goldens replay at `stamina 1`, exactly where ceil and floor disagree, and
+ * every one of them is at full health when the heal is computed.
+ *
+ * So the fix is an INPUT, not an assertion: an odd-stamina actor with room to
+ * heal. `nextphase` regenerates the acting combatant by `1 + ceil(stamina/2)`
+ * at `+0x3305..+0x3346`, immediately before `check_stats`.
+ */
+test("the phase-transition heal rounds UP, measured with odd stamina and headroom", () => {
+  // `nextphase` regenerates the acting combatant by `1 + ceil(stamina / 2)` at
+  // `+0x3305..+0x3346`, and the rest branch adds its own `3 + ceil(stamina)` at
+  // `+0x51d5`. The neighbouring rest test above uses `stamina 4`, where ceil
+  // and floor agree — which is precisely why the mutants lived.
+  for (const stamina of [1, 3, 5, 9]) {
+    const battle = battleOf({ stamina }, {});
+    const hero = combatantById(battle, "hero");
+    hero.resources.staminaleft.value = 10;
+    // Real headroom. Without it `Math.min(..., maxHealth - health)` clamps the
+    // heal to 0 and writes nothing, which is how 265 of the suite's 326
+    // invocations of this code assert nothing at all.
+    hero.health = 5;
+
+    applyAction(battle, { actorId: "hero", type: Ss2ActionType.REST, targetId: "hero" });
+
+    const healed = 3 + Math.ceil(stamina) + 1 + Math.ceil(stamina / 2);
+    // Pinned to literals as well as to the formula, so the oracle cannot move
+    // with the code. Every one of these differs from the floor variant.
+    const literal = { 1: 6, 3: 9, 5: 12, 9: 18 }[stamina];
+    assert.equal(healed, literal, `stamina ${stamina}: formula and literal disagree`);
+    assert.equal(hero.health, 5 + literal, `stamina ${stamina}: applied heal`);
+    assert.equal(battle.lastResolution.events[0].healed, literal);
+  }
+});
