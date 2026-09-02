@@ -58,6 +58,7 @@ import {
   wrapperDefaultWatchFields,
   wrapperEmittedEventTypes
 } from "../tools/runtime-capture/campaign.mjs";
+import { loadSs2Fixtures } from "./ss2-fixture-files.js";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const FAMILY = "prisoner-normal-kill";
@@ -1978,22 +1979,49 @@ test("plan names the unobserved fight mode as a note, not as a blocker", async (
   // refusal, and the driver has to keep the two apart. The set of already
   // observed modes is read off the committed runtime observations, so the note
   // disappears by itself on the first successful tournament capture.
+  //
+  // ► THAT CAPTURE HAPPENED ON 2026-09-02, and this test is the record of it.
+  //   `obs-onx1405-a1` and `obs-onx1521-a1` are the first runtime observations
+  //   in this project's history carrying `fightMode: "tournament"` — the mode
+  //   the game actually plays, and the one all 22 earlier goldens lack. So the
+  //   note is GONE, by the mechanism the comment above promised, and what this
+  //   test now pins is its absence.
   const coverage = await computeCoverage("tournament");
   assert.equal(coverage.rows.length, 3);
   for (const row of coverage.rows) {
     assert.deepEqual(row.blockers, [], `${row.fixtureId} has no derivable blocker`);
-    assert.deepEqual(row.notes.map((note) => note.code), ["unobserved-fight-mode"]);
-    assert.match(row.notes[0].detail, /fight_mode "tournament"/);
+    assert.equal(
+      row.notes.some((note) => note.code === "unobserved-fight-mode"),
+      false,
+      `${row.fixtureId} still carries the unobserved-fight-mode note after tournament was observed`
+    );
   }
 
-  // The archive really has never recorded it, and really has recorded the
-  // other two the note cites.
+  // The archive HAS now recorded it, alongside the two it always had.
   const runtimeModes = new Set(observationEntries
     .filter((entry) => entry.value.capture.method !== SS2_SIMULATED_CAPTURE_METHOD)
     .map((entry) => entry.value.scenario.fightMode)
     .filter((mode) => mode !== undefined));
-  assert.equal(runtimeModes.has("tournament"), false);
-  assert.deepEqual([...runtimeModes].sort(), ["duel", "misc"]);
+  assert.equal(runtimeModes.has("tournament"), true, "tournament is observed; the note above should be gone");
+  assert.deepEqual([...runtimeModes].sort(), ["duel", "misc", "tournament"]);
+
+  // Vacuity guard, and it reports a real state change rather than a pass: with
+  // tournament observed, EVERY fight mode any committed fixture declares is now
+  // observed, so this note can no longer fire for any family. It is not dead
+  // code — it is code whose precondition the corpus has finally satisfied — and
+  // the difference is checkable, so it is checked: the emitter still exists in
+  // the driver, and the reason it is quiet is the evidence.
+  const driver = await readFile(path.join(REPO_ROOT, "tools", "runtime-capture", "campaign.mjs"), "utf8");
+  assert.match(driver, /unobserved-fight-mode/, "the note emitter was deleted rather than satisfied");
+
+  const fixtureModes = new Set(
+    (await loadSs2Fixtures()).map((fixture) => fixture.scenario?.fightMode).filter(Boolean)
+  );
+  assert.deepEqual(
+    [...fixtureModes].sort().filter((mode) => !runtimeModes.has(mode)),
+    [],
+    "a fixture declares a fight mode nothing has observed; the note should fire again for its family"
+  );
 
   // And a family whose mode HAS been observed gets no such note.
   const misc = await computeCoverage(FAMILY);

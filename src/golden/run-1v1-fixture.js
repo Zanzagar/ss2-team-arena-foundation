@@ -1,4 +1,5 @@
 import { createOrderedRollTape } from "./ordered-rolls.js";
+import { parseStagedDeclaration } from "./staged-declaration.js";
 
 export const SS2_GOLDEN_SCHEMA_VERSION = 1;
 export const SS2_1V1_FIXTURE_KIND = "ss2-1v1-fixture";
@@ -76,7 +77,14 @@ const GOLDEN_PROVENANCE_KEYS = new Set([
   "observedAt",
   "repetitions",
   "runtimeVerified",
-  "sourceRefs"
+  "sourceRefs",
+  // OPTIONAL, and its absence is a claim: this golden's scenario was produced
+  // by the game rather than written in. Added 2026-09-02, when the first
+  // armoured observations were captured and `promote-1v1-golden.js` refused
+  // them — correctly — because the schema could not record that they were
+  // staged. See `assertGoldenCanRecordStaging` there for why a golden that
+  // silently looked game-produced is the outcome the field exists to prevent.
+  "staged"
 ]);
 const SCENARIO_KEYS = new Set([
   "attackDirection",
@@ -645,6 +653,15 @@ export function validateSs2OneVsOneFixture(fixture) {
     );
     if (!/^[A-Fa-f0-9]{64}$/.test(fixture.provenance.captureManifestSha256 ?? "")) {
       throw new GoldenFixtureValidationError("captureManifestSha256 must be a SHA-256 digest.");
+    }
+    // `staged` is optional and its ABSENCE is the claim that the scenario was
+    // produced by the game. When present it is parsed with the SAME grammar the
+    // observation records use, so a golden cannot declare a staging its
+    // evidence could not have carried. `Object.hasOwn` rather than a truthiness
+    // test: the empty string is a malformed declaration, not a second spelling
+    // of "staged nothing", and it must be refused rather than skipped.
+    if (Object.hasOwn(fixture.provenance, "staged")) {
+      parseStagedDeclaration(fixture.provenance.staged, "golden provenance.staged", GoldenFixtureValidationError);
     }
   } else {
     throw new GoldenFixtureValidationError("classification must be candidate or golden.");

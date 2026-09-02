@@ -41,6 +41,7 @@ import {
   SS2_SIMULATED_CAPTURE_METHOD,
   computeSs2ObservationDigest,
   matchSs2ObservationToFixture,
+  parseSs2StagedDeclaration,
   ss2ObservationsMatch,
   validateSs2Observation
 } from "../src/golden/observation.js";
@@ -83,6 +84,13 @@ const committedObservations = await Promise.all(
 );
 const committedById = new Map(
   committedObservations.map((observation) => [observation.observationId, observation])
+);
+
+/** The promoted corpus, for the staging cross-check below. */
+const committedGoldens = await Promise.all(
+  (await readdir(GOLDEN_DIR))
+    .filter((name) => name.endsWith(".json"))
+    .map((name) => loadJson(path.join(GOLDEN_DIR, name)))
 );
 
 const parseTrace = (trace) => trace.trim().split("\n").map((line) => JSON.parse(line));
@@ -432,19 +440,39 @@ test("all three attestations are optional, which is what keeps the committed evi
   withAttestation.capture.overdraw = 0;
   assert.notEqual(computeSs2ObservationDigest(withAttestation), legacy[0].digest);
 
-  // `staged` is the same story told once more, and at the moment its whole
-  // population is the legacy one: no wrapper has staged anything yet, so every
-  // committed record is evidence the game produced unaided. Asserted as an
-  // observation about today, not as an invariant — the armoured and tournament
-  // families are expected to file staged records, and this line is then the one
-  // to update, exactly as the attested/legacy split above already had to be.
-  for (const observation of committedObservations) {
-    assert.equal(
-      Object.hasOwn(observation.capture, "staged"),
-      false,
-      `${observation.observationId} claims staging; if that is intentional, update this assertion ` +
-      "and check the goldens citing it record the staging too"
+  // `staged` is the same story told once more, and THE DAY THIS LINE WARNED
+  // ABOUT ARRIVED: 2026-09-02, when the armoured family filed its first two
+  // records. This assertion used to say no committed record claims staging, and
+  // said in its own comment that "the armoured and tournament families are
+  // expected to file staged records, and this line is then the one to update".
+  //
+  // It is asserted as an exact SET rather than relaxed to "some may", because
+  // the whole point of the field is that a scenario written in must be
+  // distinguishable from one the game produced unaided. A record that starts
+  // claiming staging without anyone noticing is precisely what this catches.
+  const STAGED_OBSERVATIONS = ["obs-onx1405-a1", "obs-onx1521-a1"];
+  assert.deepEqual(
+    committedObservations
+      .filter((observation) => Object.hasOwn(observation.capture, "staged"))
+      .map((observation) => observation.observationId)
+      .sort(),
+    [...STAGED_OBSERVATIONS].sort(),
+    "the set of committed records claiming staging changed; a record that newly claims it must be " +
+    "deliberate, and every golden citing it has to record the staging too"
+  );
+
+  // And the second half of the old warning, checked rather than trusted: every
+  // golden citing a staged record declares the staging on its own face. This is
+  // the assertion that would have caught a promotion silently dropping the
+  // field — the outcome `assertGoldenCanRecordStaging` exists to prevent.
+  for (const golden of committedGoldens) {
+    const citesStaged = (golden.provenance.observationIds ?? []).some((id) => STAGED_OBSERVATIONS.includes(id));
+    if (!citesStaged) continue;
+    assert.ok(
+      typeof golden.provenance.staged === "string" && golden.provenance.staged.length > 0,
+      `${golden.fixtureId} cites a staged observation but declares no provenance.staged`
     );
+    parseSs2StagedDeclaration(golden.provenance.staged, `${golden.fixtureId} provenance.staged`);
   }
   const withStaging = cloneJson(legacy[0]);
   withStaging.capture.staged = "hero.strength=40";

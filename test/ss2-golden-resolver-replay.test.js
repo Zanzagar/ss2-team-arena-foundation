@@ -31,10 +31,42 @@
  *
  * It also proves NO CLAMPING. This header claimed it did, and a verifier
  * removed all three clamp sites (`ss2-rules.js`'s stamina clamp and both of
- * `resolver.js`'s health clamps) with this file still green: no value in any
- * of the 22 ever reaches a bound. Nine further mutations of the rule set pass
- * the entire 685-test suite. Closing those needs NEW EVIDENCE — an armoured or
- * enchanted fixture — not more assertions over the same 22.
+ * `resolver.js`'s health clamps) with this file still green. Nine further
+ * mutations of the rule set pass the entire 685-test suite. Closing those needs
+ * NEW EVIDENCE — an armoured or enchanted fixture — not more assertions over
+ * the same 22.
+ *
+ * ► **CORRECTED 2026-09-02, TWICE OVER, and the second correction is the one
+ *   that matters.** This paragraph used to end "no value in any of the 22 ever
+ *   reaches a bound", and gave that as the REASON the clamps delete green. It
+ *   is false, and it is false in the direction that makes the corpus sound
+ *   better than it is:
+ *
+ *   - **Values reach bounds constantly.** Instrumented over this file,
+ *     `src/team/resolver.js:259` takes 141 arrivals, of which **120 land
+ *     exactly on the floor** and 21 on the ceiling. All 22 goldens stage
+ *     villain `hitpoints`/`hitpointsmax` at 10 against a hero doing 21-23, so
+ *     the damage does not merely reach the floor, it buries it. The reason a
+ *     clamp deletes green is not that it never fires — it is that **nothing
+ *     downstream distinguishes a clamped value from an unclamped one**, which
+ *     is a much worse property and needs a different fix.
+ *   - **"three" is wrong, in both directions.** At this file's own bar, **15
+ *     of 16** clamp sites across the rule set, resolver, resources, roster and
+ *     candidate delete green. Against the FULL suite exactly **seven** do
+ *     (`ss2-rules.js:490`, `:707`, `resolver.js:261`, `roster.js:168`,
+ *     `ss2-attack-candidate.js:228`, `:237`, `:575`) — and only ONE of the
+ *     three named above is among them.
+ *   - **This file defends exactly one clamp**, and it is not one of the three:
+ *     deleting `src/golden/ss2-attack-candidate.js:339` fails the replay
+ *     assertion below. So the honest form of this paragraph's headline is
+ *     "it proves ONE clamp, and is blind to fifteen".
+ *
+ *   Related, and the same shape one layer down: the stamina clamp's FLOOR at
+ *   `ss2-rules.js:784` is dead code. Deleting just the floor stays green even
+ *   though `test/ss2-team-rules.test.js:456` drives −38 through it, because
+ *   `src/team/resources.js:252` re-clamps every resource write to the entry's
+ *   minimum. **A guard sitting behind another guard reads as coverage and is
+ *   not.**
  *
  * ## Two harness conventions, stated rather than assumed
  *
@@ -101,6 +133,51 @@ async function loadJson(filePath) {
 
 const goldenFiles = (await readdir(GOLDEN_DIR)).filter((name) => name.endsWith(".json")).sort();
 const goldens = await Promise.all(goldenFiles.map((name) => loadJson(path.join(GOLDEN_DIR, name))));
+
+/**
+ * Goldens this file CANNOT drive, and the reason each one cannot be driven.
+ *
+ * Not a skip list and not a tolerance: every entry is a REAL GAP between what
+ * the corpus records and what the rule set requires, and the assertion below
+ * fails if the set changes in EITHER direction — a new undrivable golden is a
+ * finding, and one that becomes drivable must be removed from here.
+ *
+ * `golden-armoured-deflection-threshold-cleared` is the first golden in this
+ * project with armour on the defender, promoted 2026-09-02 from two independent
+ * captures. Its villain scenario carries twelve keys where the prisoner goldens
+ * carry fourteen: **`min_damage` and `max_damage` are absent**, because the
+ * candidate does not pin them — the villain never swings in this scenario, so
+ * nothing in it is determined by the villain's damage pair.
+ *
+ * `assertRequiredResources` refuses the combatant anyway, and it is right to:
+ * it cannot know in advance that this defender never attacks, and in a real
+ * fight it would. So the gap is genuine and belongs to whoever decides what a
+ * candidate must pin — and that decision has to come FROM THE MAP, never from
+ * the observation, even though the raw trace does carry the numbers
+ * (`min_damage` and `max_damage` are both in the wrapper's
+ * DEFAULT_WATCH_FIELDS). Fitting the candidate to the capture is the one move
+ * this repository refuses most consistently.
+ */
+const REPLAY_UNDRIVABLE = Object.freeze({
+  "golden-armoured-deflection-threshold-cleared":
+    "its villain scenario omits min_damage/max_damage, which the candidate does not pin because the " +
+    "villain never swings; the rule set requires a damage pair from every combatant"
+});
+
+/** Whether this file can build a battle from the golden at all. */
+function isReplayable(golden) {
+  return !Object.hasOwn(REPLAY_UNDRIVABLE, golden.fixtureId);
+}
+
+/**
+ * The goldens this file can actually build a battle from.
+ *
+ * `goldens` stays the WHOLE promoted corpus, because the size assertion and the
+ * undrivable-set assertion are both about the corpus. Everything that drives a
+ * battle uses this list instead — see REPLAY_UNDRIVABLE below for why the two
+ * differ and why the difference is a finding rather than a tolerance.
+ */
+const replayableGoldens = goldens.filter((golden) => isReplayable(golden));
 
 /** The three melee bands, keyed the way the build assigns them. */
 const BANDS = Object.freeze([
@@ -209,8 +286,21 @@ test("every promoted golden replays through createTeamBattle/applyAction", () =>
   // The floor first: a loop over an empty listing asserts nothing at all, and
   // this repository has already lost 69 files to exactly that hole.
   assert.ok(goldens.length > 0, "the golden directory is empty; nothing below would run");
-  assert.equal(goldens.length, 22, "the golden corpus changed size; re-read what this file claims");
-  for (const golden of goldens) {
+  assert.equal(goldens.length, 23, "the golden corpus changed size; re-read what this file claims");
+
+  // The undrivable set is asserted in BOTH directions before anything is
+  // replayed, so a golden that quietly stops being replayable cannot hide in a
+  // loop that simply skips it.
+  const undrivable = goldens.filter((golden) => !isReplayable(golden)).map((golden) => golden.fixtureId).sort();
+  assert.deepEqual(
+    undrivable,
+    Object.keys(REPLAY_UNDRIVABLE).sort(),
+    "the set of goldens this file cannot drive changed; read REPLAY_UNDRIVABLE before touching this"
+  );
+
+  const replayable = goldens.filter(isReplayable);
+  assert.equal(replayable.length, 22, "the replayable corpus changed size");
+  for (const golden of replayable) {
     const { observed } = replayGolden(golden);
     assert.equal(observed.length, 1, `${golden.fixtureId}: exactly one action must resolve`);
     const [record] = observed;
@@ -225,7 +315,7 @@ test("every promoted golden replays through createTeamBattle/applyAction", () =>
 });
 
 test("the ordered channel consumes exactly the golden's tape, in order, and drains it", () => {
-  for (const golden of goldens) {
+  for (const golden of replayableGoldens) {
     const { battle, rngTape } = replayGolden(golden);
     assert.equal(
       battle.rngCursor,
@@ -245,7 +335,7 @@ test("the ordered channel consumes exactly the golden's tape, in order, and drai
 });
 
 test("the defender's battle state is the golden's measured state", () => {
-  for (const golden of goldens) {
+  for (const golden of replayableGoldens) {
     const { battle } = replayGolden(golden);
     const villain = combatantById(battle, "villain");
     const expected = golden.expected.state.villain;
@@ -273,8 +363,8 @@ test("the defender's battle state is the golden's measured state", () => {
 });
 
 test("a lethal golden ends the battle through the resolver's own elimination path", () => {
-  const lethal = goldens.filter((golden) => golden.expected.resultEvent !== null);
-  const survived = goldens.filter((golden) => golden.expected.resultEvent === null);
+  const lethal = replayableGoldens.filter((golden) => golden.expected.resultEvent !== null);
+  const survived = replayableGoldens.filter((golden) => golden.expected.resultEvent === null);
   assert.equal(lethal.length, 19);
   assert.equal(survived.length, 3, "the three misses");
 
@@ -302,7 +392,7 @@ test("a lethal golden ends the battle through the resolver's own elimination pat
 });
 
 test("the miss goldens reach the resolver as a zero-damage effect, not as no effect", () => {
-  for (const golden of goldens.filter((entry) => entry.expected.calculation.hit === false)) {
+  for (const golden of replayableGoldens.filter((entry) => entry.expected.calculation.hit === false)) {
     const { battle } = replayGolden(golden);
     const damage = battle.lastResolution.effects.filter((effect) => effect.kind === "damage");
     assert.equal(damage.length, 1, golden.fixtureId);
@@ -320,7 +410,7 @@ test("a killing blow leaves the attacker's state exactly as the golden measured 
   // `onEnterFrame` handlers (`+0x2035`, `+0x2042`, `+0x2049`) before the melee
   // branch's `struck`-gated `nextphase()` call (`+0x62c3` -> `+0x62e2`) can
   // fire, so a killing blow costs the attacker nothing at all.
-  const lethal = goldens.filter((golden) => golden.expected.resultEvent !== null);
+  const lethal = replayableGoldens.filter((golden) => golden.expected.resultEvent !== null);
   assert.ok(lethal.length >= 19, "the lethal goldens are what carry this assertion");
   for (const golden of lethal) {
     const { battle } = replayGolden(golden);
@@ -346,7 +436,7 @@ test("a non-lethal action DOES transition, by the map's own formula", () => {
   // is pinned to a literal as well as to the formula: the hero of every golden
   // is strength 10 / staminamax 110 / staminaleft 105, i.e. stamina 1, and a
   // normal attack costs round(10 * 2) = 20 against a regen of 1 + round(1/3).
-  const survived = goldens.filter((golden) => golden.expected.resultEvent === null);
+  const survived = replayableGoldens.filter((golden) => golden.expected.resultEvent === null);
   assert.equal(survived.length, 3, "the three misses");
   const literalFor = { 1: 96, 2: 86, 3: 76 };  // quick / normal / power, from 105
   for (const golden of survived) {
@@ -379,7 +469,7 @@ test("the defender neither pays nor regenerates: the per-turn mutation is attack
   // `nextphase` has no `game_defender` counterpart anywhere in the function
   // (map § "The per-turn mutation is attacker-only"). Any simulation that
   // regenerates both sides drifts from the build, so pin it.
-  for (const golden of goldens) {
+  for (const golden of replayableGoldens) {
     const { battle } = replayGolden(golden);
     const villain = combatantById(battle, "villain");
     assert.equal(
@@ -401,7 +491,7 @@ test("the rule set cites exactly the goldens this file replays", () => {
   // the resolver — not a list someone kept by hand.
   assert.deepEqual(
     [...SS2_GOLDEN_FIXTURE_IDS].sort(),
-    goldens.map((golden) => golden.fixtureId).sort()
+    replayableGoldens.map((golden) => golden.fixtureId).sort()
   );
   assert.deepEqual(
     goldens.map((golden) => `${golden.fixtureId}.json`).sort(),
@@ -411,7 +501,7 @@ test("the rule set cites exactly the goldens this file replays", () => {
 });
 
 test("replay is deterministic: the same tape and the same action reach the same hash", () => {
-  for (const golden of goldens.slice(0, 3)) {
+  for (const golden of replayableGoldens.slice(0, 3)) {
     const first = replayGolden(golden);
     const second = replayGolden(golden);
     assert.equal(

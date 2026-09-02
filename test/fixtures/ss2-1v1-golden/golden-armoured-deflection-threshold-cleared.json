@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "kind": "ss2-1v1-fixture",
+  "fixtureId": "golden-armoured-deflection-threshold-cleared",
+  "classification": "golden",
+  "build": {
+    "fingerprintSchemaVersion": 1,
+    "steamBuildId": 24807725,
+    "ss2Sha256": "77CB545C2061AB41246251467A4EDF5926AB6FD1DDD95DC9527D7BA9C45BB8CA"
+  },
+  "provenance": {
+    "kind": "licensed-observation",
+    "runtimeVerified": true,
+    "sourceRefs": [
+      "overlay:862/frame:52/DoAction@0x240c7f/checkattackroll",
+      "overlay:862/frame:52/DoAction@0x240c7f/damagecharacter",
+      "root:button:2069/condition:2"
+    ],
+    "observedAt": "2026-09-02T10:50:04Z",
+    "captureToolVersion": "ss2-capture/0.1.0",
+    "repetitions": 2,
+    "observationIds": [
+      "obs-onx1405-a1",
+      "obs-onx1521-a1"
+    ],
+    "observationDigests": [
+      "c3963c43f09136107894bf74170bd6df365af4d9b1b1b01fdfd334a5ba36bd22",
+      "36a21f41647634a3df7f87bf72ed2ac5d41c8748ced83d03dd0469719ad1811c"
+    ],
+    "captureManifestSha256": "4dd811e34e9609b235418339930761edf518ee70fb21a3e0c38402565621adfb",
+    "staged": "villain.defence=3,villain.herolevel=4,villain.vitality=2,villain.stamina=1,villain.hitpoints=80,villain.staminaleft=105,villain.armourclass=79,villain.armourclass_max=79,villain.helmet=6,villain.shoulderguard=1,villain.breastplate=0,villain.gauntlet=1,villain.greaves=2,villain.shinguard=0,villain.boot=0,villain.shield=0"
+  },
+  "scenario": {
+    "attackerSide": "hero",
+    "attackDirection": 5,
+    "result": null,
+    "hero": {
+      "attack": 1,
+      "defence": 1,
+      "strength": 10,
+      "charisma": 1,
+      "magicka": 1,
+      "min_damage": 21,
+      "max_damage": 23,
+      "hitpoints": 300,
+      "hitpointsmax": 300,
+      "staminaleft": 105,
+      "staminamax": 110,
+      "armourclass": 0,
+      "armourclass_max": 0,
+      "gladiator_dir": "right"
+    },
+    "villain": {
+      "defence": 3,
+      "hitpoints": 80,
+      "hitpointsmax": 80,
+      "staminaleft": 105,
+      "staminamax": 110,
+      "armourclass": 79,
+      "armourclass_max": 79,
+      "helmet": 6,
+      "shoulderguard": 1,
+      "greaves": 2,
+      "gauntlet": 1,
+      "gladiator_dir": "left"
+    },
+    "fightMode": "tournament"
+  },
+  "samples": [
+    {
+      "label": "hit-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    },
+    {
+      "label": "normal-damage-roll",
+      "source": "randomBetween",
+      "min": 21,
+      "max": 23,
+      "value": 22
+    },
+    {
+      "label": "normal-critical-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 20,
+      "value": 20
+    },
+    {
+      "label": "critical-deflection-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 93
+    },
+    {
+      "label": "armour-removal-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 12
+    },
+    {
+      "label": "knockback-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 4,
+      "value": 1
+    },
+    {
+      "label": "enchantment-potency-roll",
+      "source": "randomBetween",
+      "min": 1,
+      "max": 100,
+      "value": 100
+    }
+  ],
+  "expected": {
+    "calculation": {
+      "attackDirection": 5,
+      "chance": 42,
+      "rollNeeded": 58,
+      "diceroll": 100,
+      "hit": true,
+      "selectedDamage": 22,
+      "criticalSample": 20,
+      "inheritedCritical": false,
+      "deflectionRoll": 93,
+      "deflectionThreshold": 93,
+      "criticalCleared": true,
+      "criticalSampleAfterDeflection": 0,
+      "dispatchedMethod": "normal",
+      "effectiveDamageMethod": "normal"
+    },
+    "mutation": {
+      "armourDamage": 22,
+      "hitpointDamage": 0,
+      "staminaBonus": 0,
+      "armourRemovalRoll": 12,
+      "armourRemovals": [],
+      "knockback": {
+        "roll": 1,
+        "force": null,
+        "animation": false
+      },
+      "enchantmentRoll": 100,
+      "statusApplied": null
+    },
+    "mutationTrace": [
+      {
+        "sequence": 1,
+        "path": "/villain/armourclass",
+        "before": 79,
+        "after": 57,
+        "reason": "physical-damage"
+      }
+    ],
+    "resultEvent": null,
+    "state": {
+      "hero": {
+        "hitpoints": 300,
+        "armourclass": 0,
+        "armourclass_max": 0,
+        "staminaleft": 105,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 0,
+        "shoulderguard": 0,
+        "breastplate": 0,
+        "gauntlet": 0,
+        "greaves": 0,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "villain": {
+        "hitpoints": 80,
+        "armourclass": 57,
+        "armourclass_max": 79,
+        "staminaleft": 105,
+        "burning": false,
+        "frozen": false,
+        "poison": false,
+        "life_stolen": false,
+        "taunted1": false,
+        "taunted2": false,
+        "helmet": 6,
+        "shoulderguard": 1,
+        "breastplate": 0,
+        "gauntlet": 1,
+        "greaves": 2,
+        "shinguard": 0,
+        "boot": 0,
+        "shield": 0
+      },
+      "result": null
+    }
+  }
+}

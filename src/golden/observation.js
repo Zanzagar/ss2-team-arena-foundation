@@ -15,6 +15,7 @@
 import { createHash } from "node:crypto";
 
 import { RollSource, createOrderedRollTape } from "./ordered-rolls.js";
+import { SS2_STAGED_MAX_LENGTH, parseStagedDeclaration } from "./staged-declaration.js";
 import {
   SS2_BUILD_SHA256,
   SS2_PROJECTED_COMBATANT_KEYS,
@@ -155,10 +156,8 @@ const SPELL_ANIMATION_LABEL_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,31}$/;
  * would let a comma or an `=` into a value and make the list ambiguous to
  * split.
  */
-const STAGED_ENTRY_PATTERN =
-  /^(hero|villain)\.([a-z][a-z0-9_]{0,63})=(-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?|true|false)$/;
-/** Roughly 30 entries. A staging list longer than this is a defect, not a scenario. */
-export const SS2_STAGED_MAX_LENGTH = 512;
+/** The staging grammar now lives in `staged-declaration.js`; see that file for why. */
+export { SS2_STAGED_MAX_LENGTH };
 
 export class ObservationError extends Error {
   constructor(message, options = {}) {
@@ -247,37 +246,17 @@ export const SS2_SPELL_HOOK_FOR_STATIC_REASON = Object.freeze({
  * fact would mean two records that claim the same thing digest differently, and
  * a reader could not tell "staged nothing" from "forgot to say".
  */
+/**
+ * The observation-side spelling of the staging grammar.
+ *
+ * Kept as a named export because `capture-ingest.js` and this module's own
+ * `assertObservation` both call it, and because the promotion gate's refusal
+ * message names it. The grammar itself moved to `staged-declaration.js` so that
+ * `run-1v1-fixture.js` can validate `provenance.staged` with the SAME parser
+ * without importing this module, which would be a cycle.
+ */
 export function parseSs2StagedDeclaration(text, path = "capture.staged") {
-  const reject = (why) => {
-    throw new ObservationValidationError(
-      `${path} must be a non-empty comma-separated "side.field=value" list in application order, ` +
-      `for example "hero.strength=40,villain.helmet=6" — ${why}. A capture that staged nothing ` +
-      "omits the field entirely; the empty string is not a second spelling of that."
-    );
-  };
-  if (typeof text !== "string") reject(`got ${JSON.stringify(text)}`);
-  if (text.length === 0) reject("it is empty");
-  if (text.length > SS2_STAGED_MAX_LENGTH) {
-    reject(`it is ${text.length} characters, past the ${SS2_STAGED_MAX_LENGTH} cap`);
-  }
-  const entries = [];
-  const seen = new Set();
-  for (const part of text.split(",")) {
-    const match = STAGED_ENTRY_PATTERN.exec(part);
-    if (!match) reject(`the entry ${JSON.stringify(part)} is not side.field=value`);
-    const [, side, field, literal] = match;
-    const key = `${side}.${field}`;
-    if (seen.has(key)) {
-      reject(`${key} is listed twice — each staged field appears once, carrying the value that stuck`);
-    }
-    seen.add(key);
-    entries.push({
-      side,
-      field,
-      value: literal === "true" ? true : literal === "false" ? false : Number(literal)
-    });
-  }
-  return entries;
+  return parseStagedDeclaration(text, path, ObservationValidationError);
 }
 
 function isPlainObject(value) {
