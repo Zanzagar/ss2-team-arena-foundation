@@ -41,6 +41,17 @@ there never reaches the next reader.
   to the observed value. This is the single most tempting wrong move here.
 - **Licensed SWFs are read-only** and hash-verified before and after every
   capture. Never copy, export or commit game assets or extracted scripts.
+- **NEVER SACRIFICE ANY INTEGRITY OF THE RECORD BECAUSE THE REPO IS PUBLIC.**
+  These are two different rules and confusing them would be the worst mistake
+  available here. The rule above is about LICENCE AND ETHICS — do not reproduce
+  game content — and it holds whether this repository is public or private.
+  Publication is not a reason to trim, soften, round, omit or delay a
+  measurement, a failure, a retraction or a number. **If something must be
+  recorded and cannot safely be public, the repo goes private; the record does
+  not get weaker.** Audited 2026-09-02: nothing withheld to date is
+  load-bearing — display names, set labels and refusal bubble text are content
+  no arithmetic reads, and where a "raw literal is not reproduced" its every
+  value is tabulated beside the note.
 - **Never shortcut the game's own frames.** Skipping the prologue tripped the
   game's own character-tampering screen.
 - `validate-vehicle.ps1` must PASS after ANY wrapper edit — but read what it does
