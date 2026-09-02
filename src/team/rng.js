@@ -18,6 +18,8 @@
  * the placeholder rule set and must not appear in a runtime-verified tape.
  */
 
+import { fnv1a } from "../common/fnv1a.js";
+
 export const RollSource = Object.freeze({
   RANDOM_BETWEEN: "randomBetween",
   RANDOM_NUMBER: "randomNumber",
@@ -161,6 +163,53 @@ export class OrderedRngChannel {
   /** Diagnostic-only ordered record of every draw. Never part of a state hash. */
   get journal() {
     return this.#journal.map((entry) => ({ ...entry }));
+  }
+
+  /**
+   * A commitment to the samples ALREADY DRAWN, in order — or `null` when this
+   * channel is seeded.
+   *
+   * ## Why this exists
+   *
+   * A tape channel has no generator state: the constructor sets `#state = 0`
+   * and leaves it there. `toTeamWireState` projected only `rngState` and
+   * `rngCursor`, so **two peers holding different tapes hashed identically**.
+   * Reproduced before this was added: two battles whose tapes differed only in
+   * an unconsumed sample both hashed to `2b429191`, with `rngState 0` and
+   * `rngCursor 0` on each side.
+   *
+   * ## Why the CONSUMED prefix and not the remainder
+   *
+   * Digesting the REMAINING tape detects a divergence one action earlier, and
+   * that is not free: it publishes a commitment to randomness nobody has drawn
+   * yet, and the labels and bounds are dictated by the rule set, so the search
+   * space is small. Measured 2026-09-02: with two samples remaining the next
+   * two values were recovered from the digest in 600 candidates.
+   *
+   * **Splitting the wire message from the hash preimage does NOT fix that** —
+   * peers must exchange the hash for a desync check to exist at all, and the
+   * same search recovered the values from the transmitted hash in 436 tries.
+   * The leak is intrinsic to detecting divergence in undrawn samples.
+   *
+   * So this commits to the prefix that has already been drawn, which both peers
+   * already saw, and therefore leaks nothing. The cost is honest and stated:
+   * **a divergence in samples neither peer has drawn yet is undetectable**, and
+   * no projection can close that without the leak above. What it DOES close is
+   * every divergence that has already happened — including two tapes whose
+   * already-drawn sample differed while producing identical visible state,
+   * which neither a mode+count projection nor a remainder digest catches.
+   *
+   * Decided by the owner 2026-09-02 after both options were costed.
+   *
+   * Sample identity, not just value: a peer that drew the right number under
+   * the wrong label has diverged, and this notices.
+   */
+  get drawnDigest() {
+    if (this.#mode !== "tape") return null;
+    const drawn = this.#samples.slice(0, this.#cursor)
+      .map((sample) => `${sample.label}|${sample.source}|${sample.min}|${sample.max}|${sample.value}`)
+      .join(String.fromCharCode(30));
+    return fnv1a(`${this.#cursor}\u001d${drawn}`);
   }
 
   snapshot() {

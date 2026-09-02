@@ -19,6 +19,7 @@ import {
   completionTokenMatchesOutcome,
   ControllerKind,
   controllerOf,
+  createOrderedRngChannel,
   createTeamBattle,
   currentCombatant,
   DEFAULT_STATS,
@@ -1866,4 +1867,115 @@ test("a drawn battle settles through the resolver's own two gates", () => {
   assert.equal(campaignSettlement(battle).reason, ResultReason.DRAW);
   // Idempotent, exactly as a decided battle is.
   assert.equal(acknowledgeResultAnimation(battle, ackFor(battle)), false);
+});
+
+/* ------------------------------------------------------------------ */
+/* The RNG tape inside the state hash (decided by the owner 2026-09-02) */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A tape channel has no generator state — `rng.js` sets `#state = 0` and leaves
+ * it — so `toTeamWireState`'s `rngState`/`rngCursor` pair let two peers holding
+ * DIFFERENT tapes agree they are in sync. `toTeamWireState` now also projects
+ * `rngMode` and `rngDrawn`, a digest of the samples ALREADY DRAWN, in tape mode
+ * only.
+ *
+ * Why the consumed prefix and not the remainder: digesting the REMAINING tape
+ * detects a divergence one action earlier and publishes a brute-forceable
+ * commitment to randomness nobody has drawn yet (measured: two remaining
+ * samples recovered in 600 candidates), and moving the digest out of the wire
+ * message does not help, because peers must exchange the hash for a desync
+ * check to exist at all. See `OrderedRngChannel.drawnDigest`.
+ */
+const unitSample = (value, label = "hit-roll") => ({ label, source: "unit", min: 0, max: 1, value });
+
+const tapeBattle = (tape) => createTeamBattle({
+  seed: 1,
+  rngTape: tape,
+  rules: placeholderTeamRules,
+  teams: [
+    { id: "red", combatants: [{ id: "r1", stats: { agility: 5 } }] },
+    { id: "blue", combatants: [{ id: "b1", stats: { agility: 4 } }] }
+  ]
+});
+
+test("two peers whose DRAWN sample differed no longer hash the same", () => {
+  // The case every other candidate projection misses: the visible state is
+  // identical -- same health, same cursor -- and only the consumed sample
+  // differs. Both rolls miss, so nothing downstream records the difference.
+  const run = (value) => {
+    const battle = tapeBattle([unitSample(value), unitSample(0.5)]);
+    const action = legalActions(battle)[0];
+    applyAction(battle, { ...action, actorId: currentCombatant(battle).id });
+    return {
+      hash: combatStateHash(battle),
+      health: battle.teams[1].combatants[0].health,
+      cursor: battle.rngCursor
+    };
+  };
+  const a = run(0.9);
+  const b = run(0.95);
+  assert.equal(a.health, b.health, "the fixture must be a same-state case or it proves nothing");
+  assert.equal(a.cursor, b.cursor, "same cursor, or the old projection would have caught it anyway");
+  assert.notEqual(a.hash, b.hash, "a divergent drawn sample must change the hash");
+});
+
+test("the digest commits to sample IDENTITY, not just to drawn values", () => {
+  // A peer that drew the right NUMBER under the wrong label has diverged, and a
+  // value-only digest would call that in sync. Driven on the channel directly,
+  // because the placeholder rule set draws exactly one label.
+  const channel = (label) => createOrderedRngChannel({
+    tape: [{ label, source: "unit", min: 0, max: 1, value: 0.5 }]
+  });
+  const left = channel("hit-roll");
+  const right = channel("block-roll");
+  assert.equal(left.drawnDigest, right.drawnDigest, "before any draw both prefixes are empty");
+  left.unit("hit-roll");
+  right.unit("block-roll");
+  assert.equal(left.cursor, right.cursor, "same count drawn");
+  assert.notEqual(left.drawnDigest, right.drawnDigest, "the label must be inside the commitment");
+
+  // And the same label with a different value must differ too.
+  const other = createOrderedRngChannel({
+    tape: [{ label: "hit-roll", source: "unit", min: 0, max: 1, value: 0.6 }]
+  });
+  other.unit("hit-roll");
+  assert.notEqual(left.drawnDigest, other.drawnDigest, "the value must be inside it as well");
+});
+
+/**
+ * THE HONEST LIMIT, PINNED SO NOBODY MISTAKES IT FOR A BUG.
+ *
+ * A divergence in samples NEITHER peer has drawn yet is undetectable, and no
+ * projection can close it without committing to undrawn randomness. This test
+ * asserts that limit deliberately: if someone later "fixes" it by digesting the
+ * remainder, this fails and they must read why first.
+ */
+test("a divergence in the UNDRAWN tail is deliberately invisible", () => {
+  const a = tapeBattle([unitSample(0.5), unitSample(0.1)]);
+  const b = tapeBattle([unitSample(0.5), unitSample(0.99)]);
+  assert.equal(
+    combatStateHash(a),
+    combatStateHash(b),
+    "if this now differs, someone projected the REMAINING tape -- read " +
+    "OrderedRngChannel.drawnDigest before keeping the change"
+  );
+});
+
+test("a seeded battle's projection is untouched, so no pinned hash moves", () => {
+  const seeded = createTeamBattle({
+    seed: 7,
+    rules: placeholderTeamRules,
+    teams: [
+      { id: "red", combatants: [{ id: "r1", stats: { agility: 5 } }] },
+      { id: "blue", combatants: [{ id: "b1", stats: { agility: 4 } }] }
+    ]
+  });
+  const wire = toTeamWireState(seeded);
+  assert.equal(Object.hasOwn(wire, "rngMode"), false, "seeded battles must not gain fields");
+  assert.equal(Object.hasOwn(wire, "rngDrawn"), false);
+  assert.equal(seeded.rng.drawnDigest, null);
+  // And the presence of those fields is itself what separates a tape peer from
+  // a seeded peer sitting at state 0 / cursor 0, who would otherwise collide.
+  assert.equal(Object.hasOwn(toTeamWireState(tapeBattle([unitSample(0.5)])), "rngMode"), true);
 });

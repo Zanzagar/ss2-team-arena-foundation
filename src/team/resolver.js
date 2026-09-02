@@ -33,6 +33,7 @@ import {
   EliminationEvent,
   snapshotLiveness
 } from "./elimination.js";
+import { fnv1a } from "../common/fnv1a.js";
 import { BattleError } from "./errors.js";
 import { placeholderTeamRules } from "./placeholder-rules.js";
 import { buildRoster, initiativeOrder } from "./roster.js";
@@ -507,6 +508,22 @@ export function toTeamWireState(battle) {
     seed: battle.seed,
     rngState: battle.rngState,
     rngCursor: battle.rngCursor,
+    // A tape channel has no generator state — `rngState` is a constant 0 — so
+    // these two fields alone let two peers holding DIFFERENT tapes agree they
+    // are in sync. Added 2026-09-02; see `OrderedRngChannel.drawnDigest` for
+    // why this commits to the CONSUMED prefix rather than the remainder, and
+    // what that deliberately cannot detect.
+    //
+    // Projected ONLY in tape mode, and that asymmetry is load-bearing twice
+    // over: a seeded channel's `rngState` is already a commitment to its whole
+    // stream, so the digest would be redundant; and their PRESENCE is itself
+    // the discriminator between a tape peer and a seeded peer that happens to
+    // sit at state 0 and cursor 0, who would otherwise hash identically. It
+    // also leaves every seeded battle's projection byte-identical, so no
+    // pinned hash in the suite moves.
+    ...(battle.rng.mode === "tape"
+      ? { rngMode: "tape", rngDrawn: battle.rng.drawnDigest }
+      : {}),
     rules: {
       id: battle.rulesDescriptor.id,
       contractVersion: battle.rulesDescriptor.contractVersion,
@@ -533,14 +550,11 @@ export function toControllerState(battle) {
   return battle.controllers.toJSON();
 }
 
-export function fnv1a(input) {
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
+/**
+ * Re-exported, not defined here: `src/team/rng.js` needs it to commit to its
+ * own drawn samples and cannot import this module, which imports it.
+ */
+export { fnv1a };
 
 /** Controller-independent consistency check for host-authoritative play. */
 export function combatStateHash(battle) {

@@ -10,13 +10,19 @@ agentRuns:    wf_35a0c78d-005 (question-diverse investigation of ranked items 2-
               the hash-verified SWF or by direct measurement before anything
               was changed.
 branch:       arena/champion-capture
-commits:      c22e549, b7641da, 20aab4d, 1106ccd (4, NOT pushed —
-              `github/arena/champion-capture` is still at 2f8e4b8)
-suite:        703 tests / 702 passed / 0 failed / 1 skipped (WSL, fresh-clone
-              profile), from 693 at session start
+commits:      c22e549, b7641da, 20aab4d, 1106ccd, 118a95c, + the RNG-tape
+              commit (6). Pushed to `github/arena/champion-capture` at the
+              owner's explicit request; `main` untouched, no PR opened.
+suite:        708 tests / 707 passed / 0 failed / 1 skipped (WSL, fresh-clone
+              profile), from 693 at session start.
+              **MEASURED at the end, not carried forward — and carrying it
+              forward is exactly what went wrong mid-session: commits 1106ccd
+              and 118a95c say "703 / 702" and were already stale by one when
+              written. Re-measure; never copy this line.**
 environment:  WSL2, node v26.3.1, ~/projects/swords-and-sandals-2-multiplayer
-supersedes:   2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it (its ranked
-              items 2, 3 and 5; item 4 is answered but left to the owner)
+supersedes:   2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it (ALL FOUR of
+              its ranked items 2-5: 2 refuted then fixed for another reason,
+              3 and 5 done, 4 decided by the owner and landed)
 ---
 # Handoff — the wave refuted more of the brief than it confirmed
 
@@ -34,8 +40,8 @@ check with `git log --date=iso-local`.**
 Ranked item 2 was a false alarm and the code was already right; the real defect
 was three lines below it; ranked item 3 was five files rather than two and one of
 them sits inside 22 goldens' provenance digest; ranked item 5's premise was
-false; and the remedy this project had written down for ranked item 4 points the
-wrong way.
+false; and the remedy this project had written down for ranked item 4 pointed
+the wrong way, so the owner chose the other one and it is landed.
 
 ## What the wave broke, and what that changed
 
@@ -104,7 +110,7 @@ that `weapon` is not declarable and the table is not transcribed. **An open
 omission, not a closed impossibility** — and the difference decides whether
 anyone tries.
 
-### Item 4 — the RNG tape — ANSWERED, and the answer inverts. **Your call.**
+### Item 4 — the RNG tape — ANSWERED, DECIDED AND LANDED
 
 The collision is real and reproduced: two battles whose tapes differ only in an
 unconsumed sample both hash to `2b429191`. But this project's written remedy —
@@ -117,7 +123,20 @@ including the case all three candidate designs miss, two tapes whose
 already-drawn sample differed while producing identical state.
 
 **The decision is "detect future divergence early and leak future rolls, or
-detect only past divergence and leak nothing".** Nothing was landed.
+detect only past divergence and leak nothing".**
+
+**DECIDED BY THE OWNER 2026-09-02 AND LANDED: the CONSUMED-PREFIX digest.**
+`toTeamWireState` now projects `rngMode` and `rngDrawn` **in tape mode only**,
+and that asymmetry is load-bearing twice: a seeded channel's `rngState` is
+already a commitment to its whole stream, and the fields' PRESENCE is what
+separates a tape peer from a seeded peer sitting at state 0 / cursor 0. No
+pinned hash moved. `OrderedRngChannel.drawnDigest` carries the reasoning.
+
+Demonstrated, not argued: two battles with identical health and cursor whose
+already-drawn sample differed now hash differently (`e393ec2e` vs `44e5d85d`)
+where they previously collided. **The honest limit is pinned by a test that
+asserts the undrawn tail stays invisible** — so anyone "fixing" that by
+digesting the remainder has to delete an assertion explaining the leak.
 
 ## Capture prep — a blocker that was never real
 
@@ -153,16 +172,13 @@ has no whitelist, so it can already write them.
    level.** The command is above. Supervised, serial, save-mutating; needs the
    owner. Sync `/mnt/c/ss2-capture` first — it is at `98482b6`, many commits
    behind.
-2. **Decide item 4** (consumed-prefix digest vs. remainder digest). One
-   paragraph of your judgement unblocks a resolver-contract change that is
-   otherwise fully costed.
-3. **Model enchantment DAMAGE.** `weapon_enchantment_damage` (`+0x320c`) and
+2. **Model enchantment DAMAGE.** `weapon_enchantment_damage` (`+0x320c`) and
    `secondary_weapon_enchantment_damage` (`+0x3326`) are both dropped, so an
    enchanted weapon applies a status and deals no magic damage. The secondary is
    missing from the adapter catalogue too — an asymmetry, not a decision.
-4. **Transcribe the static weapon table** and make `weapon` declarable, which
+3. **Transcribe the static weapon table** and make `weapon` declarable, which
    closes gap 3 rather than restating it.
-5. **The `COMBATANT_KEYS` schema question is unchanged and still yours.**
+4. **The `COMBATANT_KEYS` schema question is unchanged and still yours.**
 
 ## Traps from this session
 

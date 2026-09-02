@@ -998,8 +998,10 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
-► **STATE AS OF 2026-09-02 00:07. Suite is 703 / 702 / 0 / 1 (fresh-clone
-  profile), from 693.** Ranked items 2, 3 and 5 of the `…-0130` brief are DONE
+► **STATE AS OF 2026-09-02 00:30. Suite is 708 / 707 / 0 / 1 (fresh-clone
+  profile), from 693. MEASURE IT, DO NOT COPY THIS LINE** — two commit messages
+  this session said "703 / 702" and were stale by one when written, which is the
+  same error the previous session's last commit existed to fix. Ranked items 2, 3 and 5 of the `…-0130` brief are DONE
   or REFUTED and item 4 is answered; see
   `docs/handoffs/2026-09-02-0007--the-wave-refuted-more-than-it-confirmed.md`.
   **What is left, in order:**
@@ -1015,13 +1017,11 @@ output and names the wrapper source hash it compiled.
      diverge. Raise the odds first by pinning the approach-step count and
      extending `-StageVillain` to `speed` and `strength` (`applyStageSide` has
      no whitelist, so it can already write them).
-  2. **DECIDE THE RNG-TAPE QUESTION.** Costed and byte-backed; the direction
-     this file used to prescribe is wrong. See § "Found 2026-09-02".
-  3. **Model enchantment DAMAGE** — `+0x320c` and `+0x3326`, both dropped, so an
+  2. **Model enchantment DAMAGE** — `+0x320c` and `+0x3326`, both dropped, so an
      enchanted weapon applies a status and deals no magic damage.
-  4. **Transcribe the static weapon table and make `weapon` declarable**, which
+  3. **Transcribe the static weapon table and make `weapon` declarable**, which
      closes gap 3 in `ss2-rules.js` rather than restating it.
-  5. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
+  4. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
 
 ► **ITEMS 1 AND 2 OF THE 2026-09-01 BRIEF ARE DONE (2026-09-02).**
   `src/team/ss2-rules.js` exists and the 22 goldens replay through the resolver.
@@ -1211,8 +1211,9 @@ the one fact that would settle it.
   found it — reverting that one line and running all of
   `capture-campaign.test.js` under `az-AZ` passed **76 of 76**.
 
-- **The RNG tape is not inside the hash — CONFIRMED, and the remedy this file
-  proposed points the WRONG WAY. Still open; it is the owner's decision.**
+- ~~**The RNG tape is not inside the hash.**~~ **CLOSED 2026-09-02 with the
+  CONSUMED-PREFIX digest, decided by the owner. The remedy this file used to
+  prescribe pointed the WRONG WAY and was not taken.**
   The collision is real and was reproduced directly: two battles whose tapes
   differ only in an UNCONSUMED sample both hash to `2b429191`, with
   `rngState 0 / rngCursor 0` on both sides (`rng.js:126` sets `#state = 0` for
