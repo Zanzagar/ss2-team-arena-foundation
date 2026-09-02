@@ -1678,6 +1678,118 @@ The boulder total is therefore 400–800 only if every scheduled impact resolves
 All of these enter the armour-to-hitpoint overflow path; the same
 breastplate-based stamina gain applies to hitpoint-applicable damage.
 
+
+### The enchantment effect is a SKIPPED TURN, not an on-hit bonus (byte-read 2026-09-02)
+
+`damagecharacter`'s enchantment proc — gated on
+`randomBetween(1,100) < game_attacker.weapon_enchantment_potency * 10` at
+`+0x1bf1`, `+0x1c09..+0x1c22` — writes **one boolean on `game_defender`**
+(register 3: the same object `check_stats` is called on at `+0x193c` and whose
+`hitpoints` the death gate reads at `+0x194a`). **The block `+0x1bf1..+0x1dd2`
+contains no damage arithmetic and no call to `magic_damage_character` at all** —
+it is four `SetMember`s of `true`. Types map 2 → `burning`, 3 → `frozen`,
+4 → `poison`, 5 → `life_stolen`.
+
+The damage arrives on the AFFLICTED COMBATANT'S NEXT TURN, and costs them the
+turn.
+
+**Where the flag is consumed.** Both sides clear the flag in the same statement
+that turns it into the turn's decision, in the order frozen, burning, poison,
+life_stolen, as four SEQUENTIAL `if`s rather than an `else if` chain:
+
+| side | block | flag test / clear | decision written |
+| --- | --- | --- | --- |
+| hero | `sprite:862[overlay]/frame:1/DoAction@0x236941` | `+0x0e79`, `+0x0ec5`, `+0x0f11`, `+0x0f5d` | `getphase("frozen")` `+0x0e81`, `("burning")` `+0x0ecd`, `("poisoned")` `+0x0f19`, `("life_stolen")` `+0x0f65` |
+| villain | `sprite:862[overlay]/frame:52/DoAction@0x23f835` | `+0x1348`, `+0x1386`, `+0x13c4`, `+0x1402` | `villaindecisionA =` `+0x1370`, `+0x13ae`, `+0x13ec`, `+0x142a` |
+
+`getphase` (`+0x36a` of the frame-1 block) assigns `decisionA` and jumps to the
+`heroactions` label.
+
+**Because the tests are sequential, a combatant carrying two statuses loses
+one.** Every set flag is cleared, but only the LAST match sets the decision — so
+frozen + burning consumes the frozen flag and never plays a frozen phase.
+
+**Three spellings for one effect, and they are not interchangeable.** The FIELD
+is `poison`; the DECISION label is `"poisoned"`. `life_stolen` keeps its
+spelling as a decision but reaches `magic_damage_character` as `"lifesteal"`.
+
+**The status phase itself** — `sprite:862[overlay]/frame:52/DoAction@0x240c7f`,
+inside the `attacker.onEnterFrame` closure (`DefineFunction2` at `+0x36ae`),
+four arms gated on `phase_decision`:
+
+| `phase_decision` | guard | `damage_method` | `bonus_frame` | primary read | secondary read |
+| --- | --- | --- | ---: | --- | --- |
+| `frozen` | `+0x529d` | `"frozen"` | 5 | `+0x532f` | `+0x536b` |
+| `life_stolen` | `+0x53d1` | `"lifesteal"` | 6 | `+0x5463` | `+0x549f` |
+| `poisoned` | `+0x5505` | `"poisoned"` | 7 | `+0x5597` | `+0x55d3` |
+| `burning` | `+0x5639` | `"burning"` | 4 | `+0x56cb` | `+0x5707` |
+
+Each arm, taking `frozen` as the worked example:
+
+```text
+if (phase_decision != "frozen") skip the arm                       // +0x529d
+attacker_clip.crowd_action = 0                                     // +0x52af
+game_attacker.staminacost = 0                                      // +0x52c0  <- no stamina cost
+if (attacker.struck != null) {                                     // +0x52d5
+    attacker.struck = false                                        // +0x52ec
+    attacker.gotoAndPlay("frozen")                                 // +0x52fa
+    if (game_attacker.equipped_weapon == 1)                        // +0x530e
+        magic_damage_character(<swapped roles>, "frozen", 5,
+                               game_defender.weapon_enchantment_damage)   // +0x532f
+    else
+        magic_damage_character(<swapped roles>, "frozen", 5,
+                               game_defender.secondary_weapon_enchantment_damage)  // +0x536b
+}
+if (attacker.struck != true) { attacker.struck = null; nextphase() } // +0x539c / +0x53b4
+```
+
+**THE ROLE OPERANDS ARE DELIBERATELY CROSSED, and reading them as a wrong-side
+bug is the trap here.** There are eleven `magic_damage_character` call sites:
+eight enchantment (`+0x5354`, `+0x5390`, `+0x5488`, `+0x54c4`, `+0x55bc`,
+`+0x55f8`, `+0x56f0`, `+0x572c`) and three spell (`+0x85af`, `+0x88e5`,
+`+0x91c1`). `CallFunction` pops the name, then the count, then the arguments, so
+the LAST value pushed is argument one:
+
+| | spell, `+0x85af` | enchantment, all eight |
+| --- | --- | --- |
+| `defender` | `defender` clip | **`attacker` clip** |
+| `attacker` | `attacker` clip | **`defender` clip** |
+| `game_defender` | `game_defender` | **`game_attacker`** |
+| `game_attacker` | `game_attacker` | **`game_defender`** |
+
+The spell calls match this section's signature exactly; the enchantment calls
+invert all four. **That is required, not broken.** The callee damages its own
+`game_defender` PARAMETER, so a spell hits the victim and an enchantment hits
+the phase's ACTOR — and in a status phase the actor *is* the victim. Anyone who
+"fixes" the ordering moves the damage onto the wrong gladiator.
+
+**What IS odd, and survives that explanation:** the primary/secondary SELECTOR
+at `+0x530e` reads `game_attacker.equipped_weapon` — the VICTIM's slot — while
+the value it selects is a field of `game_defender`, the INFLICTOR. Which of the
+inflictor's two weapons afflicted you cannot depend on which weapon you are
+holding. Same family as the proc gate reading the primary potency for both
+slots. Reproduce it; do not correct it.
+
+`staminacost` is forced to 0 but `nextphase()` still runs, so the
+phase-transition stamina gain and heal both apply: **a status turn is net
+positive on stamina and hitpoints except for the tick itself.**
+
+`weapon_enchantment_damage = ceil(weapon_max_damage / 3 *
+weapon_enchantment_potency)` (`battlevalues` `+0x320c`); the secondary is the
+same from `secondary_weapon_max_damage` and
+`secondary_weapon_enchantment_potency` (`+0x3326`).
+
+**Runtime backing, and its exact limit.** The four status phases DO occur in
+this project's own archive: 67 `{"t":"var","name":"phase_action","value":"…"}`
+entries — poisoned 33, frozen 19, burning 14, life_stolen 1 — across 14
+rufflelogs in five session families (`arena-staged-1/2`, `arena-tourn-2`,
+`session-champ-n1`, `arena-champ-2`). **None of those traces armed a capture
+window and none records any other variable**, so the phases are observed and no
+value from them is measured. The wrapper's `DEFAULT_WATCH_FIELDS` already
+carries `burning`, `frozen`, `poison`, `life_stolen` and `hitpoints`, so
+capturing one needs no new flag — only a window armed while a status phase is
+the decision.
+
 ## Spell and vanilla AI surface
 
 `villainChooseAction` is another anonymous overlay-frame-52 function. It binds
