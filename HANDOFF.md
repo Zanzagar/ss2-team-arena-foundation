@@ -1044,9 +1044,55 @@ output and names the wrapper source hash it compiled.
      no whitelist, so it can already write them).
   2. **Model enchantment DAMAGE** — `+0x320c` and `+0x3326`, both dropped, so an
      enchanted weapon applies a status and deals no magic damage.
-  3. **Transcribe the static weapon table and make `weapon` declarable**, which
-     closes gap 3 in `ss2-rules.js` rather than restating it.
+  3. ~~**Transcribe the static weapon table and make `weapon` declarable**,
+     which closes gap 3 in `ss2-rules.js` rather than restating it.~~
+     ► **THE FIRST HALF IS ALREADY DONE AND THE ITEM AS WRITTEN WOULD BURN A
+       SESSION REDOING IT. Corrected 2026-09-02.**
+       [`docs/integration/ss2-item-tables.md`](docs/integration/ss2-item-tables.md)
+       has carried the transcription since 2026-08-30: §2.3 tabulates weapon
+       ids 1-80 and §2.4 ids 0 and 201-220 — **90 rows, each with the
+       instruction offset of its own literal** — §2.1 gives the meaning of
+       every array index (`[0]` type, `[1]` display name, `[2]` weight and
+       `attack_speed`, `[3]` min damage, `[4]` max damage, `[5]` range
+       multiplier), and §5 does the same for armour. It also SETTLES the
+       licensing boundary this work needs: **display-name string literals are
+       game content and are not reproduced; items are identified by id only.**
+       I re-read two rows from the bytes independently — id 22 at `+0x4174`
+       and id 24 at `+0x41c6` — and both match the document exactly. **The
+       other 88 are unchecked by anyone**, so the real first step is a
+       MECHANICAL diff of the document against the build, not a transcription.
+       Neither `ss2-rules.js`'s gap 3 nor this list mentioned that the file
+       exists; both said "the table is not transcribed".
+
+       What is genuinely left: verify the 90 rows mechanically, get the table
+       into a code module with a mechanism that keeps it honest, and make
+       `weapon` declarable (`SS2_RESOURCE_NAMES`, `SS2_RESOURCE_DEFAULTS`,
+       `CANONICAL_RESOURCE_SOURCES`, `SS2_PROJECTED_COMBATANT_KEYS`).
   4. **The `COMBATANT_KEYS` schema question is unchanged and still the owner's.**
+
+► **FIVE LIVE INSTRUCTIONS SIT IN `ss2-item-tables.md` §9 THAT THIS LIST HAS
+  NEVER CARRIED, AND AT LEAST TWO ARE STILL UNFIXED (checked 2026-09-02).**
+  The head's own rule is that a live instruction which is not represented up
+  here gets HOISTED, and that rule was written about the archive line — but a
+  side document freezes the same way a handoff does. §9 was written 2026-08-30
+  and says "not made — other tracks own these files". Two I checked directly:
+
+  - **§9.1 — `ss2-capture-wrapper.as`'s `shop-open` must call
+    `shop["item" + shopItem].onRollOver()` before `.onRelease()`.** It still
+    does not; `onRollOver` appears nowhere in the wrapper. Without it
+    `itemnumber`, `itemtype` and `itemcost` are never written, and §9.1 names
+    the observed consequences in this project's OWN capture logs: `itemcost`
+    `NaN`, `itemnumber` stuck at 20, `hero.weapon` set to 20 whichever id was
+    pressed, and staged gold repaired down by `check_for_nan`. **This is a
+    wrapper edit, so it belongs to a supervised window with
+    `validate-vehicle.ps1` re-run — not to an unattended session.**
+  - **§9.3 — `ARMOUR_PAGES = ["browse"]`** is still exactly that (`:852`), and
+    §1 of the same document shows `browse` carries no item handlers, so
+    `-ShopArmour` can only ever reach `shop-unreachable`.
+
+  §9.2, §9.4 and §9.5 are unchecked here. (§9.5 asked the battle map to record
+  the `[3]`/`[4]` indices, which it now does at `:447-452`, so that one looks
+  closed.)
 
 ► **ITEMS 1 AND 2 OF THE 2026-09-01 BRIEF ARE DONE (2026-09-02).**
   `src/team/ss2-rules.js` exists and the 22 goldens replay through the resolver.

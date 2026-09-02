@@ -151,7 +151,18 @@
  *
  *    What actually blocks it is two omissions, both closable: `weapon` is not
  *    a declarable field in `SS2_RESOURCE_NAMES`, `CANONICAL_RESOURCE_SOURCES`
- *    or `COMBATANT_KEYS`; and the table is not transcribed.
+ *    or `COMBATANT_KEYS`; and the table is not transcribed ~~into this
+ *    repository~~ **INTO CODE — corrected 2026-09-02, because the unqualified
+ *    sentence sent the ranked next step off to redo finished work.**
+ *    `docs/integration/ss2-item-tables.md` has carried the transcription since
+ *    2026-08-30: §2.3 for weapon ids 1-80, §2.4 for id 0 and the nine off-shop
+ *    ids, EACH ROW WITH THE INSTRUCTION OFFSET OF ITS OWN LITERAL, and §2.1
+ *    for what every array index means. Two rows were re-read from the bytes on
+ *    2026-09-02 and matched; the other 88 have never been checked, so what
+ *    this module needs first is a MECHANICAL diff of that document against the
+ *    build, not a fresh transcription. That document also settles the boundary
+ *    question this work runs into — display names are game content and are not
+ *    reproduced; items are addressed by id.
  *
  *    Note the battle map has the same hole and is what made the error
  *    reachable: it records `min_damage = round(strength*2) + weapon_min_damage`
