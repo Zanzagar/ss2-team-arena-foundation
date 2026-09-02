@@ -1034,3 +1034,59 @@ What is still missing before a playable mod:
 - **the launcher route** into the Collection's mods folder.
 
 None of these may be substituted for by the adapter.
+
+## Can a six-slot arena be rendered without touching an asset? YES (measured 2026-09-02)
+
+Stages 5 and 6 of the roadmap both say the rendered arena is "not started", and
+nobody had established whether it was even *reachable* asset-free. It is.
+Verified wave, 6 questions / 24 verifiers / 30 of 30 returned.
+
+**The fighters cost nothing.** `hero_battle` is character **1241**, exported by
+`ExportAssets` (file offset `0x3b2688`). The build has **0 `SymbolClass`, 0
+`DoABC`**, and the clip has no `DoInitAction` and no `registerClass` — so there
+is no class binding and no per-symbol instance cap. **Vanilla already attaches
+it four times concurrently** in `_root.arena.gladiators` (root frame 221, block
+base `0x671ad3`): `villain`@300, `hero`@301, `villain_shadow`@299,
+`hero_shadow`@298 — plus a fifth at depth 100000 from `initsystem`. Each
+instance brings all 101 frame labels with it: every attack and defence
+direction, `Death1`-`23`, `Hurt1`-`20`, `rest`, `taunt`, `frozen`/`burning`/
+`poisoned`, `Cast1/2`.
+
+**The depth space is free.** `gladiators` is a `createEmptyMovieClip`, so its
+depths are script-owned; occupied are only 6, 200, 201, 298-301, 40000. **The
+`320…344` band `slot-layout.js` already reserves is empty.** `duplicateMovieClip`
+appears **0 times** in the whole build and no `Enumerate2` iterates
+`gladiators`' children, so adding siblings breaks no iteration.
+
+**Skinning is already parameterised.** `skincharacter`, `initcharacter`,
+`updatecharacter`, `colorhero`, `battlevalues`, `remove_armour`,
+`damagecharacter`, `magic_damage_character`, `attack_chances` and `check_stats`
+contain **zero** `hero`/`villain` literals. Armour attaches into
+`<avatar>.<bodypart>` at per-clip depths, and damage icons at 25000/25005
+*inside the target clip*, so N combatants never collide.
+
+**Space is not the constraint.** The stage is 640×420 but the playfield runs to
+±2160 with active x clamped to ±2100, and `combatCamera`/`combatscale`
+(`sprite:2249` frame 1) pan and zoom about `midwaypoint`. Six fighters fit
+inside the existing background.
+
+### What is genuinely hard-coded to two — and it is CODE, not art
+
+Census over the battle route: 46 sites, **145 clip references, 500 state
+references**. Four matter, and each is replaced by our own code rather than by
+an asset:
+
+| site | offset | what breaks at >2 |
+| --- | --- | --- |
+| `death(whichcharacter, how_died)` | `0x240c85` `+0x1e99` | routes on CLIP IDENTITY (`=== gladiators.villain` → `combatwon`, `=== .hero` → `combatlost`). **An ally dying matches neither and transitions nothing.** |
+| `cast_spell_icon` | `+0x2251` | two identity branches with literal `_x` 60 / 580; an ally casting falls through both and writes to `undefined` |
+| `getfightdistance()` | `0x6e4221` `+0x2a9` | reads `gladiators.hero._x` / `.villain._x` by literal name to derive `midwaypoint` and `fightdistance` — which the controller selector then uses |
+| the villain AI | `0x23f83b` `+0x2c9` | unparameterised; assumes one opponent |
+
+**So stages 5 and 6 need no new or altered game asset.** What they need is our
+own code for those four seams — which is what `src/adapter/` exists to be. The
+only place an authored asset is plausibly wanted is the combat panel, and new
+UI is unblocked and shippable.
+
+*(Curiosity worth keeping: frame 221 attaches linkage `overlay_villain`@40001
+and **that linkage does not exist in the build**, so the call yields nothing.)*

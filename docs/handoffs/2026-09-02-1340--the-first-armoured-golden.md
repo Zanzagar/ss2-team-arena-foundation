@@ -162,6 +162,37 @@ to merge it into.
   never reviewed. A checked-in deny cannot override a local allow. It is the
   owner's file.
 
+## SETTLED AFTER THE BRIEF WAS WRITTEN: the six-slot arena is asset-free
+
+The owner asked whether expanding to 2v2/3v3 and a new progression system would
+force us to alter licensed assets. **It does not.** A VERIFIED wave (6 questions,
+24 verifiers, 30 of 30 returned) established it from the build; the detail is in
+`docs/ss2-adapter-contract.md` § "Can a six-slot arena be rendered without
+touching an asset?".
+
+Short version: `hero_battle` (character 1241) is `ExportAssets`-exported with no
+`SymbolClass`, no `DoABC`, no `registerClass` and therefore no instance cap —
+and **vanilla already attaches it four times concurrently**. The depth band
+`slot-layout.js` reserves is free, `duplicateMovieClip` is used zero times, and
+every skinning and combat function is already free of `hero`/`villain` literals.
+Four seams are hard-coded to two combatants (`death` routing, `cast_spell_icon`,
+`getfightdistance`, the villain AI) and **all four are replaced by our own code,
+not by art.**
+
+**The boundary block in `AGENTS.md` was also rewritten this session, twice, at
+the owner's instruction.** It had conflated three unrelated things under one
+ethics heading; an independent agent confirmed the diagnosis — *"No document in
+this repository prohibits authoring new art, UI, systems, screens, progression
+or opponents. I found zero such rule."* What survives is two operational facts,
+neither an ethics boundary: the installed SWF stays byte-identical because it is
+the MEASUREMENT ORACLE (a modded build gets a second install and its own
+fingerprint lane), and no SS2 asset ships, because the project is intended to be
+SHARED non-commercially and a clone must still need its own licensed copy.
+
+*(Two agents in that wave reported a premise failure worth keeping: I edited
+`AGENTS.md` while the wave was running, so their briefs quoted a file that no
+longer existed. Editing the thing a wave is auditing invalidates its brief.)*
+
 ## Highest-value work, ranked
 
 1. **DECIDE WHETHER ENCHANTMENT DAMAGE IS APPLIED.** The arithmetic is in
