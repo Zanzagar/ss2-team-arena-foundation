@@ -39,15 +39,39 @@ there never reaches the next reader.
 - **Derive candidates from the battle map, never from a capture.** When a fixture
   disagrees with the runtime, re-derive it from the map. Do NOT edit the fixture
   to the observed value. This is the single most tempting wrong move here.
-- **Licensed SWFs are read-only** and hash-verified before and after every
-  capture. Never copy, export or commit game assets or extracted scripts.
+- **BUILD THE BEST VERSION OF THE GAME. Nothing here forbids that, and this
+  block used to read as though it did.** New art, new UI, new systems, a new
+  progression curve, new opponents, new screens — all yours, all unblocked, all
+  shippable. If a rule ever seems to stand between you and a better game, it is
+  either miscalibrated or misread; say so and it gets fixed. Owner, 2026-09-02:
+  *"We want to create the BEST version of the game we can. If we need to dial
+  things back later we note that and do it when we have to."*
+- **Two narrow operational facts remain, and NEITHER is an ethics boundary:**
+  1. **The installed SWF stays byte-identical, because it is the MEASUREMENT
+     ORACLE.** All 23 promoted goldens, 70 observation records and every capture
+     manifest cite its sha256. Change the install by one byte and the corpus
+     stops describing anything — not a licence problem, an evidence problem.
+     **When modding the build becomes the work, put the modded copy in a SECOND
+     install with its own fingerprint lane.** That costs a directory and keeps
+     both.
+  2. **Ship no SS2 asset.** The project is intended to be shared, so the repo is
+     a distribution channel: someone who clones it must still need their own
+     licensed copy to play. Same model as a Doom source port shipping no WAD.
+     This is about what leaves the repo, never about what you may build in it.
+     Never distributed FOR PROFIT.
 - **Never shortcut the game's own frames.** Skipping the prologue tripped the
   game's own character-tampering screen.
 - `validate-vehicle.ps1` must PASS after ANY wrapper edit — but read what it does
   not prove. It caught 0 of the 6 defects found live on this route.
 - **Snapshot before every save-mutating run.** `run-arena.ps1` does it for you.
-- **Do not push to `main`.** Work happens on feature branches. Ask before pushing
-  anything.
+- **Git and GitHub: follow `claude-harness/docs/git-hygiene.md`** — thirteen
+  rules on branches, commits, pushing, PRs and merge eligibility. They are
+  ENFORCED, not advisory: `.claude/settings.json` carries them as
+  `permissions.deny`/`ask`, so they bind Claude, Codex and a human here
+  identically.
+  **This project TIGHTENS rule 7 (push feature branches freely) to ASK BEFORE
+  EVERY PUSH**, because the fixtures derive from a licensed game and what
+  leaves this machine is the owner's call. `main` is denied outright.
 
 ## If you are a subagent
 
@@ -69,8 +93,21 @@ and Plan agents), so these rules bind you as well:
 ## Multi-agent runs
 
 Standing rules to paste into every agent prompt are in
-`docs/overnight-agent-plan.md`; the runnable form is in `.claude/workflows/`.
+`docs/overnight-agent-plan.md` — **ABOVE its `## THE ARCHIVE LINE` only**;
+below that line is the frozen record of two runs in August, not guidance. The
+runnable form is in `.claude/workflows/`. *(This pointer used to name the whole
+file, which is how a plan written for ONE night in August became doctrine
+loaded by every agent. See that file's own header for what the omission cost.)*
 
+- **PRECEDENCE, decided by the owner 2026-09-02 (harness `docs/adr/0001`):
+  Pocock's skills are the default workflow, Codex adversarial review is the
+  check on any diff that matters, and a fan-out wave is the LAST resort —
+  only for breaking a claim about the game's bytes or the capture archive
+  that no test pins and no diff review reaches. ONE wave at a time, never
+  concurrent; the committed script hard-caps questions and verifiers at 6
+  each, and authoring an inline workflow to get past that is a rule
+  violation. Say what a wave will spawn BEFORE launching it. Three concurrent
+  12-verifier waves spent ~30% of a week's usage in twenty minutes.**
 - **Fan out on QUESTIONS, not replicas.** Measured here 2026-08-31: two
   independent implementations agreed on every number and were both incomplete in
   the same way, because they shared one brief that carried one wrong fact. The
@@ -114,19 +151,46 @@ Use `--test-concurrency=1`: the machine is memory-starved with many agents, and
 parallel spawns intermittently fail with `spawn UNKNOWN`, which is not a code
 failure.
 
-**If `node` is not on PATH, you are in a Windows-native session** (npm is not
-installed there either). Use the codex runtime's node, which is the only one on
-that machine — resolve it rather than pinning it, as the directory moves on
-update:
+**IF `node` IS NOT ON PATH, WORK OUT WHICH ENVIRONMENT YOU ARE IN BEFORE
+REACHING FOR A FIX — the two remedies are not interchangeable and the wrong one
+is a syntax error, not a fallback.**
+
+**In WSL/Linux, a missing `node` means your environment was SCRUBBED** — cron, a
+hook, a systemd unit, or `wsl -- bash -c` driven from Windows. node comes from
+nvm, which puts it on PATH; an ordinary agent session inherits that PATH and
+`bash -c` and `bash -lc` both find node with no help. Only a wiped environment
+loses it. Then, and only then:
+
+```
+export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"
+```
+
+Use `bash -ic` when testing shell FUNCTIONS (`opus5`, `fable5`, `sol`) — those
+come from `~/.bashrc`, which does return early for non-interactive shells.
+
+*(Corrected 2026-08-31 after the first WSL session measured it. An earlier
+version of this paragraph blamed `.bashrc`'s non-interactive early return and
+told every session to source nvm. That was generalised from one unusual caller —
+WSL driven from Windows — and would have cost every session a step it does not
+need. The early return is real but is not what puts node on PATH.)*
+
+**In a Windows-native session** (PowerShell, and only there) node genuinely is
+absent, npm too. Use the codex runtime's node — resolve it rather than pinning
+it, as the directory moves on update:
 
 ```
 & 'C:\Users\corey\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe' --test --test-concurrency=1
 ```
 
+That line is PowerShell. **Do not run it in WSL — it is a bash syntax error**,
+and the path is unreachable from Linux anyway.
+
 **Two test profiles are correct, and which one you get depends on the tree:**
 
-- A capture-bearing tree, holding the gitignored `captures/` raw-trace archive:
-  **all tests pass, 0 skipped.**
+- A capture-bearing tree, holding at least one probe session directory under
+  the gitignored `captures/` archive: **all tests pass, 0 skipped.** (The
+  directory merely existing is not enough — it is committed, holding a manifest
+  and a README — so a tree with `captures/` and 1 skipped is CORRECT.)
 - A fresh clone or worktree without that archive: **1 skipped**, and the skip is
   the raw-trace archive existence check. This is EXPECTED, not a defect.
 
@@ -139,8 +203,9 @@ derivation FAILS and names itself rather than skipping silently.
 
 - Use `git commit -F <file>` for any message containing quotes — PowerShell
   mangles them otherwise.
-- `gh` is NOT installed. Check PR state with
-  `git ls-remote github "refs/pull/*/head"`.
+- **`gh` IS installed and authenticated in WSL** (2.98.0, account `Zanzagar`), at
+  `~/.local/bin/gh`. It is NOT installed on Windows — there, check PR state with
+  `git ls-remote github "refs/pull/*/head"`, which works everywhere.
 - **Flag your own mistakes prominently in the repo's own record** rather than
   quietly fixing them. Commit messages here name which errors were whose.
 - End a working session by writing a date-stamped brief to `docs/handoffs/`
