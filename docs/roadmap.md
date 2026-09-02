@@ -20,12 +20,18 @@ of team scope or a separate game mode architecture.
 
 Stage 0b is a structural stage, not a parity stage, and neither it nor the
 resource widening changes what is verified. The runtime-verified behaviour in
-this repository is the 22 promoted goldens and nothing else, and **none of it
-has been injected into the resolver**: `defineTeamRuleSet` is called exactly
-once outside the tests, from `src/team/placeholder-rules.js`, and what it
-builds declares `verification: "placeholder"`. Every formula the resolver runs
-today is labelled as a placeholder in code, in the wire state, in a campaign
-record's `provenance.ruleSet` block, and in the docs.
+this repository is the 22 promoted goldens and nothing else.
+
+► **UPDATED 2026-09-02. The paragraph that stood here said "none of it has been
+  injected into the resolver" and that `defineTeamRuleSet` is called exactly
+  once outside the tests. Both are now false.** `src/team/ss2-rules.js` injects
+  SS2's own attack arithmetic, all 22 goldens replay through
+  `createTeamBattle`/`applyAction`, and `tools/hotseat.mjs` plays it. What has
+  NOT changed is the tier: that rule set declares `verification: "map-derived"`
+  and `runtimeVerified: false`, because no capture has observed it running.
+  What the goldens back is the attack ingress it delegates to, for directions
+  1-12, with zero armour and zero enchantment coverage; the stamina economy,
+  action legality and AI policy around it have no runtime backing at all.
 
 What a golden proves is narrower than "the build behaves this way", and the
 distinction matters before any of it is injected. A capture observes the
@@ -61,7 +67,7 @@ compared. The full account is in
 | settle once, after elimination *and* acknowledgement | `src/team/settlement.js` | done; two gates, private latch, repeats return `false`. The token those gates match on now names **one battle**, not one result: it is `<outcome prefix>:<battle discriminator>`, the discriminator being the battle's arm-time `combatStateHash`, and `arm()` requires it. A campaign of consecutive bouts between the same two teams used to hand every bout the same token, so bout 1's acknowledgement settled bout 2 with bout 1's winner |
 | controller identity independent of combatants | `src/team/controllers.js` | done; seat → controller registry, excluded from the combat hash |
 | AI fill for empty slots, no second path | `src/team/roster.js` | done; filled fighters use the same constructor and protocol |
-| verified rules replace placeholders by injection | `src/team/rule-set.js`, `src/team/resources.js`, `src/adapter/state-bridge.js` | seam done, wide enough to carry the measured operands, and now actually fed: a rule set reads `armourclass`/`staminaleft`/`charisma` as declared resources and writes them with an absolute `resource` effect, and the adapter emits the twenty-entry bag from vanilla and mirrors the resolved value back. **No verified rule set exists yet**, and nothing measured has been dropped into the seam |
+| verified rules replace placeholders by injection | `src/team/rule-set.js`, `src/team/ss2-rules.js`, `src/team/resources.js`, `src/adapter/state-bridge.js` | seam done, and now fed with MEASURED arithmetic: `src/team/ss2-rules.js` runs the build's own attack path, reads ~40 vanilla fields through the resource and status channels, and replays all 22 goldens through the resolver. **Still no RUNTIME-VERIFIED rule set** — it declares `map-derived` / `runtimeVerified: false`. The adapter path cannot feed it: `CANONICAL_RESOURCE_SOURCES` carries none of the eight armour piece ids, `min_damage`, `max_damage`, `character_level`, `equipped_weapon` or `herolevel`, and `maximumHealth` refuses rather than defaulting |
 | campaign save: separate, additive, versioned | `src/campaign/` | done. Schema v2 with a migration chain, content-addressed immutable keys, digest-checked reads, corruption quarantine. The "does not overwrite vanilla save fields" half is structural, not aspirational: the layer has **no read or write path for the vanilla save at all**, every key is minted under `ss2TeamArena:`, and every payload is screened against the vanilla field-name catalogue |
 | campaign roster read-back and rewards | — | not started; a record is written and never read back into a battle, and nothing pays a reward |
 | six-slot arena layout, clips, panels | `src/adapter/slot-layout.js`, `src/adapter/presentation.js` | derived asset-free and tested for 1v1/2v2/3v3/1v3, and emitted as inert JSON presentation commands. Nothing renders them, and everything past slot 0 of each side is an authored mod surface no capture can settle |

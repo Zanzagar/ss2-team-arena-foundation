@@ -1,18 +1,16 @@
-#!/usr/bin/env node
 /**
- * Hot-seat runner: the first thing in this repository a person can PLAY.
+ * Hot-seat runner: the first thing in this repository a person can PLAY, and
+ * since this change the first that plays SS2's OWN arithmetic.
  *
  * Two humans take turns at one keyboard. It drives `src/team/` directly and
- * touches `src/adapter/` not at all, because the adapter's canonical resource
- * bag cannot yet carry an SS2 rule set's inputs (see HANDOFF.md). Node builtins
- * only; `package.json` has no dependencies and this must not add one.
+ * touches `src/adapter/` not at all — the adapter's canonical resource bag
+ * cannot carry an SS2 rule set's inputs (see `src/team/ss2-rules.js`). Node
+ * builtins only; `package.json` has no dependencies and this must not add one.
  *
  * WHY THIS EXISTS. The resolver, the roster, the RNG channel, elimination and
- * settlement have all been tested for months and never once been played. A
- * corpus of 22 runtime-verified goldens feeds nothing, and nothing feeds a
- * screen. Until a person can watch a fight, no measurement has a consumer and
- * no priority has a source. This closes that loop with the smallest thing that
- * could possibly work.
+ * settlement had all been tested for months and never once been played, and a
+ * corpus of 22 runtime-verified goldens fed nothing. Until a person can watch a
+ * fight, no measurement has a consumer and no priority has a source.
  *
  * IT DECIDES NO COMBAT. Every number on screen was decided and clamped by the
  * resolver running the INJECTED RULE SET. There is no formula here — the only
@@ -21,13 +19,14 @@
  * did its own damage would make the rule set unfalsifiable.
  *
  * ON HONESTY. The banner names the rule set's verification tier on every run
- * and refuses to be subtle about it. A placeholder fight must never be mistaken
- * for measured SS2 behaviour — that confusion is the exact failure this whole
- * project is built to prevent, and a playable demo is the easiest place in the
- * world to commit it.
+ * and refuses to be subtle about it. `map-derived` is NOT `runtime-verified`,
+ * and the banner says which parts of the fight have golden backing and which
+ * have none. That confusion is the exact failure this whole project is built to
+ * prevent, and a playable demo is the easiest place in the world to commit it.
  *
  * Usage:
- *   node tools/hotseat.mjs [--seed <n>] [--hp <n>] [--names A,B]
+ *   node tools/hotseat.mjs [--rules ss2|placeholder] [--seed <n>]
+ *                          [--hp <n>] [--armour <n>] [--names A,B]
  */
 
 import { createInterface } from "node:readline/promises";
@@ -40,8 +39,12 @@ import {
   currentCombatant,
   combatantById,
   allCombatants,
+  placeholderTeamRules,
+  resourceValue,
+  rngJournal,
   seatOf
 } from "../src/team/index.js";
+import { ss2Combatant, ss2TeamRules } from "../src/team/ss2-rules.js";
 
 /**
  * Input that works both ways round.
@@ -80,8 +83,14 @@ async function createPrompter() {
 /* Argument parsing                                                    */
 /* ------------------------------------------------------------------ */
 
+/** The rule sets a player may inject, by name. */
+const RULE_SETS = Object.freeze({
+  ss2: ss2TeamRules,
+  placeholder: placeholderTeamRules
+});
+
 function parseArgs(argv) {
-  const options = { seed: 1, hp: 60, names: ["Player 1", "Player 2"] };
+  const options = { seed: 1, hp: 60, armour: 0, rules: "ss2", names: ["Player 1", "Player 2"] };
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const next = () => {
@@ -92,12 +101,20 @@ function parseArgs(argv) {
     };
     if (flag === "--seed") options.seed = Number(next());
     else if (flag === "--hp") options.hp = Number(next());
+    else if (flag === "--armour") options.armour = Number(next());
+    else if (flag === "--rules") options.rules = next();
     else if (flag === "--names") options.names = next().split(",").map((part) => part.trim());
     else if (flag === "--help" || flag === "-h") options.help = true;
     else throw new Error(`Unknown flag ${flag}. Try --help.`);
   }
   if (!Number.isInteger(options.seed)) throw new Error("--seed must be an integer.");
   if (!Number.isInteger(options.hp) || options.hp < 1) throw new Error("--hp must be a positive integer.");
+  if (!Number.isInteger(options.armour) || options.armour < 0) {
+    throw new Error("--armour must be a non-negative integer.");
+  }
+  if (!Object.hasOwn(RULE_SETS, options.rules)) {
+    throw new Error(`--rules must be one of: ${Object.keys(RULE_SETS).join(", ")}.`);
+  }
   if (options.names.length !== 2 || options.names.some((name) => name === "")) {
     throw new Error("--names needs exactly two non-empty names, comma separated.");
   }
@@ -109,8 +126,15 @@ Hot-seat: two humans, one keyboard, one fight.
 
   node tools/hotseat.mjs [options]
 
+  --rules <name> ss2 (default) plays the map-derived SS2 arithmetic;
+                 placeholder plays the invented approximation
   --seed <n>     RNG seed; the same seed and the same choices replay exactly
-  --hp <n>       starting health for both fighters (default 60)
+  --hp <n>       starting health for both fighters (default 60). In the build
+                 this is DERIVED (herolevel * 10 + vitality * 20) and would be
+                 recomputed by battlevalues; here it is staged directly.
+  --armour <n>   give both fighters a breastplate and helmet of this grade
+                 (default 0, no armour). SS2 subtracts damage from armour
+                 first and carries only the overflow into health.
   --names A,B    fighter names (default "Player 1,Player 2")
   --help         this text
 `;
@@ -128,12 +152,28 @@ function healthBar(combatant) {
   return `[${"#".repeat(filled)}${".".repeat(BAR_WIDTH - filled)}]`;
 }
 
+/**
+ * One pool, read straight off the projection. Shown only when the rule set's
+ * blueprint actually declared it, so the placeholder's scoreboard is unchanged.
+ */
+function poolColumn(combatant, name, maxName) {
+  if (!Object.hasOwn(combatant.resources ?? {}, name)) return "";
+  const value = resourceValue(combatant, name, 0);
+  const maximum = resourceValue(combatant, maxName, 0);
+  return `  ${name} ${String(value).padStart(3)}/${String(maximum).padEnd(3)}`;
+}
+
 function renderScoreboard(battle) {
   const lines = [];
   for (const combatant of allCombatants(battle)) {
     const down = combatant.alive ? "" : "  (down)";
     const health = `${String(combatant.health).padStart(4)}/${String(combatant.maxHealth).padEnd(4)}`;
-    lines.push(`  ${combatant.name.padEnd(12)} ${healthBar(combatant)} ${health}${down}`);
+    const armour = poolColumn(combatant, "armourclass", "armourclass_max");
+    const stamina = poolColumn(combatant, "staminaleft", "staminamax");
+    const status = combatant.status.length > 0 ? `  [${combatant.status.join(" ")}]` : "";
+    lines.push(
+      `  ${combatant.name.padEnd(12)} ${healthBar(combatant)} ${health}${armour}${stamina}${status}${down}`
+    );
   }
   return lines.join("\n");
 }
@@ -145,6 +185,14 @@ function renderScoreboard(battle) {
 function renderResolution(battle, before) {
   const resolution = battle.lastResolution;
   if (!resolution) return "  (nothing resolved)";
+  // The rule set's own verdict, read — never recomputed. This block used to
+  // derive "missed" from `effect.amount === 0`, which is a COMBAT DECISION and
+  // was wrong: an armour-absorbed hit deals zero hitpoint damage, so every one
+  // of them was announced as a miss while the derivation line printed two
+  // lines above said HIT. A verifier measured 68 of them in six seeds at
+  // `--armour 4`, and none at `--armour 0` — a defect this change's own new
+  // flag made reachable.
+  const attack = resolution.events?.find((event) => typeof event.hit === "boolean") ?? null;
   const lines = [];
   for (const effect of resolution.effects ?? []) {
     const target = combatantById(battle, effect.targetId);
@@ -152,13 +200,9 @@ function renderResolution(battle, before) {
     if (effect.kind === "damage") {
       const was = before.get(effect.targetId);
       const now = target?.health ?? 0;
-      // A rule set reports a miss as a zero-amount damage effect rather than
-      // by omitting it, so the effect list stays a faithful record of what was
-      // attempted. Say "misses" instead of "takes 0 damage", which reads as a
-      // bug to anyone playing.
-      lines.push(effect.amount === 0
-        ? `  ${name} is missed`
-        : `  ${name} takes ${effect.amount} damage  (${was} -> ${now})`);
+      if (attack && attack.hit === false) lines.push(`  ${name} is missed`);
+      else if (effect.amount === 0) lines.push(`  ${name} is hit, and the blow is stopped by armour`);
+      else lines.push(`  ${name} takes ${effect.amount} damage  (${was} -> ${now})`);
     } else if (effect.kind === "heal") {
       lines.push(`  ${name} recovers ${effect.amount}`);
     } else if (effect.kind === "status") {
@@ -167,14 +211,30 @@ function renderResolution(battle, before) {
       lines.push(`  ${name} ${effect.resource} -> ${effect.to}`);
     }
   }
-  for (const event of resolution.events ?? []) {
-    if (event.type === "combatant-defeated") {
-      const name = combatantById(battle, event.combatantId)?.name ?? event.combatantId;
-      lines.push(`  *** ${name} is down ***`);
-    }
-  }
   if (lines.length === 0) lines.push("  no effect");
+  // The resolver stamps the knockout onto `battle.events`, not onto the rule
+  // set's own event list, and its wire token is `defeated` — the constant is
+  // named COMBATANT_DEFEATED but the string is the historical one network
+  // clients already key off. This block read `"combatant-defeated"` and
+  // `event.combatantId`, so it matched nothing and printed nothing; both are
+  // taken from the constant and from `resolution.knockouts` now.
+  for (const knockedOut of resolution.knockouts ?? []) {
+    lines.push(`  *** ${combatantById(battle, knockedOut)?.name ?? knockedOut} is down ***`);
+  }
   return lines.join("\n");
+}
+
+/**
+ * The one line a player needs to see the rule set's reasoning: what it rolled,
+ * what it needed, and which of SS2's twelve directions the build drew. Reads
+ * the event; computes nothing. Absent for rule sets that publish no such event.
+ */
+function renderDerivation(battle) {
+  const event = battle.lastResolution?.events?.[0];
+  if (!event || event.attackDirection === undefined) return "";
+  const outcome = event.hit ? `HIT (${event.dispatchedMethod})` : "miss";
+  return `  direction ${event.attackDirection}   chance ${event.chance}%   ` +
+    `rolled ${event.diceroll} vs ${event.rollNeeded}   ${outcome}`;
 }
 
 function describeOption(battle, option) {
@@ -188,7 +248,8 @@ function describeOption(battle, option) {
 /* The loop                                                            */
 /* ------------------------------------------------------------------ */
 
-function buildFighter(id, name, hp) {
+/** The placeholder's fighter: invented stats for an invented rule set. */
+function buildPlaceholderFighter(id, name, hp) {
   return {
     id,
     name,
@@ -200,14 +261,58 @@ function buildFighter(id, name, hp) {
   };
 }
 
+/**
+ * The SS2 fighter: base stats and equipment, with every derived number — the
+ * damage pair, the eight per-piece defences, the armour and stamina pools —
+ * computed by the build's own `battlevalues`, not typed in here.
+ *
+ * The base stats below are an ARBITRARY, SYMMETRIC starting gladiator chosen so
+ * a demo fight lasts a few turns. They are not a measured character; nothing in
+ * the corpus says what a hot-seat duellist should be. `--hp` and `--armour`
+ * move them.
+ */
+function buildSs2Fighter(id, name, hp, armour) {
+  const source = ss2Combatant(
+    {
+      strength: 5,
+      speed: 5,
+      attack: 5,
+      defence: 5,
+      vitality: 3,
+      stamina: 4,
+      magicka: 0,
+      charisma: 3,
+      herolevel: 3,
+      character_level: 3,
+      weapon_min_damage: 3,
+      weapon_max_damage: 6,
+      breastplate: armour,
+      helmet: armour,
+      gladiator_dir: id === "p1" ? "right" : "left"
+    },
+    { id, name, controller: "local" }
+  );
+  // `--hp` stages `hitpointsmax` directly. `maximumHealth` returns a declared
+  // maxHealth verbatim precisely so a staged one is never quietly overruled.
+  source.maxHealth = hp;
+  source.health = hp;
+  return source;
+}
+
 function banner(battle) {
   const descriptor = battle.rulesDescriptor;
-  const verified = descriptor.verification === "runtime-verified";
+  const goldens = descriptor.goldenFixtureIds.length;
   const rule = `rule set: ${descriptor.id}   verification: ${descriptor.verification}`;
-  const warning = verified
-    ? `  Backed by ${descriptor.goldenFixtureIds.length} golden fixture(s) from the licensed build.`
-    : "  *** NOT SS2 BEHAVIOUR. These numbers are an invented approximation and\n" +
-      "  *** must never be quoted as Swords & Sandals II parity.";
+  const warning = descriptor.verification === "runtime-verified"
+    ? `  Backed by ${goldens} golden fixture(s) from the licensed build.`
+    : descriptor.verification === "map-derived"
+      ? "  *** MAP-DERIVED, NOT RUNTIME-VERIFIED. The attack arithmetic was read out\n" +
+        `  *** of the licensed build's bytecode and replays against ${goldens} promoted\n` +
+        "  *** goldens for attack directions 1-12. The stamina economy, the action\n" +
+        "  *** legality and the AI around it have NO runtime backing at all, and no\n" +
+        "  *** capture has ever observed this module driving a fight."
+      : "  *** NOT SS2 BEHAVIOUR. These numbers are an invented approximation and\n" +
+        "  *** must never be quoted as Swords & Sandals II parity.";
   return [
     "=".repeat(66),
     "  SWORDS & SANDALS II — multiplayer foundation — HOT SEAT",
@@ -233,11 +338,16 @@ async function main() {
     return;
   }
 
+  const rules = RULE_SETS[options.rules];
+  const buildFighter = options.rules === "ss2"
+    ? (id, name) => buildSs2Fighter(id, name, options.hp, options.armour)
+    : (id, name) => buildPlaceholderFighter(id, name, options.hp);
   const battle = createTeamBattle({
     seed: options.seed,
+    rules,
     teams: [
-      { id: "red", combatants: [buildFighter("p1", options.names[0], options.hp)] },
-      { id: "blue", combatants: [buildFighter("p2", options.names[1], options.hp)] }
+      { id: "red", combatants: [buildFighter("p1", options.names[0])] },
+      { id: "blue", combatants: [buildFighter("p2", options.names[1])] }
     ]
   });
 
@@ -281,6 +391,8 @@ async function main() {
       const before = new Map(allCombatants(battle).map((c) => [c.id, c.health]));
       applyAction(battle, { actorId: actor.id, ...options_[choice - 1] });
       console.log("");
+      const derivation = renderDerivation(battle);
+      if (derivation) console.log(derivation);
       console.log(renderResolution(battle, before));
     }
 
@@ -293,7 +405,14 @@ async function main() {
     } else {
       console.log("\n  No result.");
     }
-    console.log(`  turns: ${battle.turnNumber}   rolls drawn: ${battle.rngCursor}`);
+      // Printed from the JOURNAL, not from the cursor. The cursor is a counter the
+    // runner could in principle move; the journal is the resolver's own ordered
+    // record of every draw, so `journal.length === rngCursor` is a check that
+    // the runner invented no roll. A test asserts the two agree.
+    console.log(
+      `  turns: ${battle.turnNumber}   rolls drawn: ${rngJournal(battle).length}   ` +
+      `rng cursor: ${battle.rngCursor}`
+    );
     console.log("=".repeat(66));
   } finally {
     prompter.close();

@@ -150,8 +150,10 @@ and the path is unreachable from Linux anyway.
 
 **Two test profiles are correct, and which one you get depends on the tree:**
 
-- A capture-bearing tree, holding the gitignored `captures/` raw-trace archive:
-  **all tests pass, 0 skipped.**
+- A capture-bearing tree, holding at least one probe session directory under
+  the gitignored `captures/` archive: **all tests pass, 0 skipped.** (The
+  directory merely existing is not enough — it is committed, holding a manifest
+  and a README — so a tree with `captures/` and 1 skipped is CORRECT.)
 - A fresh clone or worktree without that archive: **1 skipped**, and the skip is
   the raw-trace archive existence check. This is EXPECTED, not a defect.
 

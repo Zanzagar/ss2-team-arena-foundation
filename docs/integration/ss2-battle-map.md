@@ -665,7 +665,24 @@ the same claim. Stated separately:
 | overlay frame 20 `DoAction@0x23b16b` | `+0x0c15`, `+0x110a` | the same test on `longrange_archer` |
 | `villain_cast_spells` | `+0x0a5a`, `+0x0acf` | `villain.staminaleft < villain.staminamax / 2` rewrites the decision to `drink_potion` and calls `use_item` |
 | `villainChooseAction` | `+0x03e8` | `staminaleft > 10` gates the **entire** action-choice block (the false arm jumps 1,209 bytes past it) |
-| `villainChooseAction` | `+0x0b33`, `+0x0b9f`, `+0x0e22`, `+0x0e8e` | on the `choices > 95` arm of both facings, `staminaleft / staminamax * 100 >= 40` picks `taunt` and below it `rest` |
+| `villainChooseAction` | `+0x0b33`, `+0x0e22` | `staminaleft / staminamax * 100 < 40` picks `rest`, at or above it `taunt` |
+| `villainChooseAction` | `+0x0b9f`, `+0x0e8e` | `staminaleft / staminamax * 100 < 30` picks `rest`, at or above it **`wincrowd`** |
+
+► **CORRECTED 2026-09-02, re-read from the bytes.** The two rows above were ONE
+  row, reading "`+0x0b33`, `+0x0b9f`, `+0x0e22`, `+0x0e8e` | on the
+  `choices > 95` arm of both facings, `staminaleft / staminamax * 100 >= 40`
+  picks `taunt` and below it `rest`". That conflates two different thresholds
+  selecting two different actions: `+0x0b9f` and `+0x0e8e` push **30**
+  (`+0x0bc3`, `+0x0eb2`) and assign **`wincrowd`** (`+0x0bd3`, `+0x0ec2`), not
+  40 and `taunt`. Found by an adversarial verifier and confirmed directly.
+
+  **This row was the cited evidence for a rest gate in `src/team/ss2-rules.js`,
+  and the gate has been removed as unsupported.** Both tests are reached only
+  inside a `choices` band arm, so neither licenses a threshold applied to every
+  villain decision; the only unconditional villain stamina gate is
+  `staminaleft > 10` at `+0x03e8`. Which band arm each belongs to, and whether
+  the 30/`wincrowd` block sequentially overwrites the 40/`taunt` one within a
+  facing, is NOT settled here — it needs a full decode of `+0x0b00`-`+0x0c00`.
 | `villainChooseAction` | `+0x1173` | after a movement label is written, `staminaleft > 0` failing replaces it with `rest` |
 | `check_stats` | `+0x110a`, `+0x112f` | the two clamp tests (§`check_stats` is a pure clamp) |
 | `battlevalues` (root frame 35) | `+0x3b1c` | `staminaleft > 0` failing triggers the refill below — inside the `battle_started` skip, so out of battle only |
@@ -686,6 +703,25 @@ long-range button swap is at 50%.
 | `check_stats` | `+0x1122` | ceiling at `staminamax` |
 | `check_stats` | `+0x114b` | floor at `0`, which also converts `undefined` and `NaN` to zero |
 | `rest` branch | `+0x521d` | `+= game_attacker.stamina` (`bonus` bound at `+0x5208`) |
+
+► **CORRECTED 2026-09-02, and the omission cost a session. The `rest` branch
+  ALSO writes hitpoints, at `+0x51d5`**: `game_attacker.hitpoints += 3 +
+  ceil(game_attacker.stamina)`, inside the same `attacker.struck == null` guard
+  (`+0x51a2`) as the `+0x521d` stamina write above it, three statements earlier
+  in the same arm. It is missing from every writers table in this document,
+  while the PROSE at § "Battle result and reward callbacks" states it correctly.
+  A reader who trusts the tables over the prose — which is what a table is for —
+  concludes the only site for that expression is `+0x684c` in the taunt branch,
+  and the taunt table below says exactly that. **`+0x684c` is the copy.** This
+  is what happened: `src/team/ss2-rules.js` was written asserting that
+  `+0x684c` was the sole site, the map was overruled, and a test was written to
+  pin the resulting wrong number. Two adversarial verifiers broke it
+  independently and the bytes were then read directly.
+
+  A rest therefore heals `3 + ceil(stamina)` from the branch AND
+  `1 + ceil(stamina / 2)` from `nextphase` — `4 + ceil(stamina) +
+  ceil(stamina / 2)` in total, clamped by `check_stats` at `+0x5266` and again
+  at `+0x334d`.
 | `drink_potion`, `inventory_action == 6` (test `+0x5aaf`) | `+0x5af7` | `+= round(staminamax * 0.5)` |
 | `drink_potion`, `inventory_action == 7` (test `+0x5b5f`) | `+0x5b9a` | `+= round(staminamax)` |
 | `taunt` branch | `+0x6894` | `+= game_attacker.stamina` |
@@ -807,7 +843,7 @@ copy, and it fires on a completed taunt rather than on a rest:
 | cost | `+0x67bb` | `staminacost = round(charisma * 2)` |
 | watchdog | `+0x67e4` | `taunttimer++`; at `> 60` (`+0x67ee`) it zeroes the timer, nulls `attacker.struck` (`+0x6812`) and calls `nextphase` (`+0x681f`) |
 | guard | `+0x6835`–`+0x6841` | the restoration runs only while `attacker.struck == null` |
-| hitpoints | `+0x684c` | `game_attacker.hitpoints += 3 + ceil(game_attacker.stamina)` |
+| hitpoints | `+0x684c` | `game_attacker.hitpoints += 3 + ceil(game_attacker.stamina)` — **a COPY. The original is the rest branch's own `+0x51d5`; see the correction in § "The fifteen writers"** |
 | stamina | `+0x6894` | `game_attacker.staminaleft += game_attacker.stamina` (`bonus` bound at `+0x687f`) |
 | clamp | `+0x68d3` | `check_stats(game_attacker)` |
 | re-arm | `+0x68f0` | `attacker.struck = false` |

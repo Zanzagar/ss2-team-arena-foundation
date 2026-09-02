@@ -50,17 +50,45 @@ test("a hot-seat fight runs from start to a winner", async () => {
   assert.match(stdout, /\(down\)/, "the defeated fighter must be marked down");
 });
 
-test("the banner names the rule set's verification tier, and warns when it is not measured", async () => {
+test("the banner names the placeholder tier, and warns that it is not measured", async () => {
   // This is the honesty guard. The placeholder rules are an invented
   // approximation, and a playable demo is the easiest place in the project to
   // let that be mistaken for measured SS2 behaviour.
-  const { stdout } = await runHotseat(["--seed", "1", "--hp", "10"], ALWAYS_ATTACK);
+  const { stdout } = await runHotseat(["--rules", "placeholder", "--seed", "1", "--hp", "10"], ALWAYS_ATTACK);
   assert.match(stdout, /verification: placeholder/,
     "the tier must be on screen, not merely in the source");
   assert.match(stdout, /NOT SS2 BEHAVIOUR/,
     "a placeholder rule set must carry an explicit warning");
   assert.doesNotMatch(stdout, /Backed by \d+ golden/,
     "a placeholder rule set must never claim golden backing");
+});
+
+test("the default is the SS2 rule set, and the banner refuses to overstate it", async () => {
+  // The default changed the day the corpus got a consumer. `map-derived` is
+  // the easiest tier to misread as "verified", so the banner has to say what
+  // has golden backing and what has none, on every run.
+  const { stdout } = await runHotseat(["--seed", "1", "--hp", "10"], ALWAYS_ATTACK);
+  assert.match(stdout, /verification: map-derived/);
+  assert.match(stdout, /NOT RUNTIME-VERIFIED/);
+  assert.match(stdout, /NO runtime backing/,
+    "the banner must name the parts of the fight no golden covers");
+  assert.doesNotMatch(stdout, /Backed by \d+ golden fixture/,
+    "only a runtime-verified rule set may claim its goldens back the whole fight");
+});
+
+test("the SS2 fight shows the build's own derivation, drawn direction included", async () => {
+  // SS2 draws the attack direction; the player does not choose it. Putting the
+  // draw on screen is what makes that visible rather than merely documented.
+  const { stdout } = await runHotseat(["--seed", "7", "--hp", "40"], ALWAYS_ATTACK);
+  assert.match(stdout, /direction \d+ {3}chance \d+% {3}rolled \d+ vs \d+ {3}(HIT|miss)/);
+  assert.match(stdout, /quick-attack -> /, "the vocabulary on screen must be SS2's, not the placeholder's");
+  assert.match(stdout, /staminaleft \d+\/\d+/, "stamina gates legality, so it has to be visible");
+});
+
+test("an unknown rule set is refused by name", async () => {
+  const { code, stderr } = await runHotseat(["--rules", "bogus"], "");
+  assert.equal(code, 2);
+  assert.match(stderr, /--rules must be one of/);
 });
 
 test("the same seed and the same choices replay identically", async () => {
@@ -74,13 +102,46 @@ test("the same seed and the same choices replay identically", async () => {
 });
 
 test("the runner decides no combat: every roll it causes is drawn by the rule set", async () => {
-  // The runner must never roll dice of its own. The resolver journals every
-  // draw, so a runner that invented one would push the reported count above the
-  // journal — and the count is printed precisely so this stays checkable.
-  const { stdout } = await runHotseat(["--seed", "5", "--hp", "40"], ALWAYS_ATTACK);
-  const drawn = stdout.match(/rolls drawn: (\d+)/);
-  assert.ok(drawn, "the runner must report how many rolls were drawn");
+  // This test used to assert only that a positive roll count was printed, and
+  // a verifier showed that a mutant runner which fabricates 2 damage after
+  // every action — printing figures contradicting its own scoreboard — passed
+  // it and all ten of its neighbours. The no-combat property was a property of
+  // the code and of nothing else. Two assertions close that.
+  const { stdout } = await runHotseat(["--seed", "5", "--hp", "40", "--armour", "3"], ALWAYS_ATTACK);
+
+  // 1. The journal is the resolver's own ordered record; the cursor is a
+  //    counter. A runner that drew a roll of its own moves one and not the
+  //    other.
+  const drawn = stdout.match(/rolls drawn: (\d+)   rng cursor: (\d+)/);
+  assert.ok(drawn, "the runner must report both the journal length and the cursor");
   assert.ok(Number(drawn[1]) > 0, "a completed fight must have drawn at least one roll");
+  assert.equal(drawn[1], drawn[2], "a roll the runner invented would move the cursor and not the journal");
+
+  // 2. Every damage line must be arithmetic the RESOLVER did: the printed
+  //    before/after pair must differ by exactly the printed amount. A runner
+  //    that fabricates state, or that fabricates only the printed number,
+  //    fails here. (Sound because no action in this vocabulary targets its own
+  //    actor with damage, so nothing else moves the target's health.)
+  const damage = [...stdout.matchAll(/takes (\d+) damage {2}\((\d+) -> (\d+)\)/g)];
+  assert.ok(damage.length > 0, "a completed fight must land at least one blow");
+  for (const [line, amount, was, now] of damage) {
+    assert.equal(Number(was) - Number(now), Number(amount), line);
+  }
+});
+
+test("an armour-absorbed hit is reported as a hit, not as a miss", async () => {
+  // The runner must not compute the hit verdict itself. It did, from
+  // `effect.amount === 0`, and armour absorption made that wrong: the blow was
+  // announced as a miss two lines under a derivation line reading HIT.
+  const { stdout } = await runHotseat(["--seed", "5", "--hp", "40", "--armour", "4"], ALWAYS_ATTACK);
+  const blocks = stdout.split("\n\n");
+  for (const block of blocks) {
+    if (!/direction \d+ {3}chance/.test(block)) continue;
+    const hit = /HIT \(/.test(block);
+    if (hit) assert.doesNotMatch(block, /is missed/, "a hit must never be announced as a miss");
+    else assert.doesNotMatch(block, /stopped by armour/, "a miss must not be announced as absorbed");
+  }
+  assert.match(stdout, /stopped by armour/, "the seed must produce at least one absorbed hit");
 });
 
 test("input ending early stops the fight cleanly instead of hanging", async () => {
@@ -114,7 +175,7 @@ test("bad input is rejected without starting a fight", async () => {
 });
 
 test("an unparsable choice re-prompts rather than crashing or acting", async () => {
-  const { code, stdout } = await runHotseat(["--seed", "3", "--hp", "40"], "banana\n1\n1\n1\n1\n1\n1\n");
+  const { code, stdout } = await runHotseat(["--seed", "3", "--hp", "40"], `banana\n${ALWAYS_ATTACK}`);
   assert.equal(code, 0);
   assert.match(stdout, /is not one of 1-/, "a bad choice must say so");
   assert.match(stdout, /WINNER/, "and the fight must still be playable afterwards");

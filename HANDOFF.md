@@ -8,7 +8,25 @@ it points at. A handoff must not restate what is here; if the two ever disagree,
 THIS file is right and the handoff was frozen at the end of its session.
 
 **LATEST:
-[2026-09-01 21:12 — the project became playable](docs/handoffs/2026-09-01-2112--the-project-became-playable.md).**
+[2026-09-02 — the corpus got a consumer, and the wave broke ten of twelve claims](docs/handoffs/2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it.md).**
+Start there. **`src/team/ss2-rules.js` exists**: SS2's own attack arithmetic
+runs inside the shared resolver, all 22 goldens replay through
+`createTeamBattle`/`applyAction`, and `node tools/hotseat.mjs` plays that rule
+set by default. Ranked items 1 and 2 of the brief below are DONE.
+
+**Read its corrections before quoting anything in it.** A 12-agent write-nothing
+wave broke **10 of 12** load-bearing claims, and two of the breaks were
+evidence-level, not stylistic: the `rest` branch has its OWN
+`hitpoints += 3 + ceil(stamina)` at `+0x51d5` (the map's prose said so and this
+session OVERRULED it), and `death()` deletes `nextphase` before the phase
+transition can fire, so **a killing blow costs the attacker nothing** — the
+golden replay had been asserting nineteen times that the engine must DISAGREE
+with the fixtures' only measured attacker number. Both are fixed and both are
+now pinned by tests. The battle map itself carried two errors, both corrected in
+place from the bytes.
+
+*(The previous LATEST, still the state it describes:)*
+[2026-09-01 21:12 — the project became playable](docs/handoffs/2026-09-01-2112--the-project-became-playable.md).
 Start there. **`node tools/hotseat.mjs` now plays a fight** — two humans, one
 keyboard, to a winner — the first playable thing in this project's history, and
 the answer to a question from the owner that outranks every measurement below:
@@ -922,6 +940,17 @@ output and names the wrapper source hash it compiled.
 
 ## Next steps, in order
 
+► **ITEMS 1 AND 2 OF THE 2026-09-01 BRIEF ARE DONE (2026-09-02).**
+  `src/team/ss2-rules.js` exists and the 22 goldens replay through the resolver.
+  What that opened, and what it did NOT close, is in
+  `docs/handoffs/2026-09-02-0130--ss2-rules-and-the-wave-that-broke-it.md` and
+  in § "Found 2026-09-02" below. **The corpus now has a consumer; it still has
+  no armour, no enchantment and no non-tournament coverage, and a mutation
+  sweep showed the suite cannot see most of what the rule set could get wrong
+  in those dimensions. That is an evidence problem — a capture problem — not a
+  test-writing problem, and it is now the top of this list.**
+
+
 1. ~~**The champion family cannot be captured, and the fixtures must be
    re-derived.**~~ **RETRACTED 2026-08-31 (`2d0b077`). ALL THREE ARITHMETIC
    BLOCKS BELOW ARE FALSE. Do not act on this item; capture the armoured family
@@ -996,6 +1025,79 @@ has per-fixture commands.
 ---
 
 ## Open items
+
+### Found 2026-09-02: what wiring SS2's arithmetic into the resolver exposed
+
+All of these came out of a 12-agent write-nothing verification wave against
+`src/team/ss2-rules.js` (12 started, 12 returned, **10 BROKEN**). The ones that
+were fixed are recorded in the handoff; these are the ones still open, each with
+the one fact that would settle it.
+
+- **THE MAP WAS RIGHT AND THIS PROJECT OVERRULED IT.** `src/team/ss2-rules.js`
+  was written asserting that `+0x684c` (taunt) was the only site for
+  `hitpoints += 3 + ceil(stamina)`, and dropped the rest branch's heal on that
+  basis — while `ss2-battle-map.md`'s own prose said the taunt copy was a copy.
+  The bytes agree with the prose: `+0x51d5`, inside the rest branch's
+  `struck == null` arm. **The mechanism was that the map's TABLES omitted the
+  row its PROSE described**, and a table is what an implementer reads. Both are
+  corrected. The general lesson is the standing rule running backwards: *derive
+  from the map, and when you think the map is wrong, read the bytes before you
+  write the code that says so.*
+- **A MUTATION SWEEP IS THE ONLY THING THAT MEASURED THE SUITE'S REACH.** Nine
+  mutations of `ss2-rules.js` passed all 685 tests. Seven of the ones tried
+  since are now caught, and the fixes were never "add an assertion" — they were
+  **desaturating the fixtures**: the defender sat at full stamina so the
+  breastplate join clamped and wrote nothing; hero and villain shared
+  `attack == defence` so swapping them was invisible; `stamina 4` makes
+  `round(x/3)` and `floor(x/3)` agree. **A green suite over symmetric,
+  saturated inputs is a suite that cannot see.** Run a mutation sweep on
+  anything load-bearing before believing a green run.
+- **The 22 goldens still cover ONE archetype in ONE dimension.** All 22:
+  `armourclass 0`, eight zero piece ids, no enchantment, `fightMode: "misc"`,
+  hero attack 1 == defence 1, damage exactly equal to the defender's hitpoints,
+  hero at full health. Three clamp sites can each be deleted with the replay
+  file green because no value ever reaches a bound. **The armour-first split,
+  piece destruction, the breastplate stamina join and enchantment status have
+  ZERO runtime backing.** `test/ss2-team-rules.test.js` cross-checks them
+  against the arithmetic itself and says so; that is not evidence about the
+  build. What closes it is a capture, not a test.
+- **`src/golden/ss2-attack-candidate.js:254-264` looks wrong and was NOT
+  touched.** `activeEnchantment` returns `attacker.weapon_enchantment_potency`
+  in BOTH branches, so the `equipped_weapon === 2` branch pairs the SECONDARY
+  enchantment type with the PRIMARY potency. Flagged by a verifier; not
+  changed, because 22 promoted goldens replay against that module and altering
+  it is an evidence decision, not a bug fix. **Give it its own named claim.**
+- **`localeCompare` is a desync hazard and survives in two files.**
+  `roster.js`'s `initiativeOrder` and `placeholder-rules.js` both tie-break on
+  `a.id.localeCompare(b.id)`, which is ICU-locale-dependent — two peers in
+  different locales order initiative differently and their `combatStateHash`
+  diverges with no other cause. `ss2-rules.js` was changed to a plain
+  comparator; the other two were NOT, because initiative order has a wider
+  blast radius than that change. One line each, plus a test.
+- **The RNG tape is not inside the hash.** `toTeamWireState` carries `rngState`
+  and `rngCursor`, but a tape channel's `state` is a constant 0, so two peers
+  with different tapes hash identically until they diverge. Projecting the
+  channel mode and a digest of the samples would close it. Resolver-contract
+  change; needs its own decision.
+- **`ss2BattleValues` reproduces a SUBSET of `battlevalues`, and two omissions
+  change a fight.** `weapon_min_damage`/`weapon_max_damage` are themselves
+  `battlevalues`'s lookups into `_root.weapon[...]` (`+0x31be`, `+0x31da`) and
+  are taken as caller-supplied inputs here, so a gladiator's damage pair cannot
+  be produced from a character record alone; and `weapon_enchantment_damage`
+  (`+0x320c`) is dropped entirely, so an enchanted weapon applies a status and
+  deals no magic damage. Also dropped: `maximum_ammo`'s herolevel tier chain,
+  `character_xp`, and `weapon_range`'s bow override.
+- **A fight can run forever.** `phaseTransitionEffects` heals the acting
+  combatant every non-lethal action, so any pair whose per-action self-heal
+  exceeds expected incoming damage never dies (measured at 30,000 actions).
+  This may be faithful — vanilla has the same regeneration — but the resolver
+  has no draw or turn cap, so it surfaces as `AI turn limit reached`.
+- **AGENTS.md's two test profiles are stated in a way that invites a false
+  finding.** It says the 0-skipped profile is "a capture-bearing tree, holding
+  the gitignored `captures/` raw-trace archive". This tree HAS `captures/` — the
+  manifest and a README — and measures 1 skipped, correctly. The condition is at
+  least one probe session directory under `captures/`, not the directory
+  existing. Worth the one-line correction there.
 
 ### Found 2026-09-01 (evening): the armoured family measured at n=38, and what it is actually waiting on
 

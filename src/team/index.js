@@ -15,6 +15,13 @@
  * | `settlement.js`     | once-only campaign settlement behind two gates           |
  * | `resolver.js`       | turn order, legality, effect application, events         |
  *
+ * One module in this directory is deliberately NOT re-exported here:
+ * `ss2-rules.js`, the map-derived SS2 rule set. It is the only file under
+ * `src/team/` that imports from `src/golden/`, and making every consumer name
+ * that import at its own call site is the honest signal for a dependency the
+ * rest of the seam does not have. Import it directly:
+ * `import { ss2TeamRules } from "./team/ss2-rules.js"`.
+ *
  * Node builtins only; no assets, no game data, no third-party dependencies.
  */
 
