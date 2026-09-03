@@ -1,0 +1,4 @@
+interface:
+  display_name: "SS2 Progression Design"
+  short_description: "Resolve Endless progression decisions safely"
+  default_prompt: "Use $ss2-progression-design to continue the current Endless progression decision frontier."

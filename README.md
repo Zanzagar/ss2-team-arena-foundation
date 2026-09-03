@@ -114,8 +114,9 @@ Read the work in this order:
 1. [progression diagnosis and transferable principles](docs/design/progression-diagnosis.md);
 2. [Swords & Sandals mod-scene survey](docs/design/swords-and-sandals-mod-scene-survey.md);
 3. [complete Endless progression-system design](docs/design/endless-progression-system.md);
-4. [six owner decisions](docs/design/endless-progression-decisions.md); and
-5. [MVP implementation-readiness record](docs/design/endless-mvp-readiness.md).
+4. [owner decision packet and guided-session worksheet](docs/design/endless-progression-owner-packet.md);
+5. [authoritative owner decision record](docs/design/endless-progression-decisions.md); and
+6. [MVP implementation-readiness record](docs/design/endless-mvp-readiness.md).
 
 ## Evidence vocabulary
 
